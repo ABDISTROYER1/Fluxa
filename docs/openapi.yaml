@@ -1603,25 +1603,53 @@ paths:
             type: string
             format: date-time
           description: "End of period (RFC3339)"
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: "Filter by tenant"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: "Fee collection summary"
+          description: "Paginated fee collections"
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  summary:
+                  data:
                     type: array
                     items:
-                      $ref: "#/components/schemas/FeeCollectionSummary"
-              example:
-                summary:
-                  - asset: "USDC"
-                    total_fees: "1250.5000000"
-                    tenant_fees:
-                      - tenant_id: "t_8f3a2b1c"
-                        total_fees: "1250.5000000"
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        transaction_id:
+                          type: string
+                        tenant_id:
+                          type: string
+                        asset:
+                          type: string
+                        fee_amount:
+                          type: string
+                        fee_bps:
+                          type: integer
+                        collected_at:
+                          type: string
+                          format: date-time
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
