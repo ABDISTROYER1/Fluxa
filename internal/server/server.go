@@ -153,7 +153,7 @@ func New(
 				r.Route("/admin/fees", feeHandler.AdminRoutes())
 				r.Route("/admin/anchors", anchorHandler.AdminRoutes())
 				r.Route("/admin", reconcileHandler.AdminRoutes())
-				r.Route("/admin/treasury", treasuryHandler.AdminRoutes())
+				r.With(RequirePlatformOperator()).Route("/admin/treasury", treasuryHandler.AdminRoutes())
 				// Mounted at /admin/compliance, not /admin: reconcileHandler
 				// already owns the bare /admin pattern above, and chi panics
 				// when two sub-routers share one.

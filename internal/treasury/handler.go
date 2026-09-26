@@ -135,7 +135,13 @@ func (h *Handler) manualSweep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	txHash, err := h.svc.ExecuteSweep(r.Context(), req.Asset, amount, req.Destination, TriggeredByManual)
+	actor := "admin"
+	if userID := r.Context().Value("user_id"); userID != nil {
+		if idStr, ok := userID.(string); ok && idStr != "" {
+			actor = idStr
+		}
+	}
+	txHash, err := h.svc.ExecuteSweep(r.Context(), req.Asset, amount, req.Destination, actor)
 	if err != nil {
 		api.HandleDomainError(w, err)
 		return
@@ -210,6 +216,11 @@ func (h *Handler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		MinOperatingBuffer: minBuffer,
 		ColdStorageAddress: req.ColdStorageAddress,
 		AutoSweepEnabled:   req.AutoSweepEnabled,
+	}
+	tenantID := r.Context().Value("tenant_id")
+	if tenantID != nil && tenantID != "platform" && tenantID != "system" && tenantID != "operator" {
+		api.Error(w, http.StatusForbidden, "tenants cannot modify global treasury configuration")
+		return
 	}
 	if err := h.svc.UpdateConfig(r.Context(), cfg); err != nil {
 		api.HandleDomainError(w, err)

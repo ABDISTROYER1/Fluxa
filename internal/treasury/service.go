@@ -283,13 +283,26 @@ func (s *service) ExecuteSweep(ctx context.Context, asset string, amount decimal
 		return "", fmt.Errorf("load fee wallet account: %w", err)
 	}
 
+	builtAsset, err := s.buildAsset(asset)
+	if err != nil {
+		return "", err
+	}
+
+	if destination == "" || destination == s.feeWallet {
+		return "", fmt.Errorf("invalid destination address")
+	}
+	_, err = keypair.ParseAddress(destination)
+	if err != nil {
+		return "", fmt.Errorf("invalid stellar destination address: %w", err)
+	}
+
 	stellarTx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
 		SourceAccount:        &srcAccount,
 		IncrementSequenceNum: true,
 		Operations: []txnbuild.Operation{
 			&txnbuild.Payment{
 				Destination: destination,
-				Asset:       s.buildAsset(asset),
+				Asset:       builtAsset,
 				Amount:      amount.StringFixed(7),
 			},
 		},
@@ -334,7 +347,7 @@ func (s *service) ExecuteSweep(ctx context.Context, asset string, amount decimal
 			"swept_at":     time.Now().UTC().Format(time.RFC3339),
 		}
 		if err := s.webhookSvc.Dispatch(ctx, domain.EventTreasurySweepCompleted, payload); err != nil {
-			log.Error().Err(err).Msg("treasury: failed to dispatch treasury.sweep_completed webhook")
+			log.Error().Err(err).Msg("treasury: failed to dispatch sweep_completed webhook")
 		}
 	}
 
@@ -356,18 +369,23 @@ func (s *service) ListSweeps(ctx context.Context, limit, offset int) ([]*SweepLo
 	return s.repo.ListSweeps(ctx, limit, offset)
 }
 
-func (s *service) buildAsset(code string) txnbuild.Asset {
-	if code == "XLM" {
-		return txnbuild.NativeAsset{}
+func (s *service) buildAsset(code string) (txnbuild.Asset, error) {
+	if code == "XLM" || code == "native" {
+		return txnbuild.NativeAsset{}, nil
 	}
-	issuer := ""
+	var issuer string
 	switch code {
 	case "USDC":
 		issuer = s.usdcIssuer
 	case "EURC":
 		issuer = s.eurcIssuer
+	default:
+		return nil, fmt.Errorf("unknown asset code: %s", code)
 	}
-	return txnbuild.CreditAsset{Code: code, Issuer: issuer}
+	if issuer == "" {
+		return nil, fmt.Errorf("issuer not configured for asset: %s", code)
+	}
+	return txnbuild.CreditAsset{Code: code, Issuer: issuer}, nil
 }
 
 func (s *service) networkPassphrase() string {
