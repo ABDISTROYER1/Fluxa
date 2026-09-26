@@ -28,17 +28,17 @@ type mockRepo struct {
 	auditLogs           []*AuditLogEntry
 }
 
-func (m *mockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration) ([]*domain.Transaction, error) {
+func (m *mockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return nil, nil
 }
 func (m *mockRepo) ResetStuckSubmittedToPending(_ context.Context, _ string, _ time.Duration) error {
 	return nil
 }
 
-func (m *mockRepo) GetStuckPendingTxes(_ context.Context, _ time.Duration) ([]*domain.Transaction, error) {
+func (m *mockRepo) GetStuckPendingTxes(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return nil, nil
 }
-func (m *mockRepo) GetPendingTxesForReconciliation(_ context.Context, _ time.Duration) ([]*domain.Transaction, error) {
+func (m *mockRepo) GetPendingTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return m.txes, nil
 }
 func (m *mockRepo) UpdateReconciliationStatus(_ context.Context, _ string, _ domain.TransactionStatus) error {
@@ -472,17 +472,17 @@ type smartMockRepo struct {
 	auditLogs     []*AuditLogEntry
 }
 
-func (m *smartMockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration) ([]*domain.Transaction, error) {
+func (m *smartMockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return nil, nil
 }
 func (m *smartMockRepo) ResetStuckSubmittedToPending(_ context.Context, _ string, _ time.Duration) error {
 	return nil
 }
 
-func (m *smartMockRepo) GetStuckPendingTxes(_ context.Context, _ time.Duration) ([]*domain.Transaction, error) {
+func (m *smartMockRepo) GetStuckPendingTxes(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return nil, nil
 }
-func (m *smartMockRepo) GetPendingTxesForReconciliation(_ context.Context, _ time.Duration) ([]*domain.Transaction, error) {
+func (m *smartMockRepo) GetPendingTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return m.txes, nil
 }
 func (m *smartMockRepo) UpdateReconciliationStatus(_ context.Context, _ string, _ domain.TransactionStatus) error {

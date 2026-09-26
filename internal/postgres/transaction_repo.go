@@ -366,18 +366,24 @@ func nullableDecimalPtr(d *decimal.Decimal) interface{} {
 
 // GetConfirmedTxesForReconciliation returns confirmed transactions with a tx_hash
 // that have not been reconciled in the last hour (or never reconciled).
-func (r *TransactionRepo) GetConfirmedTxesForReconciliation(ctx context.Context, since time.Duration) ([]*domain.Transaction, error) {
+func (r *TransactionRepo) GetConfirmedTxesForReconciliation(ctx context.Context, since time.Duration, limit int) ([]*domain.Transaction, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, tx_hash, type, status,
-		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
-		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
-		        COALESCE(requeue_count, 0), reconciled_at
-		 FROM transactions
-		 WHERE status = 'confirmed'
-		   AND tx_hash IS NOT NULL
-		   AND (reconciled_at IS NULL OR reconciled_at < NOW() - $1::interval)
-		 ORDER BY created_at ASC`,
-		since.String(),
+		`WITH claimed AS (
+			SELECT id FROM transactions
+			WHERE status = 'confirmed'
+			  AND tx_hash IS NOT NULL
+			  AND (reconciled_at IS NULL OR reconciled_at < NOW() - $1::interval)
+			ORDER BY created_at ASC
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE transactions SET reconciled_at = NOW()
+		WHERE id IN (SELECT id FROM claimed)
+		RETURNING id, COALESCE(tx_hash,''), type, status,
+		          COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
+		          asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
+		          COALESCE(requeue_count, 0), reconciled_at`,
+		since.String(), limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get txes for reconciliation: %w", err)
@@ -414,17 +420,24 @@ func (r *TransactionRepo) GetConfirmedTxesForReconciliation(ctx context.Context,
 // has a hash to look up on Horizon, so nothing may have reached the network.
 // A submitted transaction that does have a hash is deliberately excluded:
 // that one is only ever resolved by the hash-based reconciliation path.
-func (r *TransactionRepo) GetStuckPendingTxes(ctx context.Context, olderThan time.Duration) ([]*domain.Transaction, error) {
+func (r *TransactionRepo) GetStuckPendingTxes(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Transaction, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, tx_hash, type, status,
-		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
-		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
-		        COALESCE(requeue_count, 0), reconciled_at
-		 FROM transactions
-		 WHERE (status = 'pending' OR (status = 'submitted' AND tx_hash IS NULL))
-		   AND created_at < NOW() - $1::interval
-		 ORDER BY created_at ASC`,
-		olderThan.String(),
+		`WITH claimed AS (
+			SELECT id FROM transactions
+			WHERE (status = 'pending' OR (status = 'submitted' AND tx_hash IS NULL))
+			  AND created_at < NOW() - $1::interval
+			  AND (reconciled_at IS NULL OR reconciled_at < NOW() - $1::interval)
+			ORDER BY created_at ASC
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE transactions SET reconciled_at = NOW()
+		WHERE id IN (SELECT id FROM claimed)
+		RETURNING id, COALESCE(tx_hash,''), type, status,
+		          COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
+		          asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
+		          COALESCE(requeue_count, 0), reconciled_at`,
+		olderThan.String(), limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get stuck pending txes: %w", err)
@@ -457,12 +470,21 @@ func (r *TransactionRepo) GetStuckPendingTxes(ctx context.Context, olderThan tim
 // UpdateReconciliationStatus updates the status without the confirmed guard,
 // allowing reconciliation to set reconciliation_failed on previously confirmed txes.
 func (r *TransactionRepo) UpdateReconciliationStatus(ctx context.Context, id string, status domain.TransactionStatus) error {
-	_, err := r.db.Exec(ctx,
-		`UPDATE transactions SET status = $2 WHERE id = $1`,
-		id, status,
-	)
+	tID := tenant.IDFromContext(ctx)
+	query := `UPDATE transactions SET status = $2 WHERE id = $1 AND status != $2`
+	args := []interface{}{id, status}
+
+	if tID != "" {
+		query += ` AND tenant_id = $3`
+		args = append(args, tID)
+	}
+
+	tag, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update reconciliation status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("update reconciliation status: %w", domain.ErrConcurrentUpdate)
 	}
 	return nil
 }
@@ -582,25 +604,25 @@ func (r *TransactionRepo) UpsertByTxHash(ctx context.Context, tx *domain.Transac
 // 'submitted', hash recorded, but neither confirmed nor failed yet). Uses
 // SELECT FOR UPDATE SKIP LOCKED so concurrent reconciler instances claim
 // disjoint sets of rows without blocking.
-func (r *TransactionRepo) GetPendingTxesForReconciliation(ctx context.Context, olderThan time.Duration) ([]*domain.Transaction, error) {
-	dbTx, err := r.db.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin reconciliation tx: %w", err)
-	}
-	defer dbTx.Rollback(ctx)
-
-	rows, err := dbTx.Query(ctx,
-		`SELECT id, COALESCE(tx_hash,''), type, status,
-		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
-		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
-		        COALESCE(requeue_count, 0), reconciled_at
-		 FROM transactions
-		 WHERE status IN ('pending', 'submitted')
-		   AND tx_hash IS NOT NULL
-		   AND created_at < NOW() - $1::interval
-		 ORDER BY created_at ASC
-		 FOR UPDATE SKIP LOCKED`,
-		olderThan.String(),
+func (r *TransactionRepo) GetPendingTxesForReconciliation(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Transaction, error) {
+	rows, err := r.db.Query(ctx,
+		`WITH claimed AS (
+			SELECT id FROM transactions
+			WHERE status IN ('pending', 'submitted')
+			  AND tx_hash IS NOT NULL
+			  AND ((reconciled_at IS NULL AND created_at < NOW() - $1::interval) OR
+			       (reconciled_at IS NOT NULL AND reconciled_at < NOW() - $1::interval))
+			ORDER BY created_at ASC
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE transactions SET reconciled_at = NOW()
+		WHERE id IN (SELECT id FROM claimed)
+		RETURNING id, COALESCE(tx_hash,''), type, status,
+		          COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
+		          asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
+		          COALESCE(requeue_count, 0), reconciled_at`,
+		olderThan.String(), limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query pending txes for reconciliation: %w", err)
@@ -629,11 +651,6 @@ func (r *TransactionRepo) GetPendingTxesForReconciliation(ctx context.Context, o
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	rows.Close()
-
-	if err := dbTx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit reconciliation tx: %w", err)
 	}
 	return txs, nil
 }

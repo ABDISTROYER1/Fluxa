@@ -95,8 +95,8 @@ type DriftSnapshot struct {
 // Repository is implemented by postgres.TransactionRepo and covers confirmed-tx
 // auditing, pending-tx reconciliation, and run record writes.
 type Repository interface {
-	GetConfirmedTxesForReconciliation(ctx context.Context, since time.Duration) ([]*domain.Transaction, error)
-	GetStuckPendingTxes(ctx context.Context, olderThan time.Duration) ([]*domain.Transaction, error)
+	GetConfirmedTxesForReconciliation(ctx context.Context, since time.Duration, limit int) ([]*domain.Transaction, error)
+	GetStuckPendingTxes(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Transaction, error)
 	// ResetStuckSubmittedToPending recovers a transaction claimed
 	// (status=submitted) by a worker that crashed before recording a
 	// tx_hash, so nothing may have reached the network. Gated on age so an
@@ -104,7 +104,7 @@ type Repository interface {
 	// touched. No-op (via domain.ErrConcurrentUpdate) for a pending
 	// transaction, which needs no reset before being re-enqueued.
 	ResetStuckSubmittedToPending(ctx context.Context, id string, olderThan time.Duration) error
-	GetPendingTxesForReconciliation(ctx context.Context, olderThan time.Duration) ([]*domain.Transaction, error)
+	GetPendingTxesForReconciliation(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Transaction, error)
 	UpdateReconciliationStatus(ctx context.Context, id string, status domain.TransactionStatus) error
 	UpdateTxConfirmed(ctx context.Context, id, txHash string) error
 	UpdateTxFailed(ctx context.Context, id string) error
@@ -262,7 +262,7 @@ func (s *Service) RunAll(ctx context.Context) error {
 // locking (SELECT FOR UPDATE SKIP LOCKED) in the repository layer so concurrent
 // reconciler instances process disjoint sets of rows without blocking each other.
 func (s *Service) RunPendingReconciliation(ctx context.Context) (txsChecked, discrepanciesFound, correctionsMade int, err error) {
-	txes, err := s.repo.GetPendingTxesForReconciliation(ctx, pendingCheckThreshold)
+	txes, err := s.repo.GetPendingTxesForReconciliation(ctx, pendingCheckThreshold, 100)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("fetch pending txes for reconciliation: %w", err)
 	}
@@ -397,7 +397,7 @@ func (s *Service) ReconcileWallet(ctx context.Context, walletID string) error {
 // Reconcile verifies confirmed transactions against Horizon and flags
 // discrepancies in the ledger audit log.
 func (s *Service) Reconcile(ctx context.Context) error {
-	txes, err := s.repo.GetConfirmedTxesForReconciliation(ctx, reconcileInterval)
+	txes, err := s.repo.GetConfirmedTxesForReconciliation(ctx, reconcileInterval, 100)
 	if err != nil {
 		return fmt.Errorf("fetch txes for reconciliation: %w", err)
 	}
@@ -674,7 +674,7 @@ func verifyOps(ops []operations.Operation, expected expectedPayment) (amountVeri
 // RecoverPending re-enqueues stuck pending transactions (regardless of whether
 // they have a Stellar hash) up to maxRequeues times before marking them failed.
 func (s *Service) RecoverPending(ctx context.Context) error {
-	txes, err := s.repo.GetStuckPendingTxes(ctx, stuckThreshold)
+	txes, err := s.repo.GetStuckPendingTxes(ctx, stuckThreshold, 100)
 	if err != nil {
 		return fmt.Errorf("fetch stuck pending txes: %w", err)
 	}
