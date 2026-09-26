@@ -135,7 +135,7 @@ func (m *mockRepo) MarkRevoked(ctx context.Context, id string, _ time.Time) erro
 	return m.mark(ctx, id, domain.ClaimableBalanceStatusRevoked, "")
 }
 
-func (m *mockRepo) ListExpiredPending(_ context.Context, now time.Time) ([]*domain.ClaimableBalance, error) {
+func (m *mockRepo) ListExpiredPending(_ context.Context, now time.Time, _ int) ([]*domain.ClaimableBalance, error) {
 	var out []*domain.ClaimableBalance
 	for _, id := range m.order {
 		b := m.balances[id]
@@ -594,6 +594,31 @@ func TestClaimRefusesUnsatisfiablePredicateWithoutSubmitting(t *testing.T) {
 	stored := f.repo.balances["balance-past"]
 	if stored.Status != domain.ClaimableBalanceStatusPending {
 		t.Errorf("expected the balance to stay pending, got %s", stored.Status)
+	}
+}
+
+func TestConcurrentClaimsAssertsOneOnChainSubmissionAndConflictForLoserStub(t *testing.T) {
+	f := newFixture(t)
+	id := f.seed("balance-concurrent", future(), false, domain.Claimant{
+		Account:   f.claimant.Address(),
+		Predicate: &domain.ClaimPredicate{Type: domain.PredicateUnconditional},
+	}, domain.Claimant{
+		Account:   f.sponsor.Address(),
+		Predicate: &domain.ClaimPredicate{Type: domain.PredicateUnconditional},
+	})
+
+	_, err1 := f.svc.Claim(context.Background(), id, f.claimant.Address())
+	if err1 != nil {
+		t.Fatalf("first claim failed: %v", err1)
+	}
+
+	_, err2 := f.svc.Claim(context.Background(), id, f.sponsor.Address())
+	if !errors.Is(err2, domain.ErrClaimableBalanceNotPending) {
+		t.Fatalf("expected ErrClaimableBalanceNotPending for loser, got %v", err2)
+	}
+
+	if len(f.stellar.submitted) != 1 {
+		t.Fatalf("expected exactly one on-chain submission, got %d", len(f.stellar.submitted))
 	}
 }
 

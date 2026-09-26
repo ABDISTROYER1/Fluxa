@@ -41,14 +41,24 @@ func (h *Handler) Routes() func(r chi.Router) {
 		if h.guard != nil {
 			post = r.With(h.guard).Post
 		}
-		post("/", h.create)
-		post("/{id}/claim", h.claim)
+		idemMW := server.OptionalIdempotencyMiddleware()
+		post("/", func(w http.ResponseWriter, r *http.Request) {
+			idemMW(http.HandlerFunc(h.create)).ServeHTTP(w, r)
+		})
+		post("/{id}/claim", func(w http.ResponseWriter, r *http.Request) {
+			idemMW(http.HandlerFunc(h.claim)).ServeHTTP(w, r)
+		})
 	}
 }
 
 type claimantRequest struct {
 	Account   string            `json:"account"   validate:"required"`
 	Predicate *predicateRequest `json:"predicate"`
+}
+
+func isValidStellarAddress(addr string) bool {
+	_, err := keypair.Parse(addr)
+	return err == nil
 }
 
 type predicateRequest struct {
@@ -165,10 +175,18 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	claimants := make([]domain.Claimant, 0, len(req.Claimants))
 	for _, c := range req.Claimants {
+		if !isValidStellarAddress(c.Account) {
+			api.BadRequest(w, "invalid stellar claimant account address")
+			return
+		}
 		claimants = append(claimants, domain.Claimant{
 			Account:   c.Account,
 			Predicate: predicateFromRequest(c.Predicate),
 		})
+	}
+	if req.SponsorAccount != "" && !isValidStellarAddress(req.SponsorAccount) {
+		api.BadRequest(w, "invalid stellar sponsor account address")
+		return
 	}
 
 	result, err := h.svc.Create(r.Context(), CreateInput{
@@ -206,10 +224,20 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Status:   domain.ClaimableBalanceStatus(query.Get("status")),
 	}
 	if raw := query.Get("limit"); raw != "" {
-		filter.Limit, _ = strconv.Atoi(raw)
+		parsedLimit, err := strconv.Atoi(raw)
+		if err != nil {
+			api.BadRequest(w, "invalid limit parameter")
+			return
+		}
+		filter.Limit = parsedLimit
 	}
 	if raw := query.Get("offset"); raw != "" {
-		filter.Offset, _ = strconv.Atoi(raw)
+		parsedOffset, err := strconv.Atoi(raw)
+		if err != nil {
+			api.BadRequest(w, "invalid offset parameter")
+			return
+		}
+		filter.Offset = parsedOffset
 	}
 	if raw := query.Get("expires_before"); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
@@ -271,6 +299,11 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) {
 	// claimant, the claim needs no arguments at all.
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if req.ClaimantAccount != "" && !isValidStellarAddress(req.ClaimantAccount) {
+		api.BadRequest(w, "invalid stellar claimant account address")
+		return
 	}
 
 	result, err := h.svc.Claim(r.Context(), id, req.ClaimantAccount)
