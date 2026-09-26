@@ -25,6 +25,8 @@ the same model used by Stripe, Adyen, and other payment processors.
 | `POST` | `/v1/fx/convert` | `Idempotency-Key` or `X-Idempotency-Key` | FX conversions |
 | `POST` | `/v1/wallets` | `Idempotency-Key` or `X-Idempotency-Key` | Wallet creation |
 | `POST` | `/v1/wallets/:id/trustlines` | `Idempotency-Key` or `X-Idempotency-Key` | Trustline configuration |
+| `POST` | `/v1/claimable-balances` | `Idempotency-Key` or `X-Idempotency-Key` | Claimable balance creation |
+| `POST` | `/v1/claimable-balances/:id/claim` | `Idempotency-Key` or `X-Idempotency-Key` | Claimable balance claiming |
 
 Read-only endpoints (e.g. `GET /v1/transfers/:id`) never require or use the header.
 
