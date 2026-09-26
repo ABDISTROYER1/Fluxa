@@ -21,7 +21,8 @@ func (r *TenantRepo) Create(ctx context.Context, t *domain.Tenant) error {
 	if t.AccountType == "" {
 		t.AccountType = domain.AccountTypeIndividual
 	}
-	_, err := r.db.Exec(ctx,
+	db := TxFromContext(ctx, r.db)
+	_, err := db.Exec(ctx,
 		`INSERT INTO tenants (id, name, email, account_type, max_wallets, max_transfers_per_month, max_webhooks, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		t.ID, t.Name, t.Email, t.AccountType, t.MaxWallets, t.MaxTransfersPerMonth, t.MaxWebhooks, t.CreatedAt,

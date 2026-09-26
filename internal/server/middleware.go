@@ -169,7 +169,7 @@ func AuthMiddleware(repo *postgres.APIKeyRepo, jwtSecret []byte, validator Membe
 			_ = repo.UpdateLastUsed(r.Context(), key.ID)
 
 			ctx := tenant.WithID(r.Context(), key.TenantID)
-			ctx = tenant.WithUser(ctx, "", domain.RoleAdmin)
+			ctx = tenant.WithUser(ctx, "", key.Role)
 			requestLogger := zerolog.Ctx(ctx).With().
 				Str("tenant_id", key.TenantID).
 				Logger()

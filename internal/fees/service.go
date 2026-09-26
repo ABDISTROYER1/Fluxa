@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
+	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 )
 
@@ -22,6 +23,10 @@ func (s *service) GetSchedule(ctx context.Context, tenantID string) (*domain.Fee
 		tenantPtr = &tenantID
 	}
 	return s.repo.GetSchedule(ctx, tenantPtr, "*")
+}
+
+func (s *service) SetSchedule(ctx context.Context, schedule *domain.FeeSchedule) error {
+	return s.repo.SetSchedule(ctx, schedule)
 }
 
 func (s *service) CalculateTransferFee(ctx context.Context, tenantID, asset string, amount decimal.Decimal) (*TransferFee, error) {
@@ -44,7 +49,10 @@ func (s *service) calculateFee(ctx context.Context, tenantID, asset string, amou
 	}
 
 	// Look up applicable tiers based on monthly volume
-	volume, _ := s.repo.GetMonthlyVolume(ctx, tenantID)
+	volume, err := s.repo.GetMonthlyVolume(ctx, tenantID)
+	if err != nil {
+		log.Error().Err(err).Str("tenant_id", tenantID).Msg("failed to get monthly volume for fee tier")
+	}
 	tier := s.repo.GetApplicableTier(ctx, tenantID, volume)
 
 	feeBps := schedule.TransferFeeBps
@@ -74,45 +82,6 @@ func (s *service) RecordCollection(ctx context.Context, collection *domain.FeeCo
 	return s.repo.RecordCollection(ctx, collection)
 }
 
-func (s *service) ListCollectedSummary(ctx context.Context, start, end *time.Time) ([]domain.FeeCollectionSummary, error) {
-	collections, err := s.repo.ListCollected(ctx, start, end)
-	if err != nil {
-		return nil, err
-	}
-
-	byAsset := make(map[string]*domain.FeeCollectionSummary)
-	tenantTotals := make(map[string]map[string]decimal.Decimal)
-
-	for _, c := range collections {
-		summary, ok := byAsset[c.Asset]
-		if !ok {
-			summary = &domain.FeeCollectionSummary{Asset: c.Asset}
-			byAsset[c.Asset] = summary
-			tenantTotals[c.Asset] = make(map[string]decimal.Decimal)
-		}
-		summary.TotalFees = summary.TotalFees.Add(c.FeeAmount)
-
-		tenantKey := ""
-		if c.TenantID != nil {
-			tenantKey = *c.TenantID
-		}
-		tenantTotals[c.Asset][tenantKey] = tenantTotals[c.Asset][tenantKey].Add(c.FeeAmount)
-	}
-
-	result := make([]domain.FeeCollectionSummary, 0, len(byAsset))
-	for asset, summary := range byAsset {
-		for tenantKey, total := range tenantTotals[asset] {
-			var tenantID *string
-			if tenantKey != "" {
-				tenantID = &tenantKey
-			}
-			summary.TenantFees = append(summary.TenantFees, domain.TenantFeeTotal{
-				TenantID:  tenantID,
-				TotalFees: total,
-			})
-		}
-		result = append(result, *summary)
-	}
-
-	return result, nil
+func (s *service) ListCollected(ctx context.Context, start, end *time.Time, tenantID *string, limit, offset int) ([]*domain.FeeCollection, error) {
+	return s.repo.ListCollected(ctx, start, end, tenantID, limit, offset)
 }

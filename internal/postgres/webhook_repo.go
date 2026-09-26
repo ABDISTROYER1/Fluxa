@@ -26,7 +26,8 @@ func (r *WebhookRepository) CreateEndpoint(ctx context.Context, ep *domain.Webho
 		INSERT INTO webhook_endpoints (id, tenant_id, url, secret, events, active, success_count, failure_count, last_delivered_at, notified_failing, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
-	_, err := r.db.Exec(ctx, query, ep.ID, ep.TenantID, ep.URL, ep.Secret, ep.Events, ep.Active, ep.SuccessCount, ep.FailureCount, ep.LastDeliveredAt, ep.NotifiedFailing, ep.CreatedAt, ep.UpdatedAt)
+	db := TxFromContext(ctx, r.db)
+	_, err := db.Exec(ctx, query, ep.ID, ep.TenantID, ep.URL, ep.Secret, ep.Events, ep.Active, ep.SuccessCount, ep.FailureCount, ep.LastDeliveredAt, ep.NotifiedFailing, ep.CreatedAt, ep.UpdatedAt)
 	return err
 }
 
