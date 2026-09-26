@@ -67,7 +67,7 @@ func (r *ScheduleRepo) List(ctx context.Context) ([]*domain.Schedule, error) {
 		query += ` WHERE tenant_id = $1`
 		args = append(args, tID)
 	}
-	query += ` ORDER BY created_at DESC`
+	query += ` ORDER BY created_at DESC LIMIT 100`
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -107,7 +107,7 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *domain.Schedule) error {
 // background worker.
 func (r *ScheduleRepo) ListDue(ctx context.Context, now time.Time) ([]*domain.Schedule, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT `+scheduleColumns+` FROM schedules WHERE status = $1 AND next_run_at <= $2`,
+		`SELECT `+scheduleColumns+` FROM schedules WHERE status = $1 AND next_run_at <= $2 ORDER BY next_run_at ASC LIMIT 100`,
 		domain.ScheduleStatusActive, now,
 	)
 	if err != nil {
