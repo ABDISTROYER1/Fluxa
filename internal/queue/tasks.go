@@ -18,6 +18,8 @@ const (
 	TypeRunSchedules     = "schedule:run"
 	TypeTreasurySweep    = "treasury:sweep"
 	TypeRefreshSanctions = "compliance:sanctions_refresh"
+	TypeForceSettle      = "settle_transfer"
+	TypeReconcileWallet  = "reconcile_wallet"
 	// TypeExpireClaimableBalances sweeps claimable balances past their expiry
 	// and revokes the ones flagged revoke_on_expiry.
 	TypeExpireClaimableBalances = "claimable:expire"
