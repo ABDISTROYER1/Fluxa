@@ -210,3 +210,16 @@ func RequireNotViewer(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func RequirePlatformOperator() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenantID := tenant.IDFromContext(r.Context())
+			if tenantID != "platform" && tenantID != "system" && tenantID != "operator" {
+				http.Error(w, "unauthorized: platform operator access required", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
