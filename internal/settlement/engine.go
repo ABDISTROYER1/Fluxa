@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
@@ -21,15 +20,23 @@ import (
 	"github.com/stellar/go/txnbuild"
 )
 
+var (
+	ErrRetryableRateLimit = errors.New("retryable rate limit")
+	ErrRetryableService   = errors.New("retryable service unavailable")
+	ErrRetryableTimeout   = errors.New("retryable timeout")
+)
+
 type Engine struct {
-	txRepo       transfer.Repository
-	walletRepo   wallet.Repository
-	feeSvc       fees.Service
-	stellar      stellar.Client
-	signer       stellar.Signer
-	network      string
-	assetIssuers map[string]string
-	feeWallet    string
+	txRepo         transfer.Repository
+	walletRepo     wallet.Repository
+	feeSvc         fees.Service
+	stellar        stellar.Client
+	signer         stellar.Signer
+	network        string
+	assetIssuers   map[string]string
+	feeWallet      string
+	maxAttempts    int
+	backoffSeconds int
 }
 
 func NewEngine(
@@ -43,14 +50,25 @@ func NewEngine(
 	feeWallet string,
 ) *Engine {
 	return &Engine{
-		txRepo:       txRepo,
-		walletRepo:   walletRepo,
-		feeSvc:       feeSvc,
-		stellar:      stellarClient,
-		signer:       signer,
-		network:      network,
-		assetIssuers: assetIssuers,
-		feeWallet:    feeWallet,
+		txRepo:         txRepo,
+		walletRepo:     walletRepo,
+		feeSvc:         feeSvc,
+		stellar:        stellarClient,
+		signer:         signer,
+		network:        network,
+		assetIssuers:   assetIssuers,
+		feeWallet:      feeWallet,
+		maxAttempts:    3,
+		backoffSeconds: 2,
+	}
+}
+
+func (e *Engine) SetRetryPolicy(attempts, backoffSeconds int) {
+	if attempts > 0 {
+		e.maxAttempts = attempts
+	}
+	if backoffSeconds > 0 {
+		e.backoffSeconds = backoffSeconds
 	}
 }
 
@@ -84,7 +102,7 @@ func (e *Engine) SubmitTransfer(ctx context.Context, txID string) error {
 		return fmt.Errorf("load source wallet: %w", err)
 	}
 
-	srcAccount, err := e.stellar.LoadAccount(srcWallet.PublicKey)
+	srcAccount, err := stellar.LoadAccountWithContext(ctx, e.stellar, srcWallet.PublicKey)
 	if err != nil {
 		return fmt.Errorf("load stellar account: %w", err)
 	}
@@ -297,16 +315,24 @@ type submitOutcome struct {
 func (e *Engine) submitWithRetry(ctx context.Context, tx *txnbuild.Transaction) submitOutcome {
 	var lastErr error
 	ambiguous := true
-	for attempt := 0; attempt < 3; attempt++ {
+	maxAtt := e.maxAttempts
+	if maxAtt <= 0 {
+		maxAtt = 3
+	}
+	backoff := e.backoffSeconds
+	if backoff <= 0 {
+		backoff = 2
+	}
+	for attempt := 0; attempt < maxAtt; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return submitOutcome{ambiguous: true, err: ctx.Err()}
-			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			case <-time.After(time.Duration(attempt) * time.Duration(backoff) * time.Second):
 			}
 		}
 
-		resp, err := e.stellar.SubmitTransaction(tx)
+		resp, err := stellar.SubmitTransactionWithContext(ctx, e.stellar, tx)
 		if err == nil {
 			return submitOutcome{hash: resp.Hash, confirmed: true}
 		}
@@ -324,15 +350,23 @@ func isRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "429") || strings.Contains(errStr, "503") || strings.Contains(errStr, "timeout")
+	if errors.Is(err, ErrRetryableRateLimit) || errors.Is(err, ErrRetryableService) || errors.Is(err, ErrRetryableTimeout) {
+		return true
+	}
+	var errCode interface{ HTTPStatus() int }
+	if errors.As(err, &errCode) {
+		if errCode.HTTPStatus() == 429 || errCode.HTTPStatus() == 503 {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) syncWalletBalances(ctx context.Context, w *domain.Wallet) {
 	if w == nil {
 		return
 	}
-	if acct, err := e.stellar.LoadAccount(w.PublicKey); err == nil {
+	if acct, err := stellar.LoadAccountWithContext(ctx, e.stellar, w.PublicKey); err == nil {
 		for _, b := range acct.Balances {
 			code := b.Code
 			if code == "" {

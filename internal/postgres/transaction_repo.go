@@ -207,7 +207,7 @@ func (r *TransactionRepo) ResetStuckSubmittedToPending(ctx context.Context, id s
 func (r *TransactionRepo) UpdateStatus(ctx context.Context, id string, status domain.TransactionStatus, txHash string) error {
 	tID := tenant.IDFromContext(ctx)
 	query := `UPDATE transactions
-		 SET status = $2, tx_hash = NULLIF($3, '')
+		 SET status = $2, tx_hash = COALESCE(NULLIF($3, ''), tx_hash)
 		 WHERE id = $1
 		   AND status != 'confirmed'`
 	args := []interface{}{id, status, txHash}

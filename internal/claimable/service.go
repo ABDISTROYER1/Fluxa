@@ -47,7 +47,7 @@ type WalletResolver interface {
 // Declared here so the claimable package stays independent of the webhook
 // package; webhook.Dispatcher satisfies it.
 type WebhookDispatcher interface {
-	Dispatch(ctx context.Context, tenantID *string, eventType string, payload interface{}) error
+	Dispatch(ctx context.Context, eventType string, payload interface{}) error
 }
 
 // CreateInput describes a new claimable balance.
@@ -263,6 +263,13 @@ func (s *service) Create(ctx context.Context, in CreateInput) (*CreateResult, er
 		expiresAt = EarliestDeadline(in.Claimants)
 	}
 
+	tID := tenant.IDFromContext(ctx)
+	if tID == "" {
+		if sponsorWallet != nil {
+			// If needed, fallback or ensure org_id is populated
+		}
+	}
+
 	record := &domain.ClaimableBalance{
 		ID:             balanceID,
 		TenantID:       tenantPtr(ctx),
@@ -372,15 +379,14 @@ func (s *service) Claim(ctx context.Context, id, claimantAccount string) (*Claim
 		return nil, fmt.Errorf("%w: %s", domain.ErrClaimantNotCustodied, claimant.Account)
 	}
 
-	txHash, err := s.submitClaim(ctx, balance.ID, wallet)
-	if err != nil {
+	if err := s.repo.MarkClaimed(ctx, balance.ID, claimant.Account, now); err != nil {
 		return nil, err
 	}
 
-	if err := s.repo.MarkClaimed(ctx, balance.ID, claimant.Account, now); err != nil {
-		log.Error().Err(err).Str("balance_id", balance.ID).Str("tx_hash", txHash).
-			Msg("claimable: claim landed on chain but failed to persist")
-		return nil, fmt.Errorf("record claim for %s: %w", balance.ID, err)
+	txHash, err := s.submitClaim(ctx, balance.ID, wallet)
+	if err != nil {
+		_ = s.repo.MarkExpired(ctx, balance.ID, now)
+		return nil, err
 	}
 
 	s.dispatch(ctx, domain.EventClaimableBalanceClaimed, map[string]interface{}{
@@ -405,7 +411,7 @@ func (s *service) Claim(ctx context.Context, id, claimantAccount string) (*Claim
 func (s *service) ProcessExpired(ctx context.Context) (*ExpiryReport, error) {
 	now := time.Now().UTC()
 
-	due, err := s.repo.ListExpiredPending(ctx, now)
+	due, err := s.repo.ListExpiredPending(ctx, now, 100)
 	if err != nil {
 		return nil, fmt.Errorf("list expired claimable balances: %w", err)
 	}
@@ -458,12 +464,13 @@ func (s *service) revoke(ctx context.Context, balance *domain.ClaimableBalance, 
 			continue
 		}
 
+		if err := s.repo.MarkRevoked(ctx, balance.ID, now); err != nil {
+			return false, err
+		}
+
 		txHash, err := s.submitClaim(ctx, balance.ID, wallet)
 		if err != nil {
 			return false, err
-		}
-		if err := s.repo.MarkRevoked(ctx, balance.ID, now); err != nil {
-			return false, fmt.Errorf("record revocation: %w", err)
 		}
 
 		s.dispatch(ctx, domain.EventClaimableBalanceRevoked, map[string]interface{}{
@@ -582,7 +589,7 @@ func (s *service) dispatch(ctx context.Context, eventType string, payload interf
 	if s.webhooks == nil {
 		return
 	}
-	if err := s.webhooks.Dispatch(ctx, tenantPtr(ctx), eventType, payload); err != nil {
+	if err := s.webhooks.Dispatch(ctx, eventType, payload); err != nil {
 		log.Error().Err(err).Str("event_type", eventType).Msg("claimable: webhook dispatch failed")
 	}
 }

@@ -159,9 +159,12 @@ func (r *ClaimableBalanceRepo) markTerminal(ctx context.Context, id string, stat
 		query += fmt.Sprintf(` AND org_id = $%d`, len(args))
 	}
 
-	_, err := r.db.Exec(ctx, query, args...)
+	res, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("mark claimable balance %s: %w", status, err)
+	}
+	if res.RowsAffected() == 0 {
+		return domain.ErrClaimableBalanceNotPending
 	}
 	return nil
 }
@@ -169,14 +172,17 @@ func (r *ClaimableBalanceRepo) markTerminal(ctx context.Context, id string, stat
 // ListExpiredPending returns pending balances past their expiry across every
 // tenant. The worker calls it with an unscoped context, so the org_id guard is
 // deliberately absent — the expiry sweep is platform-wide.
-func (r *ClaimableBalanceRepo) ListExpiredPending(ctx context.Context, now time.Time) ([]*domain.ClaimableBalance, error) {
-	rows, err := r.db.Query(ctx,
-		`SELECT `+claimableBalanceColumns+`
+func (r *ClaimableBalanceRepo) ListExpiredPending(ctx context.Context, now time.Time, limit int) ([]*domain.ClaimableBalance, error) {
+	query := `SELECT ` + claimableBalanceColumns + `
 		 FROM claimable_balances
 		 WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < $1
-		 ORDER BY expires_at ASC`,
-		now,
-	)
+		 ORDER BY expires_at ASC`
+	args := []interface{}{now}
+	if limit > 0 {
+		args = append(args, limit)
+		query += fmt.Sprintf(` LIMIT $%d`, len(args))
+	}
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list expired claimable balances: %w", err)
 	}
