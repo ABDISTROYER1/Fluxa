@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/alerting"
@@ -374,7 +373,7 @@ func (s *Service) ForceSettle(ctx context.Context, transferID string) error {
 	payload := map[string]interface{}{
 		"transfer_id": transferID,
 	}
-	if err := s.queue.Enqueue(ctx, "settle_transfer", payload); err != nil {
+	if err := s.queue.Enqueue(ctx, queue.TypeForceSettle, payload); err != nil {
 		return fmt.Errorf("enqueue force-settle for transfer %s: %w", transferID, err)
 	}
 	log.Info().Str("transfer_id", transferID).Msg("reconcile: force-settle enqueued")
@@ -387,7 +386,7 @@ func (s *Service) ReconcileWallet(ctx context.Context, walletID string) error {
 	payload := map[string]interface{}{
 		"wallet_id": walletID,
 	}
-	if err := s.queue.Enqueue(ctx, "reconcile_wallet", payload); err != nil {
+	if err := s.queue.Enqueue(ctx, queue.TypeReconcileWallet, payload); err != nil {
 		return fmt.Errorf("enqueue wallet reconciliation for %s: %w", walletID, err)
 	}
 	log.Info().Str("wallet_id", walletID).Msg("reconcile: wallet reconciliation enqueued")
