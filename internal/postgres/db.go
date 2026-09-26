@@ -8,8 +8,38 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type txKey struct{}
+
+func WithTx(ctx context.Context, tx pgx.Tx) context.Context {
+	return context.WithValue(ctx, txKey{}, tx)
+}
+
+func TxFromContext(ctx context.Context, defaultDB DB) DB {
+	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
+		return tx
+	}
+	return defaultDB
+}
+
+func RunInTx(ctx context.Context, db DB, fn func(context.Context) error) error {
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := fn(WithTx(ctx, tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
 func New(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)

@@ -1,0 +1,1 @@
+ALTER TABLE api_keys ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'admin';

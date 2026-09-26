@@ -68,7 +68,8 @@ func (t pgxTxAdapter) Begin(ctx context.Context) (dbTx, error) {
 }
 
 func (r *OrgRepo) AddMember(ctx context.Context, m *domain.OrgMember) error {
-	_, err := r.db.Exec(ctx,
+	db := TxFromContext(ctx, r.db)
+	_, err := db.Exec(ctx,
 		`INSERT INTO organization_members (id, tenant_id, user_id, role, invited_by, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		m.ID, m.TenantID, m.UserID, m.Role, nullableUUID(m.InvitedBy), m.CreatedAt,
@@ -413,7 +414,8 @@ func (r *OrgRepo) GetInviteByToken(ctx context.Context, token string) (*domain.O
 }
 
 func (r *OrgRepo) UpdateInviteStatus(ctx context.Context, inviteID, status string) error {
-	_, err := r.db.Exec(ctx,
+	db := TxFromContext(ctx, r.db)
+	_, err := db.Exec(ctx,
 		`UPDATE organization_invites SET status = $1 WHERE id = $2`,
 		status, inviteID,
 	)

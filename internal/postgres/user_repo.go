@@ -18,7 +18,8 @@ func NewUserRepo(db DB) *UserRepo {
 }
 
 func (r *UserRepo) Create(ctx context.Context, u *domain.User) error {
-	_, err := r.db.Exec(ctx,
+	db := TxFromContext(ctx, r.db)
+	_, err := db.Exec(ctx,
 		`INSERT INTO users (id, email, password_hash, name, created_at)
 		 VALUES ($1, $2, $3, $4, $5)`,
 		u.ID, u.Email, u.PasswordHash, u.Name, u.CreatedAt,
