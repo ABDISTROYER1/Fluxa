@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/fluxa/fluxa/internal/apikey"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/postgres"
 	"github.com/google/uuid"
@@ -13,11 +14,11 @@ import (
 )
 
 type RegisterRequest struct {
-	Email       string `json:"email"`
-	Password    string `json:"password"`
-	Name        string `json:"name"`
-	AccountType string `json:"account_type"` // individual | organization
-	OrgName     string `json:"org_name"`     // required if account_type == organization
+	Email       string             `json:"email"`
+	Password    string             `json:"password"`
+	Name        string             `json:"name"`
+	AccountType domain.AccountType `json:"account_type"` // individual | organization
+	OrgName     string             `json:"org_name"`     // required if account_type == organization
 }
 
 type AuthResponse struct {
@@ -39,24 +40,33 @@ type RefreshTokenStore interface {
 }
 
 type service struct {
+	db            postgres.DB
 	userRepo      *postgres.UserRepo
 	tenantRepo    *postgres.TenantRepo
 	orgRepo       *postgres.OrgRepo
+	apiKeyRepo    *postgres.APIKeyRepo
+	webhookRepo   *postgres.WebhookRepository
 	refreshTokens RefreshTokenStore
 	jwtSecret     []byte
 }
 
 func NewService(
+	db postgres.DB,
 	userRepo *postgres.UserRepo,
 	tenantRepo *postgres.TenantRepo,
 	orgRepo *postgres.OrgRepo,
+	apiKeyRepo *postgres.APIKeyRepo,
+	webhookRepo *postgres.WebhookRepository,
 	refreshTokens RefreshTokenStore,
 	jwtSecret []byte,
 ) Service {
 	return &service{
+		db:            db,
 		userRepo:      userRepo,
 		tenantRepo:    tenantRepo,
 		orgRepo:       orgRepo,
+		apiKeyRepo:    apiKeyRepo,
+		webhookRepo:   webhookRepo,
 		refreshTokens: refreshTokens,
 		jwtSecret:     jwtSecret,
 	}
@@ -100,10 +110,6 @@ func (s *service) Register(ctx context.Context, req RegisterRequest) (*AuthRespo
 		CreatedAt:    now,
 	}
 
-	if err := s.userRepo.Create(ctx, user); err != nil {
-		return nil, fmt.Errorf("create user: %w", err)
-	}
-
 	tenantName := req.Name + "'s Tenant"
 	if req.AccountType == domain.AccountTypeOrganization {
 		tenantName = req.OrgName
@@ -117,10 +123,6 @@ func (s *service) Register(ctx context.Context, req RegisterRequest) (*AuthRespo
 		CreatedAt:   now,
 	}
 
-	if err := s.tenantRepo.Create(ctx, t); err != nil {
-		return nil, fmt.Errorf("create tenant: %w", err)
-	}
-
 	member := &domain.OrgMember{
 		ID:        uuid.New().String(),
 		TenantID:  tenantID,
@@ -129,8 +131,55 @@ func (s *service) Register(ctx context.Context, req RegisterRequest) (*AuthRespo
 		CreatedAt: now,
 	}
 
-	if err := s.orgRepo.AddMember(ctx, member); err != nil {
-		return nil, fmt.Errorf("add owner member: %w", err)
+	var raw, prefix string
+
+	if err := postgres.RunInTx(ctx, s.db, func(txCtx context.Context) error {
+		if err := s.userRepo.Create(txCtx, user); err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+
+		if err := s.tenantRepo.Create(txCtx, t); err != nil {
+			return fmt.Errorf("create tenant: %w", err)
+		}
+
+		if err := s.orgRepo.AddMember(txCtx, member); err != nil {
+			return fmt.Errorf("add owner member: %w", err)
+		}
+
+		var genErr error
+		raw, prefix, genErr = apikey.Generate()
+		if genErr != nil {
+			return fmt.Errorf("generate api key: %w", genErr)
+		}
+
+		key := &domain.APIKey{
+			ID:        uuid.New().String(),
+			TenantID:  tenantID,
+			KeyHash:   apikey.Hash(raw),
+			Prefix:    prefix,
+			Role:      domain.RoleOwner,
+			CreatedAt: now,
+		}
+		if err := s.apiKeyRepo.Create(txCtx, key); err != nil {
+			return fmt.Errorf("create api key: %w", err)
+		}
+
+		webhookConfig := &domain.WebhookEndpoint{
+			ID:        uuid.New().String(),
+			TenantID:  &tenantID,
+			URL:       "", // to be configured later
+			Secret:    uuid.New().String(),
+			Active:    false,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if err := s.webhookRepo.CreateEndpoint(txCtx, webhookConfig); err != nil {
+			return fmt.Errorf("create webhook config: %w", err)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	accessToken, err := GenerateToken(userID, tenantID, domain.RoleOwner, user.Email, "access", s.jwtSecret, 24*time.Hour)

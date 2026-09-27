@@ -5,23 +5,22 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
 )
 
 type fakeRepo struct {
-	endpoints  map[string]*domain.WebhookEndpoint
-	deliveries map[string]*domain.WebhookDelivery
-	deadLetters map[string]*domain.WebhookDeadLetter
+	endpoints     map[string]*domain.WebhookEndpoint
+	deliveries    map[string]*domain.WebhookDelivery
+	deadLetters   map[string]*domain.WebhookDeadLetter
 	subscriptions map[string]*domain.WebhookSubscription
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
-		endpoints:   make(map[string]*domain.WebhookEndpoint),
-		deliveries:  make(map[string]*domain.WebhookDelivery),
-		deadLetters: make(map[string]*domain.WebhookDeadLetter),
+		endpoints:     make(map[string]*domain.WebhookEndpoint),
+		deliveries:    make(map[string]*domain.WebhookDelivery),
+		deadLetters:   make(map[string]*domain.WebhookDeadLetter),
 		subscriptions: make(map[string]*domain.WebhookSubscription),
 	}
 }
@@ -66,12 +65,6 @@ func (f *fakeRepo) GetDelivery(_ context.Context, id string) (*domain.WebhookDel
 	d, ok := f.deliveries[id]
 	if !ok {
 		return nil, http.ErrMissingBoundary
-	}
-	if tenantID != nil && d.EndpointID != "" {
-		ep := m.endpoints[d.EndpointID]
-		if ep == nil || ep.TenantID == nil || *ep.TenantID != *tenantID {
-			return nil, domain.ErrWebhookDeliveryNotFound
-		}
 	}
 	return d, nil
 }
@@ -190,7 +183,11 @@ func TestWebhookService_MaxAttemptsAndDeadLetter(t *testing.T) {
 
 func TestWebhookService_RetryPreservesHTTPMethod(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil, nil, 120, false)
+	svc, ok := NewService(repo, nil, nil, 120, false).(*service)
+	if !ok {
+		t.Fatal("NewService did not return *service")
+	}
+	svc.allowPrivateNetworks = true // the destination is a loopback httptest server
 
 	ep, _, err := svc.RegisterEndpoint(context.Background(), "https://example.com/webhook", nil)
 	if err != nil {

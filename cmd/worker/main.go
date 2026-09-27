@@ -33,6 +33,14 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+func parseDuration(s string, defaultVal time.Duration) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return defaultVal
+	}
+	return d
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -87,7 +95,7 @@ func main() {
 	walletRepo := postgres.NewWalletRepo(repoDB)
 	txRepo := postgres.NewTransactionRepo(repoDB)
 	feeRepo := postgres.NewFeeRepo(repoDB)
-	webhookRepo := postgres.NewWebhookRepo(repoDB)
+	webhookRepo := postgres.NewWebhookRepository(repoDB)
 	reconcileRepo := postgres.NewReconcileRepo(repoDB)
 	scheduleRepo := postgres.NewScheduleRepo(repoDB)
 	treasuryRepo := postgres.NewTreasuryRepo(repoDB)
@@ -95,7 +103,7 @@ func main() {
 	fiatRepo := postgres.NewFiatRepo(repoDB)
 	idempotencyRepo := postgres.NewIdempotencyRepo(repoDB)
 
-	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork)
+	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork, cfg.StellarHorizonTimeout)
 	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarNetwork)
 
 	feeSvc := fees.NewService(feeRepo)
@@ -108,15 +116,20 @@ func main() {
 	)
 	settlementWorker := settlement.NewWorker(engine)
 
-	idx := indexer.New(walletRepo, txRepo, stellarClient)
-	indexerWorker := indexer.NewWorker(idx)
+	idx := indexer.NewWithConfig(walletRepo, txRepo, stellarClient, indexer.Config{
+		PaymentsPageLimit: cfg.IndexerPaymentsPageLimit,
+		StreamMinBackoff:  parseDuration(cfg.IndexerStreamMinBackoff, 1*time.Second),
+		StreamMaxBackoff:  parseDuration(cfg.IndexerStreamMaxBackoff, 30*time.Second),
+		SyncPageSize:      cfg.IndexerSyncPageSize,
+	})
+	indexerWorker := indexer.NewWorker(idx, cfg)
 
 	// StreamAll keeps a live Horizon SSE connection open per wallet so new
 	// payments land in the DB in real time; the @every 30s indexer:sync task
 	// below is the incremental-poll fallback that also catches up any wallet
 	// whose stream is reconnecting.
 	go func() {
-		if err := idx.StreamAll(ctx, 1000, 0); err != nil {
+		if err := idx.StreamAll(ctx); err != nil {
 			log.Error().Err(err).Msg("indexer: stream all wallets failed")
 		}
 	}()
@@ -202,6 +215,7 @@ func main() {
 		treasuryRepo, stellarClient, nil, webhookSvc,
 		cfg.PlatformFeeWalletPublicKey, cfg.StellarNetwork, cfg.TreasurySecretKey,
 		cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer,
+		treasury.OptionsFromConfig(cfg.TreasuryBaseReserve, cfg.TreasuryReserveCacheTTLSec, cfg.TreasuryReserveConcurrency)...,
 	)
 	treasuryWorker := treasury.NewWorker(treasurySvc)
 
@@ -210,10 +224,10 @@ func main() {
 	claimableSvc := claimable.NewService(
 		postgres.NewClaimableBalanceRepo(repoDB),
 		stellarClient,
-		stellar.NewClaimableBalanceClient(cfg.StellarHorizonURL),
+		stellar.NewClaimableBalanceClientWithTimeout(cfg.StellarHorizonURL, cfg.StellarHorizonTimeout),
 		signer,
 		postgres.NewClaimableWalletResolver(walletRepo),
-		webhook.NewDispatcher(webhookRepo),
+		webhookSvc,
 		cfg.ClaimableBalanceSourceWalletID,
 		map[string]string{
 			"USDC": cfg.StellarUSDCIssuer,
@@ -241,15 +255,20 @@ func main() {
 			log.Fatal().Err(err).Msg("parse COMPLIANCE_STRUCTURING_UNIT")
 		}
 
+		velocityScreener := compliance.NewVelocityScreener(complianceRepo, compliance.VelocityConfig{
+			Window:           time.Duration(cfg.ComplianceVelocityWindowMin) * time.Minute,
+			MaxTransfers:     cfg.ComplianceVelocityMax,
+			StructuringUnit:  structuringUnit,
+			RoundTripWindow:  time.Duration(cfg.ComplianceRoundTripMin) * time.Minute,
+			PlatformWalletID: cfg.PlatformWalletID,
+		})
+		if err := velocityScreener.Validate(); err != nil {
+			log.Fatal().Err(err).Msg("velocity screener misconfigured")
+		}
+
 		screener := compliance.NewCompositeScreener(
 			compliance.NewSanctionsScreener(sanctionsSet, cfg.ComplianceFuzzyThreshold),
-			compliance.NewVelocityScreener(complianceRepo, compliance.VelocityConfig{
-				Window:           time.Duration(cfg.ComplianceVelocityWindowMin) * time.Minute,
-				MaxTransfers:     cfg.ComplianceVelocityMax,
-				StructuringUnit:  structuringUnit,
-				RoundTripWindow:  time.Duration(cfg.ComplianceRoundTripMin) * time.Minute,
-				PlatformWalletID: cfg.PlatformWalletID,
-			}),
+			velocityScreener,
 		)
 
 		complianceSvc := compliance.NewService(complianceRepo, screener, sanctionsSet, txRepo, qClient, webhookSvc)
@@ -306,6 +325,8 @@ func main() {
 	mux.HandleFunc(queue.TypeSyncLedger, indexerWorker.HandleSyncLedger)
 	mux.HandleFunc(queue.TypeReconcile, reconcileWorker.HandleReconcile)
 	mux.HandleFunc(queue.TypeBalanceReconcile, reconcileWorker.HandleBalanceReconcile)
+	mux.HandleFunc(queue.TypeForceSettle, reconcileWorker.HandleForceSettle)
+	mux.HandleFunc(queue.TypeReconcileWallet, reconcileWorker.HandleWalletReconcile)
 	mux.HandleFunc(queue.TypeWebhookDeliver, webhookWorker.HandleDeliver)
 	mux.HandleFunc(queue.TypeTenantWebhookDeliver, webhookWorker.HandleDeliver)
 	mux.HandleFunc(queue.TypeRunSchedules, scheduleWorker.HandleRunSchedules)

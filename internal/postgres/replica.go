@@ -76,6 +76,9 @@ func (db *ReplicaAwareDB) recordFallback(err error) {
 }
 func isRead(sql string) bool {
 	s := strings.TrimSpace(strings.ToUpper(sql))
+	if strings.Contains(s, "FOR UPDATE") || strings.Contains(s, "FOR SHARE") {
+		return false
+	}
 	return strings.HasPrefix(s, "SELECT") || strings.HasPrefix(s, "WITH") || strings.HasPrefix(s, "SHOW") || strings.HasPrefix(s, "EXPLAIN")
 }
 

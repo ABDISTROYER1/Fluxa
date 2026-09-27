@@ -18,10 +18,11 @@ func NewAPIKeyRepo(db DB) *APIKeyRepo {
 }
 
 func (r *APIKeyRepo) Create(ctx context.Context, key *domain.APIKey) error {
-	_, err := r.db.Exec(ctx,
-		`INSERT INTO api_keys (id, tenant_id, key_hash, prefix, label, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		key.ID, key.TenantID, key.KeyHash, key.Prefix, key.Label, key.CreatedAt,
+	db := TxFromContext(ctx, r.db)
+	_, err := db.Exec(ctx,
+		`INSERT INTO api_keys (id, tenant_id, key_hash, prefix, label, role, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		key.ID, key.TenantID, key.KeyHash, key.Prefix, key.Label, key.Role, key.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
@@ -32,9 +33,9 @@ func (r *APIKeyRepo) Create(ctx context.Context, key *domain.APIKey) error {
 func (r *APIKeyRepo) GetByHash(ctx context.Context, hash string) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
 	err := r.db.QueryRow(ctx,
-		`SELECT id, tenant_id, key_hash, prefix, label, last_used_at, revoked_at, created_at FROM api_keys WHERE key_hash = $1`,
+		`SELECT id, tenant_id, key_hash, prefix, label, role, last_used_at, revoked_at, created_at FROM api_keys WHERE key_hash = $1`,
 		hash,
-	).Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Label, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
+	).Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("api key not found")
@@ -46,7 +47,7 @@ func (r *APIKeyRepo) GetByHash(ctx context.Context, hash string) (*domain.APIKey
 
 func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]*domain.APIKey, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, tenant_id, key_hash, prefix, label, last_used_at, revoked_at, created_at FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC`,
+		`SELECT id, tenant_id, key_hash, prefix, label, role, last_used_at, revoked_at, created_at FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC`,
 		tenantID,
 	)
 	if err != nil {
@@ -57,7 +58,7 @@ func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]*doma
 	var keys []*domain.APIKey
 	for rows.Next() {
 		k := &domain.APIKey{}
-		if err := rows.Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Label, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)

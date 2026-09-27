@@ -108,7 +108,7 @@ func (m *fullMockStellar) LoadAccount(accountID string) (horizon.Account, error)
 func (m *fullMockStellar) SubmitTransaction(tx *txnbuild.Transaction) (horizon.Transaction, error) {
 	return horizon.Transaction{Hash: "mock_tx_hash_123"}, nil
 }
-func (m *fullMockStellar) FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+func (m *fullMockStellar) FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
 	return nil, nil
 }
 func (m *fullMockStellar) TransactionDetail(hash string) (horizon.Transaction, error) {
@@ -117,10 +117,6 @@ func (m *fullMockStellar) TransactionDetail(hash string) (horizon.Transaction, e
 func (m *fullMockStellar) OperationsForTransaction(hash string) ([]operations.Operation, error) {
 	return nil, nil
 }
-func (m *fullMockStellar) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
-	return nil, nil
-}
-
 func (m *fullMockStellar) Payments(accountID, cursor string, limit uint) ([]operations.Operation, error) {
 	return nil, nil
 }

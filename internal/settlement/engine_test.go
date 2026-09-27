@@ -14,6 +14,7 @@ import (
 	"github.com/stellar/go/keypair"
 	stellarnetwork "github.com/stellar/go/network"
 	"github.com/stellar/go/protocols/horizon"
+	"github.com/stellar/go/protocols/horizon/base"
 	"github.com/stellar/go/protocols/horizon/operations"
 	"github.com/stellar/go/txnbuild"
 )
@@ -220,9 +221,17 @@ func (f *fakeWalletRepo) GetBalances(_ context.Context, _ string) ([]domain.Bala
 }
 func (f *fakeWalletRepo) UpdateSyncCursor(_ context.Context, _, _ string) error { return nil }
 
-type fakeFeesService struct{
+type fakeFeesService struct {
 	mu             sync.Mutex
 	recordColCalls int
+}
+
+func (f *fakeFeesService) SetSchedule(_ context.Context, _ *domain.FeeSchedule) error {
+	return nil
+}
+
+func (f *fakeFeesService) ListCollected(_ context.Context, _, _ *time.Time, _ *string, _, _ int) ([]*domain.FeeCollection, error) {
+	return nil, nil
 }
 
 func (f *fakeFeesService) GetSchedule(_ context.Context, _ string) (*domain.FeeSchedule, error) {
@@ -262,7 +271,14 @@ type fakeStellarClient struct {
 }
 
 func (f *fakeStellarClient) LoadAccount(accountID string) (horizon.Account, error) {
-	return horizon.Account{AccountID: accountID, Sequence: f.sequence}, nil
+	return horizon.Account{
+		AccountID: accountID,
+		Sequence:  f.sequence,
+		Balances: []horizon.Balance{{
+			Balance: "100.0000000",
+			Asset:   base.Asset{Type: "native"},
+		}},
+	}, nil
 }
 func (f *fakeStellarClient) SubmitTransaction(tx *txnbuild.Transaction) (horizon.Transaction, error) {
 	f.mu.Lock()
@@ -270,7 +286,7 @@ func (f *fakeStellarClient) SubmitTransaction(tx *txnbuild.Transaction) (horizon
 	f.mu.Unlock()
 	return f.submitFunc(tx)
 }
-func (f *fakeStellarClient) FindPathsStrict(_, _, _, _ string) ([]horizon.Path, error) {
+func (f *fakeStellarClient) FindPathsStrict(_, _, _, _, _ string) ([]horizon.Path, error) {
 	return nil, nil
 }
 func (f *fakeStellarClient) TransactionDetail(hash string) (horizon.Transaction, error) {
@@ -280,9 +296,6 @@ func (f *fakeStellarClient) TransactionDetail(hash string) (horizon.Transaction,
 	return f.txDetailFunc(hash)
 }
 func (f *fakeStellarClient) OperationsForTransaction(_ string) ([]operations.Operation, error) {
-	return nil, nil
-}
-func (f *fakeStellarClient) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
 	return nil, nil
 }
 func (f *fakeStellarClient) Payments(_, _ string, _ uint) ([]operations.Operation, error) {
@@ -313,11 +326,14 @@ func testWallets(t *testing.T) (src, dst *domain.Wallet) {
 		&domain.Wallet{ID: "dst-wallet", PublicKey: dstKP.Address(), EncryptedSecret: "00"}
 }
 
+// testFeeWallet is a well-formed Stellar address used as PLATFORM_FEE_WALLET.
+const testFeeWallet = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+
 func newTestEngine(txRepo *fakeTxRepo, walletRepo *fakeWalletRepo, feeSvc *fakeFeesService, stellarClient *fakeStellarClient) *Engine {
 	if feeSvc == nil {
 		feeSvc = &fakeFeesService{}
 	}
-	return NewEngine(txRepo, walletRepo, feeSvc, stellarClient, identitySigner{}, "testnet", nil, "")
+	return NewEngine(txRepo, walletRepo, feeSvc, stellarClient, identitySigner{}, "testnet", nil, testFeeWallet)
 }
 
 func alwaysSucceeds() func(tx *txnbuild.Transaction) (horizon.Transaction, error) {

@@ -100,7 +100,10 @@ func (m *basicMockFeeSvc) CalculateConversionFee(ctx context.Context, orgID, ass
 func (m *basicMockFeeSvc) RecordCollection(ctx context.Context, collection *domain.FeeCollection) error {
 	return nil
 }
-func (m *basicMockFeeSvc) ListCollectedSummary(ctx context.Context, orgID string, since *time.Time) ([]domain.FeeCollectionSummary, error) {
+func (m *basicMockFeeSvc) SetSchedule(_ context.Context, _ *domain.FeeSchedule) error {
+	return nil
+}
+func (m *basicMockFeeSvc) ListCollected(_ context.Context, _, _ *time.Time, _ *string, _, _ int) ([]*domain.FeeCollection, error) {
 	return nil, nil
 }
 
@@ -113,7 +116,7 @@ func TestInitiateTransfer_Success(t *testing.T) {
 	}
 	tr := &basicMockTxRepo{}
 	feeSvc := &basicMockFeeSvc{}
-	
+
 	svc := transfer.NewService(tr, wr, feeSvc, nil)
 
 	// Since XLM doesn't require trustline validation, it should succeed
@@ -135,7 +138,7 @@ func TestInitiateTransfer_SelfTransfer(t *testing.T) {
 	wr := &basicMockWalletRepo{}
 	tr := &basicMockTxRepo{}
 	feeSvc := &basicMockFeeSvc{}
-	
+
 	svc := transfer.NewService(tr, wr, feeSvc, nil)
 
 	_, err := svc.InitiateTransfer(context.Background(), "w1", "w1", "XLM", decimal.NewFromInt(10))
@@ -153,7 +156,7 @@ func TestListTransactions(t *testing.T) {
 		},
 	}
 	feeSvc := &basicMockFeeSvc{}
-	
+
 	svc := transfer.NewService(tr, wr, feeSvc, nil)
 
 	txs, err := svc.ListTransactions(context.Background(), "w1", 10, 0)

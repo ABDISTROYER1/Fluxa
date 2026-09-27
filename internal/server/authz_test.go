@@ -85,10 +85,12 @@ func newAuthzTestServerWithValidator(t *testing.T, validator MembershipValidator
 		schedule.NewHandler(nil),
 		treasuryHandler,
 		nil,
+		nil,
 		authzJWTSecret,
 		"0",
 		nil,
 		validator,
+		nil,
 	)
 }
 
@@ -132,15 +134,19 @@ func TestAdminRoutesRequireOwnerOrAdmin(t *testing.T) {
 	routes := []struct {
 		method string
 		path   string
+		// platformOperator routes are additionally gated by
+		// RequirePlatformOperator, so an org Owner/Admin without the
+		// platform-operator claim is still refused (403).
+		platformOperator bool
 	}{
-		{http.MethodGet, "/v1/admin/fees/collected"},
-		{http.MethodGet, "/v1/admin/anchors"},
-		{http.MethodPost, "/v1/admin/anchors"},
-		{http.MethodGet, "/v1/admin/reconciliation/summary"},
-		{http.MethodPost, "/v1/admin/reconciliation/run"},
-		{http.MethodGet, "/v1/admin/treasury/balances"},
-		{http.MethodPost, "/v1/admin/treasury/sweep"},
-		{http.MethodPut, "/v1/admin/treasury/config"},
+		{http.MethodGet, "/v1/admin/fees/collected", false},
+		{http.MethodGet, "/v1/admin/anchors", false},
+		{http.MethodPost, "/v1/admin/anchors", false},
+		{http.MethodGet, "/v1/admin/reconciliation/summary", false},
+		{http.MethodPost, "/v1/admin/reconciliation/run", false},
+		{http.MethodGet, "/v1/admin/treasury/balances", true},
+		{http.MethodPost, "/v1/admin/treasury/sweep", true},
+		{http.MethodPut, "/v1/admin/treasury/config", true},
 	}
 
 	for _, rt := range routes {
@@ -167,6 +173,12 @@ func TestAdminRoutesRequireOwnerOrAdmin(t *testing.T) {
 				)
 				srv := newAuthzTestServerWithValidator(t, roleValidator)
 				code := doRequest(t, srv, rt.method, rt.path, role)
+				if rt.platformOperator {
+					if code != http.StatusForbidden {
+						t.Fatalf("role %q on %s %s: expected 403 without the platform-operator claim, got %d", role, rt.method, rt.path, code)
+					}
+					return
+				}
 				if code == http.StatusForbidden || code == http.StatusUnauthorized {
 					t.Fatalf("role %q on %s %s: expected to pass authorization, got %d", role, rt.method, rt.path, code)
 				}

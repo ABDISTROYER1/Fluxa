@@ -37,6 +37,9 @@ type Service interface {
 	// public key; the custodial adapter generates its own keypair and ignores it.
 	CreateWallet(ctx context.Context, ownerPublicKey ...string) (*domain.Wallet, error)
 	GetBalances(ctx context.Context, walletID string, includeFX ...string) ([]Balance, error)
+	// GetWalletForHandler returns a wallet by ID for read paths. It never
+	// exposes the encrypted secret.
+	GetWalletForHandler(ctx context.Context, walletID string) (*domain.Wallet, error)
 	AddTrustline(ctx context.Context, walletID, assetCode, issuer, limit string) (string, error)
 	// ExecuteTransfer moves an asset out of the wallet and returns the
 	// transaction hash. Custodial wallets use a classic Stellar payment;
@@ -128,6 +131,10 @@ func (s *service) CreateWallet(ctx context.Context, ownerPublicKey ...string) (*
 	}
 
 	return w, nil
+}
+
+func (s *service) GetWalletForHandler(ctx context.Context, walletID string) (*domain.Wallet, error) {
+	return s.repo.GetByID(ctx, walletID)
 }
 
 func (s *service) GetBalances(ctx context.Context, walletID string, includeFX ...string) ([]Balance, error) {

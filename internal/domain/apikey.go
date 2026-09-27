@@ -8,6 +8,7 @@ type APIKey struct {
 	KeyHash    string
 	Prefix     string
 	Label      *string
+	Role       string
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
 	CreatedAt  time.Time

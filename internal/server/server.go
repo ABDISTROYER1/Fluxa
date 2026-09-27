@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -89,23 +88,12 @@ func New(
 		// the authenticated group below already mounts a "/webhooks"
 		// sub-router for Register/List/Delete/deliveries; chi doesn't support
 		// mounting two independent sub-routers at the same pattern.
-		r.With(webhook.VerifyRateLimit()).Post("/webhooks/verify", webhookHandler.Verify)
+		r.With(webhook.VerifyRateLimit()).Post("/webhooks/verify", webhookHandler.VerifySignature)
 
 		// Authenticated endpoints
 		r.Group(func(r chi.Router) {
 			r.Use(AuthMiddleware(apiKeyRepo, jwtSecret, membershipValidator))
 			r.Use(RateLimit(100, 200))
-
-			r.Get("/usage", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"request_count":   0,
-					"transfer_volume": "0",
-					"rate_limit":      100,
-					"period":          "current",
-					"note":            "derived on client — backend usage aggregation not yet implemented",
-				})
-			})
 
 			// API Keys (Owner & Admin only for creation & revocation)
 			r.Route("/keys", func(r chi.Router) {
@@ -124,9 +112,9 @@ func New(
 
 			// Webhooks (Owner & Admin for management, viewer/dev read)
 			r.Route("/webhooks", func(r chi.Router) {
-				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Post("/", webhookHandler.Register)
-				r.Get("/", webhookHandler.List)
-				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Delete("/{id}", webhookHandler.Delete)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Post("/", webhookHandler.RegisterEndpoint)
+				r.Get("/", webhookHandler.ListEndpoints)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Delete("/{id}", webhookHandler.DeleteEndpoint)
 				r.Get("/{id}/deliveries", webhookHandler.ListDeliveries)
 			})
 
@@ -144,7 +132,9 @@ func New(
 				r.Route("/schedules", scheduleHandler.Routes())
 				r.Route("/fx", fxHandler.Routes())
 				r.Route("/fees", feeHandler.Routes())
-				r.Route("/claimable-balances", claimableHandler.Routes())
+				if claimableHandler != nil {
+					r.Route("/claimable-balances", claimableHandler.Routes())
+				}
 			})
 
 			// Administrative routes (Owner & Admin only)

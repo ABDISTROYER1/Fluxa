@@ -7,12 +7,22 @@ import (
 // EventType is a string type for webhook event type constants.
 type EventType string
 
+type DeliveryStatus string
+
 const (
 	EventTypePaymentCompleted    = "payment.completed"
 	EventTypePaymentFailed       = "payment.failed"
 	EventTypeFxQuoteCreated      = "fx.quote.created"
 	EventTypeSettlementCompleted = "settlement.completed"
 	EventTypeBatchCompleted      = "batch.completed"
+
+	EventTransferInitiated      = "transfer.initiated"
+	EventTransferSettled        = "transfer.settled"
+	EventTransferFailed         = "transfer.failed"
+	EventWalletFunded           = "wallet.funded"
+	EventConversionCompleted    = "conversion.completed"
+	EventTreasurySweepCompleted = "treasury.sweep_completed"
+	EventReconciliationDrift    = "reconciliation.drift"
 
 	EventTransferComplianceHold     = "transfer.compliance.hold"
 	EventTransferComplianceApproved = "transfer.compliance.approved"
@@ -23,6 +33,10 @@ const (
 	EventClaimableBalanceClaimed = "claimable_balance.claimed"
 	EventClaimableBalanceExpired = "claimable_balance.expired"
 	EventClaimableBalanceRevoked = "claimable_balance.revoked"
+
+	DeliveryStatusPending   = "pending"
+	DeliveryStatusDelivered = "delivered"
+	DeliveryStatusFailed    = "failed"
 )
 
 var SupportedEventTypes = []string{
@@ -112,6 +126,16 @@ type TenantWebhookConfig struct {
 	// after the secret has been stripped from an API response.
 	SecretConfigured bool
 }
+
+// DeliveryStatus is the lifecycle state of a tenant webhook delivery attempt.
+type DeliveryStatus string
+
+const (
+	DeliveryPending DeliveryStatus = "pending"
+	DeliverySuccess DeliveryStatus = "success"
+	DeliveryFailed  DeliveryStatus = "failed"
+	DeliveryPaused  DeliveryStatus = "paused"
+)
 
 type TenantWebhookDelivery struct {
 	ID           string

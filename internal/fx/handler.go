@@ -6,6 +6,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 )
 
 type Handler struct {
@@ -43,8 +44,10 @@ type quoteRequest struct {
 }
 
 type convertRequest struct {
-	WalletID string `json:"wallet_id" validate:"required,uuid"`
-	QuoteID  string `json:"quote_id"  validate:"required,uuid"`
+	WalletID       string  `json:"wallet_id" validate:"required,uuid"`
+	QuoteID        string  `json:"quote_id"  validate:"required,uuid"`
+	MinAmountOut   *string `json:"min_amount_out,omitempty"`
+	MaxSlippageBps *int    `json:"max_slippage_bps,omitempty"`
 }
 
 func (h *Handler) getQuote(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +81,17 @@ func (h *Handler) convert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conv, err := h.svc.ExecuteConversion(r.Context(), req.WalletID, req.QuoteID)
+	var minAmtOut *decimal.Decimal
+	if req.MinAmountOut != nil {
+		val, err := decimal.NewFromString(*req.MinAmountOut)
+		if err != nil {
+			api.BadRequest(w, "invalid min_amount_out")
+			return
+		}
+		minAmtOut = &val
+	}
+
+	conv, err := h.svc.ExecuteConversion(r.Context(), req.WalletID, req.QuoteID, minAmtOut, req.MaxSlippageBps)
 	if err != nil {
 		api.HandleDomainError(w, err)
 		return

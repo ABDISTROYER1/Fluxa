@@ -15,9 +15,14 @@ const (
 	TypeReconcile        = "reconcile:run"
 	TypeBalanceReconcile = "reconcile:balance"
 	TypeWebhookDeliver   = "webhook:deliver"
-	TypeRunSchedules     = "schedule:run"
-	TypeTreasurySweep    = "treasury:sweep"
-	TypeRefreshSanctions = "compliance:sanctions_refresh"
+	// TypeTenantWebhookDeliver delivers a tenant-config webhook (the
+	// per-tenant endpoint configured through the config API).
+	TypeTenantWebhookDeliver = "webhook:deliver_tenant"
+	TypeRunSchedules         = "schedule:run"
+	TypeTreasurySweep        = "treasury:sweep"
+	TypeRefreshSanctions     = "compliance:sanctions_refresh"
+	TypeForceSettle          = "settle_transfer"
+	TypeReconcileWallet      = "reconcile_wallet"
 	// TypeExpireClaimableBalances sweeps claimable balances past their expiry
 	// and revokes the ones flagged revoke_on_expiry.
 	TypeExpireClaimableBalances = "claimable:expire"

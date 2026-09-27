@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -10,14 +9,13 @@ import (
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type WebhookRepository struct {
-	db *pgxpool.Pool
+	db DB
 }
 
-func NewWebhookRepository(db *pgxpool.Pool) *WebhookRepository {
+func NewWebhookRepository(db DB) *WebhookRepository {
 	return &WebhookRepository{db: db}
 }
 
@@ -26,7 +24,8 @@ func (r *WebhookRepository) CreateEndpoint(ctx context.Context, ep *domain.Webho
 		INSERT INTO webhook_endpoints (id, tenant_id, url, secret, events, active, success_count, failure_count, last_delivered_at, notified_failing, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
-	_, err := r.db.Exec(ctx, query, ep.ID, ep.TenantID, ep.URL, ep.Secret, ep.Events, ep.Active, ep.SuccessCount, ep.FailureCount, ep.LastDeliveredAt, ep.NotifiedFailing, ep.CreatedAt, ep.UpdatedAt)
+	db := TxFromContext(ctx, r.db)
+	_, err := db.Exec(ctx, query, ep.ID, ep.TenantID, ep.URL, ep.Secret, ep.Events, ep.Active, ep.SuccessCount, ep.FailureCount, ep.LastDeliveredAt, ep.NotifiedFailing, ep.CreatedAt, ep.UpdatedAt)
 	return err
 }
 
@@ -256,4 +255,160 @@ func (r *WebhookRepository) ListDeadLetters(ctx context.Context, tenantID *strin
 		deadLetters = append(deadLetters, &dl)
 	}
 	return deadLetters, nil
+}
+
+func (r *WebhookRepository) GetConfig(ctx context.Context, tenantID string) (*domain.TenantWebhookConfig, error) {
+	config := &domain.TenantWebhookConfig{}
+	err := r.db.QueryRow(ctx,
+		`SELECT tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at
+		 FROM tenant_webhook_configs WHERE tenant_id = $1`,
+		tenantID,
+	).Scan(
+		&config.TenantID, &config.Enabled, &config.URL, &config.Secret, &config.SigningAlgorithm, &config.Events,
+		&config.Paused, &config.ResumeAt, &config.LastDeliveredAt, &config.CreatedAt, &config.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrWebhookConfigNotFound
+		}
+		return nil, fmt.Errorf("get tenant webhook config: %w", err)
+	}
+	return config, nil
+}
+
+func (r *WebhookRepository) UpsertConfig(ctx context.Context, config *domain.TenantWebhookConfig) error {
+	_, err := r.db.Exec(ctx,
+		`INSERT INTO tenant_webhook_configs
+		 (tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		 ON CONFLICT (tenant_id) DO UPDATE SET
+		 enabled = EXCLUDED.enabled,
+		 url = EXCLUDED.url,
+		 secret = EXCLUDED.secret,
+		 signing_algorithm = EXCLUDED.signing_algorithm,
+		 events = EXCLUDED.events,
+		 paused = EXCLUDED.paused,
+		 resume_at = EXCLUDED.resume_at,
+		 last_delivered_at = EXCLUDED.last_delivered_at,
+		 updated_at = EXCLUDED.updated_at`,
+		config.TenantID, config.Enabled, config.URL, config.Secret, config.SigningAlgorithm, config.Events,
+		config.Paused, config.ResumeAt, config.LastDeliveredAt, config.CreatedAt, config.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert tenant webhook config: %w", err)
+	}
+	return nil
+}
+
+func (r *WebhookRepository) ListEnabledConfigs(ctx context.Context) ([]*domain.TenantWebhookConfig, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at
+		 FROM tenant_webhook_configs WHERE enabled = TRUE ORDER BY created_at`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list tenant webhook configs: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []*domain.TenantWebhookConfig
+	for rows.Next() {
+		config := &domain.TenantWebhookConfig{}
+		if err := rows.Scan(
+			&config.TenantID, &config.Enabled, &config.URL, &config.Secret, &config.SigningAlgorithm, &config.Events,
+			&config.Paused, &config.ResumeAt, &config.LastDeliveredAt, &config.CreatedAt, &config.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		configs = append(configs, config)
+	}
+	return configs, rows.Err()
+}
+
+func (r *WebhookRepository) CreateConfigDelivery(ctx context.Context, delivery *domain.TenantWebhookDelivery) error {
+	_, err := r.db.Exec(ctx,
+		`INSERT INTO tenant_webhook_deliveries
+		 (id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		delivery.ID, delivery.TenantID, string(delivery.EventType), delivery.Payload, string(delivery.Status),
+		delivery.ResponseCode, delivery.AttemptCount, delivery.LastAttempt, delivery.CreatedAt, delivery.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert tenant webhook delivery: %w", err)
+	}
+	return nil
+}
+
+func (r *WebhookRepository) UpdateConfigDelivery(ctx context.Context, delivery *domain.TenantWebhookDelivery) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE tenant_webhook_deliveries
+		 SET status = $1, response_code = $2, attempt_count = $3, last_attempt = $4, updated_at = $5
+		 WHERE id = $6 AND tenant_id = $7`,
+		string(delivery.Status), delivery.ResponseCode, delivery.AttemptCount, delivery.LastAttempt,
+		delivery.UpdatedAt, delivery.ID, delivery.TenantID,
+	)
+	if err != nil {
+		return fmt.Errorf("update tenant webhook delivery: %w", err)
+	}
+	return nil
+}
+
+func (r *WebhookRepository) GetConfigDelivery(ctx context.Context, id, tenantID string) (*domain.TenantWebhookDelivery, error) {
+	delivery := &domain.TenantWebhookDelivery{}
+	var eventType, status string
+	err := r.db.QueryRow(ctx,
+		`SELECT id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at
+		 FROM tenant_webhook_deliveries WHERE id = $1 AND tenant_id = $2`,
+		id, tenantID,
+	).Scan(
+		&delivery.ID, &delivery.TenantID, &eventType, &delivery.Payload, &status, &delivery.ResponseCode,
+		&delivery.AttemptCount, &delivery.LastAttempt, &delivery.CreatedAt, &delivery.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrWebhookDeliveryNotFound
+		}
+		return nil, fmt.Errorf("get tenant webhook delivery: %w", err)
+	}
+	delivery.EventType = domain.EventType(eventType)
+	delivery.Status = domain.DeliveryStatus(status)
+	return delivery, nil
+}
+
+func (r *WebhookRepository) ListConfigDeliveries(ctx context.Context, tenantID string, limit, offset int) ([]*domain.TenantWebhookDelivery, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at
+		 FROM tenant_webhook_deliveries WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+		tenantID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list tenant webhook deliveries: %w", err)
+	}
+	defer rows.Close()
+
+	var deliveries []*domain.TenantWebhookDelivery
+	for rows.Next() {
+		delivery := &domain.TenantWebhookDelivery{}
+		var eventType, status string
+		if err := rows.Scan(
+			&delivery.ID, &delivery.TenantID, &eventType, &delivery.Payload, &status, &delivery.ResponseCode,
+			&delivery.AttemptCount, &delivery.LastAttempt, &delivery.CreatedAt, &delivery.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		delivery.EventType = domain.EventType(eventType)
+		delivery.Status = domain.DeliveryStatus(status)
+		deliveries = append(deliveries, delivery)
+	}
+	return deliveries, rows.Err()
+}
+
+func (r *WebhookRepository) UpdateConfigLastDelivered(ctx context.Context, tenantID string, deliveredAt time.Time) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE tenant_webhook_configs SET last_delivered_at = $1, updated_at = $1 WHERE tenant_id = $2`,
+		deliveredAt, tenantID,
+	)
+	if err != nil {
+		return fmt.Errorf("update tenant webhook last delivered: %w", err)
+	}
+	return nil
 }

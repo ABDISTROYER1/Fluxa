@@ -219,7 +219,7 @@ func (h *Handler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID := r.Context().Value("tenant_id")
 	if tenantID != nil && tenantID != "platform" && tenantID != "system" && tenantID != "operator" {
-		api.Error(w, http.StatusForbidden, "tenants cannot modify global treasury configuration")
+		api.Error(w, http.StatusForbidden, "FORBIDDEN", "tenants cannot modify global treasury configuration")
 		return
 	}
 	if err := h.svc.UpdateConfig(r.Context(), cfg); err != nil {

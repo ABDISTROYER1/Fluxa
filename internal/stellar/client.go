@@ -3,6 +3,8 @@ package stellar
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/protocols/horizon"
@@ -10,14 +12,22 @@ import (
 	"github.com/stellar/go/txnbuild"
 )
 
+// defaultHorizonTimeout bounds every Horizon HTTP round-trip. This Horizon SDK
+// release has no per-call context support for non-streaming endpoints, so the
+// HTTP client timeout is what enforces the deadline; the *WithContext helpers
+// additionally derive a bounded context so work stops when the caller's
+// context is already done.
+const defaultHorizonTimeout = 10 * time.Second
+
 // Client is the interface Fluxa uses to interact with Stellar/Horizon.
 type Client interface {
 	LoadAccount(accountID string) (horizon.Account, error)
 	SubmitTransaction(tx *txnbuild.Transaction) (horizon.Transaction, error)
-	FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error)
+	// FindPathsStrict returns strict-receive path-payment candidates for a
+	// payment from sourceAccount to destAccount.
+	FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error)
 	TransactionDetail(hash string) (horizon.Transaction, error)
 	OperationsForTransaction(hash string) ([]operations.Operation, error)
-	PaymentsForAccount(accountID string, cursor string, limit int) ([]operations.Payment, error)
 	// Payments returns a page of payment operations for an account, starting
 	// strictly after cursor (empty cursor starts from the account's first payment).
 	Payments(accountID, cursor string, limit uint) ([]operations.Operation, error)
@@ -33,12 +43,22 @@ type Client interface {
 type horizonClient struct {
 	inner   *horizonclient.Client
 	network string
+	timeout time.Duration
 }
 
-func NewClient(horizonURL, network string) Client {
+// NewClient builds a Horizon client whose HTTP requests are bounded by timeout.
+// A non-positive timeout falls back to defaultHorizonTimeout.
+func NewClient(horizonURL, network string, timeout time.Duration) Client {
+	if timeout <= 0 {
+		timeout = defaultHorizonTimeout
+	}
 	return &horizonClient{
-		inner:   &horizonclient.Client{HorizonURL: horizonURL},
+		inner: &horizonclient.Client{
+			HorizonURL: horizonURL,
+			HTTP:       &http.Client{Timeout: timeout},
+		},
 		network: network,
+		timeout: timeout,
 	}
 }
 
@@ -124,9 +144,14 @@ func (c *horizonClient) Offers(accountID string, limit uint) ([]horizon.Offer, e
 	return page.Embedded.Records, nil
 }
 
-func (c *horizonClient) FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+// FindPathsStrict runs a strict-receive path search. sourceAccount is the
+// account paying (the path's source_account), destAccount is the account
+// receiving destAsset. Both must be populated: the previous implementation
+// wrote the paying account into the destination slot.
+func (c *horizonClient) FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
 	req := horizonclient.PathsRequest{
-		DestinationAccount:     sourceAccount,
+		SourceAccount:          sourceAccount,
+		DestinationAccount:     destAccount,
 		DestinationAssetType:   horizonclient.AssetType4,
 		DestinationAssetCode:   destAsset,
 		DestinationAssetIssuer: destIssuer,
@@ -137,26 +162,4 @@ func (c *horizonClient) FindPathsStrict(sourceAccount, destAsset, destIssuer, de
 		return nil, fmt.Errorf("find paths: %w", err)
 	}
 	return paths.Embedded.Records, nil
-}
-
-func (c *horizonClient) PaymentsForAccount(accountID string, cursor string, limit int) ([]operations.Payment, error) {
-	req := horizonclient.OperationRequest{
-		ForAccount: accountID,
-		Limit:      uint(limit),
-		Order:      horizonclient.OrderAsc,
-	}
-	if cursor != "" {
-		req.Cursor = cursor
-	}
-	page, err := c.inner.Payments(req)
-	if err != nil {
-		return nil, fmt.Errorf("payments for account: %w", err)
-	}
-	var payments []operations.Payment
-	for _, r := range page.Embedded.Records {
-		if pay, ok := r.(operations.Payment); ok {
-			payments = append(payments, pay)
-		}
-	}
-	return payments, nil
 }

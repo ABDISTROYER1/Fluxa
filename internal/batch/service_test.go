@@ -300,3 +300,15 @@ func TestExportCSV_IncludesStatusTxHashAndReference(t *testing.T) {
 		t.Fatalf("row missing expected fields: %q", lines[1])
 	}
 }
+
+func (f *fakeTransferSvc) ForceSettleTransfer(_ context.Context, _, _ string) (*domain.Transaction, error) {
+	return &domain.Transaction{ID: "tx-1"}, nil
+}
+
+func (f *fakeTransferSvc) ReconcileWallet(_ context.Context, _, _ string) (*transfer.ReconcileResult, error) {
+	return &transfer.ReconcileResult{}, nil
+}
+
+func (f *fakeTransferSvc) WithAuditLogger(_ transfer.AuditLogger) transfer.Service {
+	return f
+}

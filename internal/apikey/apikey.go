@@ -3,6 +3,7 @@ package apikey
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"math/big"
 )
@@ -40,7 +41,7 @@ func Generate() (raw string, prefix string, err error) {
 	}
 	encoded := base58Encode(b)
 	raw = "sk_live_" + encoded
-	
+
 	// Prefix is first 8 chars for display
 	prefix = raw[:8]
 	return raw, prefix, nil
@@ -53,7 +54,8 @@ func Hash(raw string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Verify checks if the provided raw key matches the stored hash
+// Verify checks if the provided raw key matches the stored hash using constant-time comparison
 func Verify(raw, hashed string) bool {
-	return Hash(raw) == hashed
+	computed := Hash(raw)
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(hashed)) == 1
 }

@@ -19,7 +19,7 @@ type holdSkipRepo struct {
 	failed   []string
 }
 
-func (m *holdSkipRepo) GetStuckPendingTxes(_ context.Context, _ time.Duration) ([]*domain.Transaction, error) {
+func (m *holdSkipRepo) GetStuckPendingTxes(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return m.stuck, nil
 }
 

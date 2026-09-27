@@ -142,6 +142,10 @@ type mockRail struct {
 	webhookErr   error
 }
 
+func (m *mockRail) GetQuote(_ context.Context, _ QuoteRequest) (*FiatQuote, error) {
+	return &FiatQuote{}, nil
+}
+
 func (m *mockRail) Deposit(ctx context.Context, req DepositRequest) (*DepositResponse, error) {
 	return nil, nil
 }
@@ -173,7 +177,7 @@ func (m *mockFXService) GetQuote(ctx context.Context, fromAsset, toAsset, amount
 	return m.quote, nil
 }
 
-func (m *mockFXService) ExecuteConversion(ctx context.Context, walletID, quoteID string) (*domain.Conversion, error) {
+func (m *mockFXService) ExecuteConversion(ctx context.Context, walletID, quoteID string, minAmountOut *decimal.Decimal, maxSlippageBps *int) (*domain.Conversion, error) {
 	return nil, nil
 }
 
@@ -653,4 +657,16 @@ func TestHandleWebhook_Deposit_ConcurrentDelivery_OnlyCreditsOnce(t *testing.T) 
 	if repo.deposits["deposit-REF-1"].Status != domain.FiatStatusCompleted {
 		t.Errorf("expected deposit status completed, got %s", repo.deposits["deposit-REF-1"].Status)
 	}
+}
+
+func (m *mockTransferService) ForceSettleTransfer(_ context.Context, _, _ string) (*domain.Transaction, error) {
+	return &domain.Transaction{ID: "tx-1"}, nil
+}
+
+func (m *mockTransferService) ReconcileWallet(_ context.Context, _, _ string) (*transfer.ReconcileResult, error) {
+	return &transfer.ReconcileResult{}, nil
+}
+
+func (m *mockTransferService) WithAuditLogger(_ transfer.AuditLogger) transfer.Service {
+	return m
 }

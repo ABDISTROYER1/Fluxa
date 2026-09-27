@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,6 +78,9 @@ func (m *mockAuditRepo) MarkQuoteUsed(_ context.Context, _, _ string) error { re
 
 type mockFeeSvc struct{}
 
+func (m *mockFeeSvc) SetSchedule(_ context.Context, _ *domain.FeeSchedule) error {
+	return nil
+}
 func (m *mockFeeSvc) GetSchedule(_ context.Context, _ string) (*domain.FeeSchedule, error) {
 	return nil, nil
 }
@@ -87,7 +91,7 @@ func (m *mockFeeSvc) CalculateConversionFee(_ context.Context, _, _ string, _ de
 	return &fees.TransferFee{FeeAmount: decimal.Zero, NetAmount: decimal.NewFromInt(10), FeeBps: 0}, nil
 }
 func (m *mockFeeSvc) RecordCollection(_ context.Context, _ *domain.FeeCollection) error { return nil }
-func (m *mockFeeSvc) ListCollectedSummary(_ context.Context, _, _ *time.Time) ([]domain.FeeCollectionSummary, error) {
+func (m *mockFeeSvc) ListCollected(_ context.Context, _, _ *time.Time, _ *string, _, _ int) ([]*domain.FeeCollection, error) {
 	return nil, nil
 }
 
@@ -99,7 +103,7 @@ func (m *mockStellar) LoadAccount(_ string) (horizon.Account, error) {
 func (m *mockStellar) SubmitTransaction(_ *txnbuild.Transaction) (horizon.Transaction, error) {
 	return horizon.Transaction{}, nil
 }
-func (m *mockStellar) FindPathsStrict(_, _, _, _ string) ([]horizon.Path, error) {
+func (m *mockStellar) FindPathsStrict(_, _, _, _, _ string) ([]horizon.Path, error) {
 	return nil, nil
 }
 func (m *mockStellar) TransactionDetail(_ string) (horizon.Transaction, error) {
@@ -108,10 +112,6 @@ func (m *mockStellar) TransactionDetail(_ string) (horizon.Transaction, error) {
 func (m *mockStellar) OperationsForTransaction(_ string) ([]operations.Operation, error) {
 	return nil, nil
 }
-func (m *mockStellar) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
-	return nil, nil
-}
-
 func (m *mockStellar) Payments(_, _ string, _ uint) ([]operations.Operation, error) {
 	return nil, nil
 }
@@ -292,7 +292,7 @@ func TestExecuteConversion_Success(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	conv, err := svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-ok-1")
+	conv, err := svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-ok-1", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestExecuteConversion_WalletNotFound(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	svc := NewService(newMockWalletRepo(), newMockConvRepo(), &mockAuditRepo{}, &mockFeeSvc{}, &mockStellar{}, rdb, "usdc-issuer", nil, 0)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-missing", "q-1")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-missing", "q-1", nil, nil)
 	if !errors.Is(err, domain.ErrWalletNotFound) {
 		t.Errorf("expected ErrWalletNotFound, got %v", err)
 	}
@@ -353,7 +353,7 @@ func TestExecuteConversion_CrossTenant(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-2"), "w-2", "q-foreign")
+	_, err = svc.ExecuteConversion(tenantCtx("org-2"), "w-2", "q-foreign", nil, nil)
 	if !errors.Is(err, domain.ErrQuoteOwnershipMismatch) {
 		t.Errorf("expected ErrQuoteOwnershipMismatch, got %v", err)
 	}
@@ -384,7 +384,7 @@ func TestExecuteConversion_QuoteExpired(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-expired")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-expired", nil, nil)
 	if !errors.Is(err, domain.ErrQuoteExpired) {
 		t.Errorf("expected ErrQuoteExpired, got %v", err)
 	}
@@ -415,7 +415,7 @@ func TestExecuteConversion_QuoteAlreadyUsed(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-used")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-used", nil, nil)
 	if !errors.Is(err, domain.ErrQuoteAlreadyUsed) {
 		t.Errorf("expected ErrQuoteAlreadyUsed, got %v", err)
 	}
@@ -446,7 +446,7 @@ func TestExecuteConversion_NonPositiveAmountInQuote(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-neg")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-neg", nil, nil)
 	if !errors.Is(err, domain.ErrInvalidQuoteAmount) {
 		t.Errorf("expected ErrInvalidQuoteAmount, got %v", err)
 	}
@@ -477,7 +477,7 @@ func TestExecuteConversion_NonPositiveToAmountInQuote(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-neg-to")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-neg-to", nil, nil)
 	if !errors.Is(err, domain.ErrInvalidQuoteAmount) {
 		t.Errorf("expected ErrInvalidQuoteAmount, got %v", err)
 	}
@@ -508,7 +508,7 @@ func TestExecuteConversion_ZeroFromAmountInQuote(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-zero")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-zero", nil, nil)
 	if !errors.Is(err, domain.ErrInvalidQuoteAmount) {
 		t.Errorf("expected ErrInvalidQuoteAmount, got %v", err)
 	}
@@ -540,7 +540,7 @@ func TestExecuteConversion_WalletNilTenantID(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-nil", "q-nil-tenant")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-nil", "q-nil-tenant", nil, nil)
 	if !errors.Is(err, domain.ErrQuoteOwnershipMismatch) {
 		t.Errorf("expected ErrQuoteOwnershipMismatch for nil TenantID, got %v", err)
 	}
@@ -613,7 +613,7 @@ func TestExecuteConversion_QuoteNotFoundInRedis(t *testing.T) {
 	svc := NewService(newMockWalletRepo(w), newMockConvRepo(), &mockAuditRepo{}, &mockFeeSvc{}, &mockStellar{}, rdb, "usdc-issuer", nil, 0)
 
 	// Don't store any quote — the Lua script should return QUOTE_EXPIRED
-	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-missing")
+	_, err = svc.ExecuteConversion(tenantCtx("org-1"), "w-1", "q-missing", nil, nil)
 	if !errors.Is(err, domain.ErrQuoteExpired) {
 		t.Errorf("expected ErrQuoteExpired for missing quote, got %v", err)
 	}
@@ -632,17 +632,24 @@ func TestGetRates_Success(t *testing.T) {
 
 	svc := setupService(t, mr)
 
-	// Since mockProvider returns rate=2.0 for everything, and supports USDC-XLM
+	// mockProvider returns a mid-market rate of 2.0 for everything, and
+	// setupService configures a 100 bps spread, so the published Rate is the
+	// mid-market rate plus spread while MidMarketRate stays at 2.0.
 	rates, err := svc.GetRates(context.Background(), "USDC", "XLM")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
-	if rates.Rate.Cmp(decimal.NewFromInt(2)) != 0 {
-		t.Errorf("expected rate 2, got %v", rates.Rate)
+
+	if rates.MidMarketRate.Cmp(decimal.NewFromInt(2)) != 0 {
+		t.Errorf("expected mid-market rate 2, got %v", rates.MidMarketRate)
+	}
+	if want := decimal.RequireFromString("2.02"); rates.Rate.Cmp(want) != 0 {
+		t.Errorf("expected spread-adjusted rate %s, got %v", want, rates.Rate)
+	}
+	if rates.SpreadBps != 100 {
+		t.Errorf("expected spread_bps 100, got %d", rates.SpreadBps)
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // Native XLM (issue #135) conversion flows
@@ -811,11 +818,130 @@ func TestExecuteConversion_XLMPair(t *testing.T) {
 	}
 	storeQuoteJSON(t, mr, q)
 
-	conv, err := svc.ExecuteConversion(tenantCtx("org-1"), "w-xlm", "q-xlm-1")
+	conv, err := svc.ExecuteConversion(tenantCtx("org-1"), "w-xlm", "q-xlm-1", nil, nil)
 	if err != nil {
 		t.Fatalf("ExecuteConversion: %v", err)
 	}
 	if conv.SourceAsset != "XLM" || conv.DestAsset != "USDC" {
 		t.Fatalf("unexpected assets %s->%s", conv.SourceAsset, conv.DestAsset)
+	}
+}
+
+// TestExecuteConversion_ForeignQuoteLeavesVictimQuoteIntact is the regression
+// test for the bug where the quote was marked used before ownership was
+// checked: a caller with someone else's quote_id could burn it. The foreign
+// attempt must neither consume nor mutate the victim's quote, and the real
+// owner must still be able to convert with it afterwards.
+func TestExecuteConversion_ForeignQuoteLeavesVictimQuoteIntact(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+
+	owner := walletPtr("w-owner", "org-owner")
+	attacker := walletPtr("w-attacker", "org-attacker")
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	svc := NewService(newMockWalletRepo(owner, attacker), newMockConvRepo(), &mockAuditRepo{}, &mockFeeSvc{}, &mockStellar{}, rdb, "usdc-issuer", nil, 0)
+
+	q := &Quote{
+		ID:         "q-victim",
+		OrgID:      "org-owner",
+		FromAsset:  "USDC",
+		ToAsset:    "XLM",
+		FromAmount: decimal.NewFromInt(10),
+		ToAmount:   decimal.NewFromInt(20),
+		Rate:       decimal.NewFromInt(2),
+		Fee:        decimal.Zero,
+		ExpiresAt:  time.Now().UTC().Add(30 * time.Second),
+		Used:       false,
+	}
+	storeQuoteJSON(t, mr, q)
+
+	// The attacker guesses the quote id and tries to spend it.
+	_, err = svc.ExecuteConversion(tenantCtx("org-attacker"), "w-attacker", "q-victim", nil, nil)
+	if !errors.Is(err, domain.ErrQuoteOwnershipMismatch) {
+		t.Fatalf("expected ErrQuoteOwnershipMismatch, got %v", err)
+	}
+
+	// The quote must still exist and must not be marked used.
+	raw, getErr := rdb.Get(context.Background(), quoteKeyPrefix+"q-victim").Result()
+	if getErr != nil {
+		t.Fatalf("victim quote was destroyed by the foreign attempt: %v", getErr)
+	}
+	var stored Quote
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		t.Fatalf("unmarshal stored quote: %v", err)
+	}
+	if stored.Used {
+		t.Fatal("victim quote was marked used by a foreign caller")
+	}
+
+	// The legitimate owner can still convert with it.
+	if _, err := svc.ExecuteConversion(tenantCtx("org-owner"), "w-owner", "q-victim", nil, nil); err != nil {
+		t.Fatalf("owner could not use their own quote after a foreign attempt: %v", err)
+	}
+}
+
+// TestExecuteConversion_ConcurrentDoubleClaimOnlyOneWins verifies the claim is
+// a single atomic operation: two concurrent conversions by the real owner of
+// the same quote must produce exactly one success and one
+// ErrQuoteAlreadyUsed, never two conversions.
+func TestExecuteConversion_ConcurrentDoubleClaimOnlyOneWins(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+
+	owner := walletPtr("w-owner", "org-owner")
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	svc := NewService(newMockWalletRepo(owner), newMockConvRepo(), &mockAuditRepo{}, &mockFeeSvc{}, &mockStellar{}, rdb, "usdc-issuer", nil, 0)
+
+	q := &Quote{
+		ID:         "q-race",
+		OrgID:      "org-owner",
+		FromAsset:  "USDC",
+		ToAsset:    "XLM",
+		FromAmount: decimal.NewFromInt(10),
+		ToAmount:   decimal.NewFromInt(20),
+		Rate:       decimal.NewFromInt(2),
+		Fee:        decimal.Zero,
+		ExpiresAt:  time.Now().UTC().Add(30 * time.Second),
+		Used:       false,
+	}
+	storeQuoteJSON(t, mr, q)
+
+	const attempts = 8
+	errs := make([]error, attempts)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			_, errs[idx] = svc.ExecuteConversion(tenantCtx("org-owner"), "w-owner", "q-race", nil, nil)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	successes, alreadyUsed := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, domain.ErrQuoteAlreadyUsed):
+			alreadyUsed++
+		default:
+			t.Fatalf("unexpected error from concurrent claim: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("expected exactly 1 successful claim, got %d", successes)
+	}
+	if alreadyUsed != attempts-1 {
+		t.Fatalf("expected %d already-used errors, got %d", attempts-1, alreadyUsed)
 	}
 }

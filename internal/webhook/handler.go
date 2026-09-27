@@ -6,16 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/fluxa/fluxa/internal/api"
-	"github.com/fluxa/fluxa/internal/domain"
-	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -166,5 +161,14 @@ func sign(secret, timestamp string, body []byte) string {
 	signedPayload := timestamp + "." + string(body)
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(signedPayload))
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+// signBody signs a payload with the tenant webhook secret. The timestamped
+// variant above is the developer-facing endpoint signature contract; tenant
+// config deliveries authenticate the body directly.
+func signBody(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }

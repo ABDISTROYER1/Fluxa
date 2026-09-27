@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/fluxa/fluxa/docs"
 )
@@ -73,51 +74,17 @@ func serveRoot(w http.ResponseWriter, r *http.Request) {
 	ServeRoot(w, r)
 }
 
-// findOpenAPISpec searches for the openapi.yaml spec file across common locations
-// relative to the working directory, environment variables, and executable path.
+// findOpenAPISpec returns the OpenAPI document served at /docs/openapi.yaml.
+// The canonical document is embedded in the binary (see package docs) so the
+// bytes served match what tools/openapicheck validated in CI regardless of the
+// process working directory. OPENAPI_SPEC_PATH overrides the embedded document
+// for local experimentation; an override that cannot be read is an error rather
+// than a silent fallback, so a misconfigured path is visible.
 func findOpenAPISpec() ([]byte, error) {
-	// 1. Explicit path from environment variable
 	if envPath := os.Getenv("OPENAPI_SPEC_PATH"); envPath != "" {
-		if data, err := os.ReadFile(envPath); err == nil {
-			return data, nil
-		}
+		return os.ReadFile(envPath)
 	}
-	if docsDir := os.Getenv("DOCS_PATH"); docsDir != "" {
-		candidate := filepath.Join(docsDir, "openapi.yaml")
-		if data, err := os.ReadFile(candidate); err == nil {
-			return data, nil
-		}
-	}
-
-	// 2. Relative paths from current working directory
-	candidates := []string{
-		filepath.Join("docs", "openapi.yaml"),
-		filepath.Join("..", "docs", "openapi.yaml"),
-		filepath.Join("..", "..", "docs", "openapi.yaml"),
-		filepath.Join("..", "..", "..", "docs", "openapi.yaml"),
-	}
-	for _, p := range candidates {
-		if data, err := os.ReadFile(p); err == nil {
-			return data, nil
-		}
-	}
-
-	// 3. Relative to running executable
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		exeCandidates := []string{
-			filepath.Join(exeDir, "docs", "openapi.yaml"),
-			filepath.Join(exeDir, "..", "docs", "openapi.yaml"),
-			filepath.Join(exeDir, "..", "..", "docs", "openapi.yaml"),
-		}
-		for _, p := range exeCandidates {
-			if data, err := os.ReadFile(p); err == nil {
-				return data, nil
-			}
-		}
-	}
-
-	return nil, os.ErrNotExist
+	return docs.OpenAPIYAML, nil
 }
 
 const swaggerHTML = `<!DOCTYPE html>

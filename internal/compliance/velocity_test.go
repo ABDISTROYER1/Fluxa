@@ -93,7 +93,7 @@ func TestStructuringRule(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &velocityMockRepo{destCount: tc.priorCount, destSum: dec(tc.priorSum)}
-			v := NewVelocityScreener(repo, VelocityConfig{})
+			v := NewVelocityScreener(repo, VelocityConfig{PlatformWalletID: "platform-wallet"})
 
 			req := baseRequest()
 			req.Amount = dec(tc.amount)
@@ -124,7 +124,7 @@ func TestVelocityScreenerNeverBlocks(t *testing.T) {
 		destSum:   dec("2998"),
 		inbound:   true,
 	}
-	v := NewVelocityScreener(repo, VelocityConfig{})
+	v := NewVelocityScreener(repo, VelocityConfig{PlatformWalletID: "platform-wallet"})
 
 	req := baseRequest()
 	req.Amount = dec("2")
@@ -154,7 +154,7 @@ func TestVelocityBurstRule(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &velocityMockRepo{orgCount: tc.priors}
-			v := NewVelocityScreener(repo, VelocityConfig{MaxTransfers: tc.max})
+			v := NewVelocityScreener(repo, VelocityConfig{MaxTransfers: tc.max, PlatformWalletID: "platform-wallet"})
 
 			got, err := v.Screen(context.Background(), baseRequest())
 			if err != nil {
@@ -169,7 +169,7 @@ func TestVelocityBurstRule(t *testing.T) {
 
 func TestRoundTripRule(t *testing.T) {
 	repo := &velocityMockRepo{inbound: true}
-	v := NewVelocityScreener(repo, VelocityConfig{})
+	v := NewVelocityScreener(repo, VelocityConfig{PlatformWalletID: "platform-wallet"})
 
 	got, err := v.Screen(context.Background(), baseRequest())
 	if err != nil {
@@ -185,7 +185,7 @@ func TestRoundTripRule(t *testing.T) {
 
 func TestRoundTripDoesNotFireWithoutInboundHistory(t *testing.T) {
 	repo := &velocityMockRepo{inbound: false}
-	v := NewVelocityScreener(repo, VelocityConfig{})
+	v := NewVelocityScreener(repo, VelocityConfig{PlatformWalletID: "platform-wallet"})
 
 	got, err := v.Screen(context.Background(), baseRequest())
 	if err != nil {
@@ -242,7 +242,7 @@ func TestVelocityScreenerPropagatesRepositoryErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			v := NewVelocityScreener(tc.repo, VelocityConfig{})
+			v := NewVelocityScreener(tc.repo, VelocityConfig{PlatformWalletID: "platform-wallet"})
 			got, err := v.Screen(context.Background(), baseRequest())
 			if !errors.Is(err, sentinel) {
 				t.Fatalf("err = %v, want it to wrap %v", err, sentinel)
@@ -255,7 +255,7 @@ func TestVelocityScreenerPropagatesRepositoryErrors(t *testing.T) {
 }
 
 func TestVelocityConfigDefaults(t *testing.T) {
-	v := NewVelocityScreener(&velocityMockRepo{}, VelocityConfig{})
+	v := NewVelocityScreener(&velocityMockRepo{}, VelocityConfig{PlatformWalletID: "platform-wallet"})
 
 	if v.cfg.MaxTransfers != 10 {
 		t.Fatalf("MaxTransfers = %d, want 10", v.cfg.MaxTransfers)
@@ -281,7 +281,7 @@ func TestVelocityConfigDefaults(t *testing.T) {
 // must hold at a different unit too.
 func TestStructuringUnitIsConfigurable(t *testing.T) {
 	repo := &velocityMockRepo{destCount: 2, destSum: dec("9900")}
-	v := NewVelocityScreener(repo, VelocityConfig{StructuringUnit: decimal.NewFromInt(5000)})
+	v := NewVelocityScreener(repo, VelocityConfig{StructuringUnit: decimal.NewFromInt(5000), PlatformWalletID: "platform-wallet"})
 
 	req := baseRequest()
 	req.Amount = dec("50") // total 9950, next multiple of 5000 is 10000 -> 0.5% below

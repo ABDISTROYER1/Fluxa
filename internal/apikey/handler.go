@@ -21,14 +21,6 @@ func NewHandler(repo *postgres.APIKeyRepo) *Handler {
 	return &Handler{repo: repo}
 }
 
-func (h *Handler) Routes() func(r chi.Router) {
-	return func(r chi.Router) {
-		r.Post("/", h.Create)
-		r.Get("/", h.List)
-		r.Delete("/{id}", h.Revoke)
-	}
-}
-
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	tenantID := tenant.IDFromContext(r.Context())
 	if tenantID == "" {
@@ -38,8 +30,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Label *string `json:"label"`
+		Role  string  `json:"role"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if req.Role == "" {
+		req.Role = domain.RoleDeveloper
+	}
+	if req.Role != domain.RoleOwner && req.Role != domain.RoleAdmin && req.Role != domain.RoleDeveloper && req.Role != domain.RoleViewer {
+		http.Error(w, `{"error":{"code":"INVALID_REQUEST","message":"invalid role"}}`, http.StatusBadRequest)
+		return
+	}
 
 	raw, prefix, err := Generate()
 	if err != nil {
@@ -54,6 +55,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		KeyHash:   Hash(raw),
 		Prefix:    prefix,
 		Label:     req.Label,
+		Role:      req.Role,
 		CreatedAt: time.Now(),
 	}
 
@@ -69,6 +71,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		"key":        raw, // raw key exactly once
 		"prefix":     key.Prefix,
 		"label":      key.Label,
+		"role":       key.Role,
 		"created_at": key.CreatedAt,
 	})
 }
@@ -93,6 +96,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			"id":           k.ID,
 			"prefix":       k.Prefix,
 			"label":        k.Label,
+			"role":         k.Role,
 			"last_used_at": k.LastUsedAt,
 			"revoked_at":   k.RevokedAt,
 			"created_at":   k.CreatedAt,

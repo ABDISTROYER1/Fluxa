@@ -133,7 +133,7 @@ func main() {
 		TTL: time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 	})
 
-	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork)
+	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork, cfg.StellarHorizonTimeout)
 	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarNetwork)
 
 	asynqOpt, err := queue.AsynqRedisOptions(cfg.RedisURL, cfg.RedisSentinelMasterName, cfg.RedisSentinelAddrs, cfg.RedisSentinelPassword)
@@ -146,8 +146,8 @@ func main() {
 	jwtSecretBytes := []byte(cfg.JWTSecret)
 
 	refreshTokenRepo := postgres.NewRefreshTokenRepo(repoDB)
-	authSvc := auth.NewService(userRepo, tenantRepo, orgRepo, refreshTokenRepo, jwtSecretBytes)
-	orgSvc := org.NewService(orgRepo, userRepo, tenantRepo, jwtSecretBytes)
+	authSvc := auth.NewService(repoDB, userRepo, tenantRepo, orgRepo, apiKeyRepo, webhookRepo, refreshTokenRepo, jwtSecretBytes)
+	orgSvc := org.NewService(repoDB, orgRepo, userRepo, tenantRepo, jwtSecretBytes)
 
 	feeSvc := fees.NewService(feeRepo)
 	walletSvc := wallet.NewService(walletRepo, stellarClient, cfg.MasterEncryptionKey, tenantRepo).
@@ -178,15 +178,20 @@ func main() {
 			log.Fatal().Err(err).Msg("parse COMPLIANCE_STRUCTURING_UNIT")
 		}
 
+		velocityScreener := compliance.NewVelocityScreener(complianceRepo, compliance.VelocityConfig{
+			Window:           time.Duration(cfg.ComplianceVelocityWindowMin) * time.Minute,
+			MaxTransfers:     cfg.ComplianceVelocityMax,
+			StructuringUnit:  structuringUnit,
+			RoundTripWindow:  time.Duration(cfg.ComplianceRoundTripMin) * time.Minute,
+			PlatformWalletID: cfg.PlatformWalletID,
+		})
+		if err := velocityScreener.Validate(); err != nil {
+			log.Fatal().Err(err).Msg("velocity screener misconfigured")
+		}
+
 		screener := compliance.NewCompositeScreener(
 			compliance.NewSanctionsScreener(sanctionsSet, cfg.ComplianceFuzzyThreshold),
-			compliance.NewVelocityScreener(complianceRepo, compliance.VelocityConfig{
-				Window:           time.Duration(cfg.ComplianceVelocityWindowMin) * time.Minute,
-				MaxTransfers:     cfg.ComplianceVelocityMax,
-				StructuringUnit:  structuringUnit,
-				RoundTripWindow:  time.Duration(cfg.ComplianceRoundTripMin) * time.Minute,
-				PlatformWalletID: cfg.PlatformWalletID,
-			}),
+			velocityScreener,
 		)
 
 		complianceSvc := compliance.NewService(complianceRepo, screener, sanctionsSet, txRepo, queueClient, webhookSvc)
@@ -231,6 +236,7 @@ func main() {
 		treasuryRepo, stellarClient, fxSvc, webhookSvc,
 		cfg.PlatformFeeWalletPublicKey, cfg.StellarNetwork, cfg.TreasurySecretKey,
 		cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer,
+		treasury.OptionsFromConfig(cfg.TreasuryBaseReserve, cfg.TreasuryReserveCacheTTLSec, cfg.TreasuryReserveConcurrency)...,
 	)
 
 	engine := settlement.NewEngine(
@@ -244,15 +250,6 @@ func main() {
 
 	idx := indexer.New(walletRepo, txRepo, stellarClient)
 	indexerWorker := indexer.NewWorker(idx)
-
-	// Live Horizon SSE stream keeps local state in sync in near real time.
-	// processPayment is idempotent (guarded by ExistsByTxHash), so running
-	// this alongside cmd/worker's own stream is safe, just extra capacity.
-	go func() {
-		if err := idx.StreamAll(ctx, 1000, 0); err != nil {
-			log.Error().Err(err).Msg("indexer: stream all wallets failed")
-		}
-	}()
 
 	asynqSrv := asynq.NewServer(asynqOpt, asynq.Config{
 		Concurrency: 5,
@@ -337,7 +334,7 @@ func main() {
 	claimableSvc := claimable.NewService(
 		postgres.NewClaimableBalanceRepo(repoDB),
 		stellarClient,
-		stellar.NewClaimableBalanceClient(cfg.StellarHorizonURL),
+		stellar.NewClaimableBalanceClientWithTimeout(cfg.StellarHorizonURL, cfg.StellarHorizonTimeout),
 		signer,
 		postgres.NewClaimableWalletResolver(walletRepo),
 		webhookSvc,
@@ -348,6 +345,7 @@ func main() {
 		},
 	)
 	claimableHandler := claimable.NewHandler(claimableSvc).
+		WithIdempotency(idemMW).
 		WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 
 	srv := server.New(
@@ -373,6 +371,7 @@ func main() {
 		orgRepo,
 		cfg.CORSAllowedOrigins,
 	)
+	server.RegisterDocsRoutes(srv.Router())
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -387,7 +386,7 @@ func main() {
 	<-quit
 	log.Info().Msg("shutting down")
 
-	cancel() // stop the indexer's live payment stream
+	cancel() // stop any background processes
 
 	asynqSrv.Shutdown()
 

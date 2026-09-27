@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -209,4 +210,96 @@ func TestHandleRunSchedules_MarksCompletedOncePastEndAt(t *testing.T) {
 	if repo.schedules[sch.ID].Status != domain.ScheduleStatusCompleted {
 		t.Fatalf("status = %s, want %s", repo.schedules[sch.ID].Status, domain.ScheduleStatusCompleted)
 	}
+}
+
+type failingTransferSvc struct {
+	fakeTransferSvc
+}
+
+func (f *failingTransferSvc) InitiateTransferIdempotent(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, idempotencyKey string) (*domain.Transaction, error) {
+	return nil, errors.New("insufficient balance")
+}
+
+func TestRunOne_EndToEndSuccess(t *testing.T) {
+	repo := newFakeRunRepo()
+	sch := &domain.Schedule{
+		ID:         "sched-succ",
+		FromWallet: "from-1",
+		ToWallet:   "to-1",
+		Asset:      "XLM",
+		Amount:     decimal.NewFromInt(10),
+		Frequency:  domain.FrequencyDaily,
+		NextRunAt:  time.Now().UTC().Add(-time.Minute),
+		Status:     domain.ScheduleStatusActive,
+	}
+	repo.schedules[sch.ID] = sch
+
+	transferSvc := &fakeTransferSvc{}
+	worker := NewWorker(repo, transferSvc)
+
+	worker.runOne(context.Background(), sch)
+
+	run, err := repo.GetRun(context.Background(), sch.ID, sch.NextRunAt)
+	if err != nil {
+		t.Fatalf("GetRun() error: %v", err)
+	}
+	if run.Status != domain.ScheduleRunStatusSucceeded {
+		_ = domain.ScheduleRunStatusSucceeded
+		t.Fatalf("run status = %s, want succeeded", run.Status)
+	}
+	if run.TransactionID == nil || *run.TransactionID != "tx-1" {
+		t.Fatalf("transaction_id not recorded properly")
+	}
+}
+
+func TestRunOne_EndToEndFailure(t *testing.T) {
+	repo := newFakeRunRepo()
+	sch := &domain.Schedule{
+		ID:         "sched-fail",
+		FromWallet: "from-1",
+		ToWallet:   "to-1",
+		Asset:      "XLM",
+		Amount:     decimal.NewFromInt(10),
+		Frequency:  domain.FrequencyDaily,
+		NextRunAt:  time.Now().UTC().Add(-time.Minute),
+		Status:     domain.ScheduleStatusActive,
+	}
+	repo.schedules[sch.ID] = sch
+
+	transferSvc := &failingTransferSvc{}
+	worker := NewWorker(repo, transferSvc)
+
+	worker.runOne(context.Background(), sch)
+
+	run, err := repo.GetRun(context.Background(), sch.ID, sch.NextRunAt)
+	if err != nil {
+		t.Fatalf("GetRun() error: %v", err)
+	}
+	if run.Status != domain.ScheduleRunStatusFailed {
+		t.Fatalf("run status = %s, want failed", run.Status)
+	}
+	if run.Error == nil {
+		t.Fatalf("run error field should be populated")
+	}
+
+	updatedSch, err := repo.GetByID(context.Background(), sch.ID)
+	if err != nil {
+		accessErr := err
+		_ = accessErr
+	}
+	if updatedSch.Status != domain.ScheduleStatusFailed {
+		t.Fatalf("schedule status = %s, want failed", updatedSch.Status)
+	}
+}
+
+func (f *fakeTransferSvc) ForceSettleTransfer(_ context.Context, _, _ string) (*domain.Transaction, error) {
+	return &domain.Transaction{ID: "tx-1"}, nil
+}
+
+func (f *fakeTransferSvc) ReconcileWallet(_ context.Context, _, _ string) (*transfer.ReconcileResult, error) {
+	return &transfer.ReconcileResult{}, nil
+}
+
+func (f *fakeTransferSvc) WithAuditLogger(_ transfer.AuditLogger) transfer.Service {
+	return f
 }

@@ -594,19 +594,6 @@ paths:
       summary: "Initiate a transfer"
       description: "Moves an asset between two wallets, applying platform fees."
       tags: ["Transfers"]
-      parameters:
-        - name: X-Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate transfers on retries"
-        - name: Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate transfers on retries"
       requestBody:
         required: true
         content:
@@ -619,6 +606,12 @@ paths:
               asset: "USDC"
               amount: "100.0000000"
       parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+          description: "Optional idempotency key to prevent duplicate transfers on retries"
         - name: "Idempotency-Key"
           in: header
           required: true
@@ -845,6 +838,42 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
+
+  # ── Fiat ──────────────────────────────────────────────────────────────────
+  /v1/fiat/quote:
+    post:
+      operationId: previewFiat
+      summary: "Preview a fiat deposit or withdrawal"
+      description: "Get a read-only quote before creating a fiat deposit or withdrawal."
+      tags: ["Wallets"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [side, amount, currency, country]
+              properties:
+                side:
+                  type: string
+                  enum: [deposit, withdraw]
+                amount:
+                  type: string
+                currency:
+                  type: string
+                country:
+                  type: string
+      responses:
+        "200":
+          description: "Preview quote"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatQuotePreviewResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ── FX ────────────────────────────────────────────────────────────────────
   /v1/fx/quote:
@@ -1456,6 +1485,48 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   # ── Fees ──────────────────────────────────────────────────────────────────
+  /v1/fees/preview:
+    post:
+      operationId: previewFee
+      summary: "Preview fees"
+      description: "Preview the calculated fees for a transfer or conversion."
+      tags: ["Fees"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, asset, amount]
+              properties:
+                type:
+                  type: string
+                  enum: [transfer, conversion]
+                asset:
+                  type: string
+                amount:
+                  type: string
+      responses:
+        "200":
+          description: "Fee preview"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gross_amount:
+                    type: string
+                  fee_amount:
+                    type: string
+                  net_amount:
+                    type: string
+                  fee_bps:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /v1/fees:
     get:
       operationId: getFeeSchedule
@@ -1506,10 +1577,10 @@ paths:
       summary: "List collected fees"
       description: |
         Returns fee collection totals grouped by asset and tenant.
-        Requires an admin API key (`sk_admin_` prefix).
+        Requires an admin role (Owner or Admin).
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: start_date
           in: query
@@ -1525,25 +1596,53 @@ paths:
             type: string
             format: date-time
           description: "End of period (RFC3339)"
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: "Filter by tenant"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: "Fee collection summary"
+          description: "Paginated fee collections"
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  summary:
+                  data:
                     type: array
                     items:
-                      $ref: "#/components/schemas/FeeCollectionSummary"
-              example:
-                summary:
-                  - asset: "USDC"
-                    total_fees: "1250.5000000"
-                    tenant_fees:
-                      - tenant_id: "t_8f3a2b1c"
-                        total_fees: "1250.5000000"
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        transaction_id:
+                          type: string
+                        tenant_id:
+                          type: string
+                        asset:
+                          type: string
+                        fee_amount:
+                          type: string
+                        fee_bps:
+                          type: integer
+                        collected_at:
+                          type: string
+                          format: date-time
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1560,7 +1659,7 @@ paths:
         and the count of pending stuck transactions. Requires an admin API key.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: days
           in: query
@@ -1608,7 +1707,7 @@ paths:
         against the Stellar Horizon API. Requires an admin API key.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       responses:
         "202":
           description: "Reconciliation run started"
@@ -1639,7 +1738,7 @@ paths:
         enqueued for settlement until it is approved.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: status
           in: query
@@ -1688,7 +1787,7 @@ paths:
       summary: "Get a compliance review"
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -1726,7 +1825,7 @@ paths:
         releasing the same payment twice.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -1779,7 +1878,7 @@ paths:
         never enqueued for settlement.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -1832,7 +1931,7 @@ paths:
         every transfer is being held for review.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       responses:
         "200":
           description: "Sanctions list status"
@@ -1871,13 +1970,6 @@ components:
       description: |
         Pass a tenant API key (`sk_live_...` or `sk_test_...`) or JWT bearer token.
         In Swagger UI, enter your token in the Authorize dialog (the 'Bearer ' prefix is added automatically).
-    AdminAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: token
-      description: |
-        Pass an admin API key (`sk_admin_...`).
-        In Swagger UI, enter your admin key in the Authorize dialog (the 'Bearer ' prefix is added automatically).
     ApiKeyAuth:
       type: apiKey
       in: header
@@ -2307,6 +2399,29 @@ components:
           enum: ["submitted"]
 
     # ── Fiat ──────────────────────────────────────────────────────────────
+    FiatQuotePreviewResponse:
+      type: object
+      properties:
+        provider:
+          type: string
+        fiat_amount:
+          type: string
+        fiat_currency:
+          type: string
+        usdc_amount:
+          type: string
+        rate:
+          type: string
+        fee:
+          type: string
+        min_limit:
+          type: string
+        max_limit:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
     FiatDepositRequest:
       type: object
       required: ["amount", "currency", "email", "name"]
@@ -2583,6 +2698,12 @@ components:
         quote_id:
           type: string
           format: uuid
+        min_amount_out:
+          type: string
+          description: "Optional minimum acceptable output amount"
+        max_slippage_bps:
+          type: integer
+          description: "Optional maximum acceptable slippage in basis points"
 
     ConversionResponse:
       type: object

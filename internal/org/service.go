@@ -36,6 +36,7 @@ type Service interface {
 }
 
 type service struct {
+	db         postgres.DB
 	orgRepo    *postgres.OrgRepo
 	userRepo   *postgres.UserRepo
 	tenantRepo *postgres.TenantRepo
@@ -43,12 +44,14 @@ type service struct {
 }
 
 func NewService(
+	db postgres.DB,
 	orgRepo *postgres.OrgRepo,
 	userRepo *postgres.UserRepo,
 	tenantRepo *postgres.TenantRepo,
 	jwtSecret []byte,
 ) Service {
 	return &service{
+		db:         db,
 		orgRepo:    orgRepo,
 		userRepo:   userRepo,
 		tenantRepo: tenantRepo,
@@ -122,7 +125,10 @@ func (s *service) AcceptInvite(ctx context.Context, req AcceptInviteRequest) (*a
 	existingUser, err := s.userRepo.GetByEmail(ctx, inv.Email)
 	if err == nil && existingUser != nil {
 		user = existingUser
-	} else {
+	}
+	var isNewUser bool
+	if user == nil {
+		isNewUser = true
 		if req.Name == "" || req.Password == "" {
 			return nil, errors.New("name and password are required to register new user from invite")
 		}
@@ -141,10 +147,6 @@ func (s *service) AcceptInvite(ctx context.Context, req AcceptInviteRequest) (*a
 			Name:         req.Name,
 			CreatedAt:    now,
 		}
-
-		if err := s.userRepo.Create(ctx, user); err != nil {
-			return nil, fmt.Errorf("create user: %w", err)
-		}
 	}
 
 	member := &domain.OrgMember{
@@ -156,11 +158,25 @@ func (s *service) AcceptInvite(ctx context.Context, req AcceptInviteRequest) (*a
 		CreatedAt: time.Now().UTC(),
 	}
 
-	if err := s.orgRepo.AddMember(ctx, member); err != nil {
-		return nil, fmt.Errorf("add org member: %w", err)
-	}
+	if err := postgres.RunInTx(ctx, s.db, func(txCtx context.Context) error {
+		if isNewUser {
+			if err := s.userRepo.Create(txCtx, user); err != nil {
+				return fmt.Errorf("create user: %w", err)
+			}
+		}
 
-	_ = s.orgRepo.UpdateInviteStatus(ctx, inv.ID, "accepted")
+		if err := s.orgRepo.AddMember(txCtx, member); err != nil {
+			return fmt.Errorf("add org member: %w", err)
+		}
+
+		if err := s.orgRepo.UpdateInviteStatus(txCtx, inv.ID, "accepted"); err != nil {
+			return fmt.Errorf("update invite status: %w", err)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	t, err := s.tenantRepo.GetByID(ctx, inv.TenantID)
 	if err != nil {
