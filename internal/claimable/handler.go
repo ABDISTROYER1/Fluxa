@@ -10,11 +10,13 @@ import (
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
+	"github.com/stellar/go/keypair"
 )
 
 type Handler struct {
 	svc   Service
 	guard func(http.Handler) http.Handler
+	idem  func(http.Handler) http.Handler
 }
 
 func NewHandler(svc Service) *Handler {
@@ -31,6 +33,14 @@ func (h *Handler) WithMutationGate(mw func(http.Handler) http.Handler) *Handler 
 	return h
 }
 
+// WithIdempotency attaches the idempotency-key middleware to the mutating
+// routes so a retried create or claim replays the original response instead
+// of moving funds twice.
+func (h *Handler) WithIdempotency(mw func(http.Handler) http.Handler) *Handler {
+	h.idem = mw
+	return h
+}
+
 // Routes is mounted at /v1/claimable-balances.
 func (h *Handler) Routes() func(r chi.Router) {
 	return func(r chi.Router) {
@@ -38,16 +48,16 @@ func (h *Handler) Routes() func(r chi.Router) {
 		r.Get("/{id}", h.get)
 
 		post := r.Post
-		if h.guard != nil {
+		switch {
+		case h.guard != nil && h.idem != nil:
+			post = r.With(h.guard, h.idem).Post
+		case h.guard != nil:
 			post = r.With(h.guard).Post
+		case h.idem != nil:
+			post = r.With(h.idem).Post
 		}
-		idemMW := server.OptionalIdempotencyMiddleware()
-		post("/", func(w http.ResponseWriter, r *http.Request) {
-			idemMW(http.HandlerFunc(h.create)).ServeHTTP(w, r)
-		})
-		post("/{id}/claim", func(w http.ResponseWriter, r *http.Request) {
-			idemMW(http.HandlerFunc(h.claim)).ServeHTTP(w, r)
-		})
+		post("/", h.create)
+		post("/{id}/claim", h.claim)
 	}
 }
 

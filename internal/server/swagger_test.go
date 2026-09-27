@@ -148,23 +148,11 @@ func TestServeOpenAPISpec_CustomEnv(t *testing.T) {
 	}
 }
 
-func TestServeOpenAPISpec_NotFound(t *testing.T) {
-	// Point to a non-existent directory and non-existent spec
+func TestServeOpenAPISpec_MissingOverrideIsAnError(t *testing.T) {
+	// An explicit OPENAPI_SPEC_PATH that cannot be read is surfaced as a 404
+	// rather than silently falling back to the embedded document, so a
+	// misconfigured path is visible to the operator.
 	t.Setenv("OPENAPI_SPEC_PATH", filepath.Join(t.TempDir(), "nonexistent.yaml"))
-	t.Setenv("DOCS_PATH", filepath.Join(t.TempDir(), "nonexistent_dir"))
-
-	// Change working directory to a clean empty temp dir
-	origWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	emptyDir := t.TempDir()
-	if err := os.Chdir(emptyDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	defer func() {
-		_ = os.Chdir(origWd)
-	}()
 
 	req := httptest.NewRequest(http.MethodGet, "/docs/openapi.yaml", nil)
 	rec := httptest.NewRecorder()
@@ -172,11 +160,26 @@ func TestServeOpenAPISpec_NotFound(t *testing.T) {
 	ServeOpenAPISpec(rec, req)
 
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", rec.Code)
+		t.Fatalf("expected status 404 for an unreadable override, got %d", rec.Code)
 	}
-
 	if !strings.Contains(rec.Body.String(), "OpenAPI spec not found") {
-		t.Errorf("expected error message 'OpenAPI spec not found', got %q", rec.Body.String())
+		t.Errorf("expected an 'OpenAPI spec not found' message, got %q", rec.Body.String())
+	}
+}
+
+func TestServeOpenAPISpec_ServesEmbeddedDocument(t *testing.T) {
+	// With no override configured the embedded document is served, so the
+	// docs route works in any deployment without extra files.
+	req := httptest.NewRequest(http.MethodGet, "/docs/openapi.yaml", nil)
+	rec := httptest.NewRecorder()
+
+	ServeOpenAPISpec(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 from the embedded document, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "openapi:") {
+		t.Error("expected the embedded OpenAPI document to be served")
 	}
 }
 

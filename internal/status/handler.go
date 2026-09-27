@@ -30,56 +30,58 @@ func (h *Handler) RegisterAdminRoutes(r chi.Router) {
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	res, err := h.service.GetStatus(r.Context())
 	if err != nil {
-		api.WriteError(w, r, err)
+		api.HandleDomainError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, res)
+	api.JSON(w, http.StatusOK, res)
 }
 
 func (h *Handler) ListIncidents(w http.ResponseWriter, r *http.Request) {
 	incidents, err := h.service.ListIncidents(r.Context())
 	if err != nil {
-		api.WriteError(w, r, err)
+		api.HandleDomainError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"incidents": incidents})
+	api.JSON(w, http.StatusOK, map[string]any{"incidents": incidents})
 }
 
 func (h *Handler) CreateIncident(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateIncidentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		api.WriteError(w, r, domain.NewValidationError("invalid request body"))
+		api.BadRequest(w, "invalid request body")
 		return
 	}
 	if err := api.Validate(req); err != nil {
+		api.BadRequest(w, err.Error())
 		api.WriteError(w, r, domain.NewValidationError(err.Error()))
 		return
 	}
 
 	inc, err := h.service.CreateIncident(r.Context(), req)
 	if err != nil {
-		api.WriteError(w, r, err)
+		api.HandleDomainError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusCreated, inc)
+	api.JSON(w, http.StatusCreated, inc)
 }
 
 func (h *Handler) UpdateIncident(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req domain.UpdateIncidentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		api.WriteError(w, r, domain.NewValidationError("invalid request body"))
+		api.BadRequest(w, "invalid request body")
 		return
 	}
 	if err := api.Validate(req); err != nil {
+		api.BadRequest(w, err.Error())
 		api.WriteError(w, r, domain.NewValidationError(err.Error()))
 		return
 	}
 
 	inc, err := h.service.UpdateIncident(r.Context(), id, req)
 	if err != nil {
-		api.WriteError(w, r, err)
+		api.HandleDomainError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, inc)
+	api.JSON(w, http.StatusOK, inc)
 }

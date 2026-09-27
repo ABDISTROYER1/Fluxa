@@ -30,7 +30,7 @@ func RunInTx(ctx context.Context, db DB, fn func(context.Context) error) error {
 	if err != nil {
 		return err
 	}
-	
+
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()

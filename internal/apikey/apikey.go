@@ -42,8 +42,8 @@ func Generate() (raw string, prefix string, err error) {
 	encoded := base58Encode(b)
 	raw = "sk_live_" + encoded
 
-	// Prefix is first 8 chars of the base58 body for display (carries entropy)
-	prefix = encoded[:8]
+	// Prefix is first 8 chars for display
+	prefix = raw[:8]
 	return raw, prefix, nil
 }
 

@@ -14,6 +14,8 @@ const (
 	StatusSubmitted            TransactionStatus = "submitted"
 	StatusConfirmed            TransactionStatus = "confirmed"
 	StatusFailed               TransactionStatus = "failed"
+	StatusSettled              TransactionStatus = "settled"
+	StatusReversed             TransactionStatus = "reversed"
 	StatusReconciliationFailed TransactionStatus = "reconciliation_failed"
 	// StatusComplianceHold marks a transfer that passed validation but was
 	// stopped by screening. It is never enqueued for settlement; an approval

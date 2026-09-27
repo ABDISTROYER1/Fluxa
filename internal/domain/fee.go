@@ -14,6 +14,7 @@ type FeeSchedule struct {
 	ConversionFeeBps int
 	MinFeeAmount     decimal.Decimal
 	MaxFeeAmount     *decimal.Decimal
+	CreatedAt        time.Time
 }
 
 type FeeTier struct {
@@ -25,11 +26,14 @@ type FeeTier struct {
 }
 
 type FeeCollection struct {
-	ID           string
-	TenantID     *string
-	Asset        string
-	FeeAmount    decimal.Decimal
-	CreatedAt    time.Time
+	ID            string
+	TransactionID string
+	TenantID      *string
+	Asset         string
+	FeeAmount     decimal.Decimal
+	FeeBps        int
+	CollectedAt   time.Time
+	CreatedAt     time.Time
 }
 
 type FeeCollectionSummary struct {

@@ -128,8 +128,14 @@ func (p *Provider) GetQuote(ctx context.Context, req fiat.QuoteRequest) (*fiat.F
 
 	rate, _ := decimal.NewFromString(result.Rate.Rate)
 	fee, _ := decimal.NewFromString(result.Rate.Fee)
-	srcAmt, _ := decimal.NewFromString(result.Rate.SourceAmount)
 	dstAmt, _ := decimal.NewFromString(result.Rate.DestinationAmount)
+	if req.Side == "withdraw" {
+		// On a buy, the source leg is USDC, so the USDC amount on the quote
+		// is the response's source_amount rather than its fiat destination.
+		if srcAmt, err := decimal.NewFromString(result.Rate.SourceAmount); err == nil {
+			dstAmt = srcAmt
+		}
+	}
 	minLimit, _ := decimal.NewFromString(result.Rate.MinAmount)
 	maxLimit, _ := decimal.NewFromString(result.Rate.MaxAmount)
 

@@ -6,6 +6,7 @@ package treasury
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
@@ -19,10 +20,27 @@ import (
 	"github.com/stellar/go/txnbuild"
 )
 
-// baseReserve is Stellar's per-subentry minimum balance requirement (fixed
-// network-wide constant, currently 0.5 XLM). A funded account additionally
-// always needs 2*baseReserve just to exist.
-var baseReserve = decimal.RequireFromString("0.5")
+// defaultBaseReserve is Stellar's per-subentry minimum balance requirement
+// (currently 0.5 XLM). A funded account additionally always needs
+// 2*baseReserve just to exist. The value is configurable per service instance
+// because it changes the reported reserve figure.
+var defaultBaseReserve = decimal.RequireFromString("0.5")
+
+const (
+	// defaultReserveCacheTTL keeps the (slow) platform-wide scan from running
+	// on every reserve/sweep read.
+	defaultReserveCacheTTL = 2 * time.Minute
+	// defaultReserveConcurrency bounds in-flight Horizon requests during a scan.
+	defaultReserveConcurrency = 16
+	// defaultOffersPageLimit caps how many open offers are counted per wallet.
+	// Horizon caps a single offers page at 200 records, so a wallet with more
+	// than this many open offers is undercounted. This is a deliberate bound,
+	// not a bug: reserve accounting must not page unboundedly per wallet.
+	defaultOffersPageLimit = 200
+	// reserveScanTimeout bounds one full platform-wide scan when the caller
+	// supplies a context without a deadline.
+	reserveScanTimeout = 2 * time.Minute
+)
 
 // AssetBalance is the fee wallet's live balance for one asset, with its USD
 // equivalent when a rate is available.
@@ -40,6 +58,14 @@ type ReserveBreakdown struct {
 	TotalXLMRequired  decimal.Decimal `json:"total_xlm_required"`
 	CurrentXLMBalance decimal.Decimal `json:"current_xlm_balance"`
 	Surplus           decimal.Decimal `json:"surplus"` // negative means deficit
+	// AsOf is when this snapshot was computed. Reserve figures are a
+	// point-in-time measurement, not a live guarantee.
+	AsOf time.Time `json:"as_of"`
+	// Cached reports whether the figures came from the short-lived cache.
+	Cached bool `json:"cached"`
+	// OffersPerWalletCap documents the per-wallet open-offer cap used by the
+	// scan; wallets above it are undercounted.
+	OffersPerWalletCap uint `json:"offers_per_wallet_cap"`
 }
 
 // FXRates resolves a spot rate between two assets. fx.Service already
@@ -74,6 +100,63 @@ type service struct {
 	treasurySecretKey string
 	usdcIssuer        string
 	eurcIssuer        string
+
+	baseReserve        decimal.Decimal
+	reserveCacheTTL    time.Duration
+	reserveConcurrency int
+	offersPageLimit    uint
+
+	reserveMu    sync.Mutex
+	reserveCache *ReserveBreakdown
+	reserveAsOf  time.Time
+}
+
+// Option customises the treasury service. Options keep NewService
+// backward-compatible for callers that do not care about the tunables.
+type Option func(*service)
+
+// WithBaseReserve overrides Stellar's per-subentry base reserve. A
+// non-positive value is ignored.
+func WithBaseReserve(v decimal.Decimal) Option {
+	return func(s *service) {
+		if v.IsPositive() {
+			s.baseReserve = v
+		}
+	}
+}
+
+// WithReserveCacheTTL sets how long a reserve snapshot is reused. A
+// non-positive value disables caching.
+func WithReserveCacheTTL(d time.Duration) Option {
+	return func(s *service) { s.reserveCacheTTL = d }
+}
+
+// OptionsFromConfig builds the tunable options from raw configuration values.
+// Malformed values are ignored so that configuration validation stays in
+// internal/config rather than being duplicated here.
+func OptionsFromConfig(baseReserve string, cacheTTLSeconds, concurrency int) []Option {
+	opts := []Option{}
+	if v, err := decimal.NewFromString(baseReserve); err == nil && v.IsPositive() {
+		opts = append(opts, WithBaseReserve(v))
+	}
+	if cacheTTLSeconds >= 0 {
+		opts = append(opts, WithReserveCacheTTL(time.Duration(cacheTTLSeconds)*time.Second))
+	}
+	if concurrency > 0 {
+		opts = append(opts, WithReserveConcurrency(concurrency))
+	}
+	return opts
+}
+
+// WithReserveConcurrency bounds in-flight Horizon requests during a scan.
+// Values below 1 are clamped to 1.
+func WithReserveConcurrency(n int) Option {
+	return func(s *service) {
+		if n < 1 {
+			n = 1
+		}
+		s.reserveConcurrency = n
+	}
 }
 
 func NewService(
@@ -82,18 +165,27 @@ func NewService(
 	fxRates FXRates,
 	webhookSvc webhook.Service,
 	feeWallet, network, treasurySecretKey, usdcIssuer, eurcIssuer string,
+	opts ...Option,
 ) Service {
-	return &service{
-		repo:              repo,
-		stellar:           stellarClient,
-		fxRates:           fxRates,
-		webhookSvc:        webhookSvc,
-		feeWallet:         feeWallet,
-		network:           network,
-		treasurySecretKey: treasurySecretKey,
-		usdcIssuer:        usdcIssuer,
-		eurcIssuer:        eurcIssuer,
+	s := &service{
+		repo:               repo,
+		stellar:            stellarClient,
+		fxRates:            fxRates,
+		webhookSvc:         webhookSvc,
+		feeWallet:          feeWallet,
+		network:            network,
+		treasurySecretKey:  treasurySecretKey,
+		usdcIssuer:         usdcIssuer,
+		eurcIssuer:         eurcIssuer,
+		baseReserve:        defaultBaseReserve,
+		reserveCacheTTL:    defaultReserveCacheTTL,
+		reserveConcurrency: defaultReserveConcurrency,
+		offersPageLimit:    defaultOffersPageLimit,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *service) GetBalances(ctx context.Context) ([]AssetBalance, error) {
@@ -141,37 +233,76 @@ func (s *service) GetBalances(ctx context.Context) ([]AssetBalance, error) {
 // specific to the fee wallet ΓÇö it's what determines how much of the fee
 // wallet's own XLM is actually free to sweep.
 func (s *service) GetReserveBreakdown(ctx context.Context) (*ReserveBreakdown, error) {
-	pubKeys, err := s.repo.ListWalletPublicKeys(ctx)
+	if cached := s.cachedReserve(); cached != nil {
+		return cached, nil
+	}
+
+	scanCtx := ctx
+	if _, ok := scanCtx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		scanCtx, cancel = context.WithTimeout(scanCtx, reserveScanTimeout)
+		defer cancel()
+	}
+
+	pubKeys, err := s.repo.ListWalletPublicKeys(scanCtx)
 	if err != nil {
 		return nil, fmt.Errorf("list wallet public keys: %w", err)
 	}
 
-	trustlines, offers := 0, 0
-	for _, pk := range pubKeys {
-		acct, err := stellar.LoadAccountWithContext(ctx, s.stellar, pk)
-		if err != nil {
-			// Not-yet-funded or unreachable wallet ΓÇö skip rather than fail
-			// the whole reserve calculation over one bad account.
-			continue
-		}
-		for _, b := range acct.Balances {
-			if b.Code != "" {
-				trustlines++
-			}
-		}
-		if offerList, err := stellar.OffersWithContext(ctx, s.stellar, pk, 200); err == nil {
-			offers += len(offerList)
-		}
+	concurrency := s.reserveConcurrency
+	if concurrency < 1 {
+		concurrency = 1
 	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	trustlines, offers := 0, 0
 
-	perAccountReserve := baseReserve.Mul(decimal.NewFromInt(2))
+	for _, pk := range pubKeys {
+		if scanCtx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(pk string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			acct, err := stellar.LoadAccountWithContext(scanCtx, s.stellar, pk)
+			if err != nil {
+				// A not-yet-funded or unreachable wallet is skipped rather
+				// than failing the whole platform-wide calculation, and
+				// because every request is bounded a single slow wallet
+				// cannot stall the scan.
+				return
+			}
+			localTrustlines := 0
+			for _, b := range acct.Balances {
+				if b.Code != "" {
+					localTrustlines++
+				}
+			}
+			localOffers := 0
+			if offerList, err := stellar.OffersWithContext(scanCtx, s.stellar, pk, s.offersPageLimit); err == nil {
+				localOffers = len(offerList)
+			}
+
+			mu.Lock()
+			trustlines += localTrustlines
+			offers += localOffers
+			mu.Unlock()
+		}(pk)
+	}
+	wg.Wait()
+
+	perAccountReserve := s.baseReserve.Mul(decimal.NewFromInt(2))
 	total := perAccountReserve.Mul(decimal.NewFromInt(int64(len(pubKeys)))).
-		Add(baseReserve.Mul(decimal.NewFromInt(int64(trustlines)))).
-		Add(baseReserve.Mul(decimal.NewFromInt(int64(offers))))
+		Add(s.baseReserve.Mul(decimal.NewFromInt(int64(trustlines)))).
+		Add(s.baseReserve.Mul(decimal.NewFromInt(int64(offers))))
 
 	current := decimal.Zero
 	if s.feeWallet != "" {
-		if acct, err := stellar.LoadAccountWithContext(ctx, s.stellar, s.feeWallet); err == nil {
+		if acct, err := stellar.LoadAccountWithContext(scanCtx, s.stellar, s.feeWallet); err == nil {
 			for _, b := range acct.Balances {
 				if b.Code == "" {
 					if amt, err := decimal.NewFromString(b.Balance); err == nil {
@@ -182,14 +313,49 @@ func (s *service) GetReserveBreakdown(ctx context.Context) (*ReserveBreakdown, e
 		}
 	}
 
-	return &ReserveBreakdown{
-		WalletCount:       len(pubKeys),
-		TrustlineCount:    trustlines,
-		OfferCount:        offers,
-		TotalXLMRequired:  total,
-		CurrentXLMBalance: current,
-		Surplus:           current.Sub(total),
-	}, nil
+	breakdown := &ReserveBreakdown{
+		WalletCount:        len(pubKeys),
+		TrustlineCount:     trustlines,
+		OfferCount:         offers,
+		TotalXLMRequired:   total,
+		CurrentXLMBalance:  current,
+		Surplus:            current.Sub(total),
+		AsOf:               time.Now().UTC(),
+		OffersPerWalletCap: s.offersPageLimit,
+	}
+	s.storeReserve(breakdown)
+	return breakdown, nil
+}
+
+// cachedReserve returns a copy of the cached snapshot when it is still fresh.
+func (s *service) cachedReserve() *ReserveBreakdown {
+	if s.reserveCacheTTL <= 0 {
+		return nil
+	}
+	s.reserveMu.Lock()
+	defer s.reserveMu.Unlock()
+	if s.reserveCache == nil {
+		return nil
+	}
+	if time.Since(s.reserveAsOf) > s.reserveCacheTTL {
+		s.reserveCache = nil
+		return nil
+	}
+	cp := *s.reserveCache
+	cp.Cached = true
+	return &cp
+}
+
+func (s *service) storeReserve(bd *ReserveBreakdown) {
+	if s.reserveCacheTTL <= 0 {
+		return
+	}
+	s.reserveMu.Lock()
+	cp := *bd
+	cp.Cached = false
+	s.reserveCache = &cp
+	s.reserveAsOf = bd.AsOf
+	s.reserveMu.Unlock()
 }
 
 func (s *service) GetReserveRequirement(ctx context.Context) (decimal.Decimal, error) {

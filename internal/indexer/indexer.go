@@ -269,7 +269,7 @@ func (idx *Indexer) processPayment(ctx context.Context, w *domain.Wallet, op ope
 	hash := op.GetTransactionHash()
 
 	var reference string
-	horizonTx, txErr := idx.stellar.TransactionDetail(hash)
+	horizonTx, txErr := stellar.TransactionDetailWithContext(ctx, idx.stellar, hash)
 	if txErr == nil {
 		if horizonTx.MemoType == "text" {
 			reference = horizonTx.Memo

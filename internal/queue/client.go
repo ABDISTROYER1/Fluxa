@@ -77,20 +77,20 @@ func (c *Client) EnqueueSanctionsRefresh(ctx context.Context) error {
 	return err
 }
 
-func (c *Client) EnqueueWebhookDelivery(ctx context.Context, deliveryID string) error {
+// EnqueueWebhookDelivery enqueues a webhook delivery job. Options such as
+// asynq.ProcessIn let the webhook service schedule backoff retries without a
+// worker-side sleep.
+func (c *Client) EnqueueWebhookDelivery(ctx context.Context, deliveryID string, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	payload, err := json.Marshal(WebhookDeliverPayload{
 		DeliveryID: deliveryID,
 		Trace:      traceContext(ctx),
 	})
 	if err != nil {
-		return fmt.Errorf("marshal webhook payload: %w", err)
+		return nil, fmt.Errorf("marshal webhook payload: %w", err)
 	}
 	task := asynq.NewTask(TypeWebhookDeliver, payload)
-	_, err = c.inner.EnqueueContext(ctx, task,
-		asynq.MaxRetry(5),
-		asynq.Queue("default"),
-	)
-	return err
+	options := append([]asynq.Option{asynq.MaxRetry(5), asynq.Queue("default")}, opts...)
+	return c.inner.EnqueueContext(ctx, task, options...)
 }
 
 func (c *Client) EnqueueTenantWebhookDelivery(ctx context.Context, deliveryID, tenantID string) error {
@@ -108,5 +108,18 @@ func (c *Client) EnqueueTenantWebhookDelivery(ctx context.Context, deliveryID, t
 		asynq.MaxRetry(5),
 		asynq.Queue("default"),
 	)
+	return err
+}
+
+// Enqueue pushes an arbitrary task type onto the default queue. It exists
+// for low-traffic admin actions (force-settle, one-off wallet reconciliation)
+// that do not warrant a dedicated method.
+func (c *Client) Enqueue(ctx context.Context, taskType string, payload interface{}) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal %s payload: %w", taskType, err)
+	}
+	task := asynq.NewTask(taskType, body)
+	_, err = c.inner.EnqueueContext(ctx, task, asynq.MaxRetry(3), asynq.Queue("default"))
 	return err
 }

@@ -17,7 +17,7 @@ import (
 type ContextClient interface {
 	LoadAccountWithContext(context.Context, string) (horizon.Account, error)
 	SubmitTransactionWithContext(context.Context, *txnbuild.Transaction) (horizon.Transaction, error)
-	FindPathsStrictWithContext(context.Context, string, string, string, string) ([]horizon.Path, error)
+	FindPathsStrictWithContext(context.Context, string, string, string, string, string) ([]horizon.Path, error)
 	TransactionDetailWithContext(context.Context, string) (horizon.Transaction, error)
 	OperationsForTransactionWithContext(context.Context, string) ([]operations.Operation, error)
 	PaymentsWithContext(context.Context, string, string, uint) ([]operations.Operation, error)
@@ -45,11 +45,11 @@ func SubmitTransactionWithContext(ctx context.Context, client Client, tx *txnbui
 	return client.SubmitTransaction(tx)
 }
 
-func FindPathsStrictWithContext(ctx context.Context, client Client, sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+func FindPathsStrictWithContext(ctx context.Context, client Client, sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
 	if contextClient, ok := client.(ContextClient); ok {
-		return contextClient.FindPathsStrictWithContext(ctx, sourceAccount, destAsset, destIssuer, destAmount)
+		return contextClient.FindPathsStrictWithContext(ctx, sourceAccount, destAccount, destAsset, destIssuer, destAmount)
 	}
-	return client.FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount)
+	return client.FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount)
 }
 
 func TransactionDetailWithContext(ctx context.Context, client Client, hash string) (horizon.Transaction, error) {
@@ -88,6 +88,8 @@ func OffersWithContext(ctx context.Context, client Client, accountID string, lim
 }
 
 func (c *horizonClient) LoadAccountWithContext(ctx context.Context, accountID string) (horizon.Account, error) {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.load_account",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attribute.String("stellar.account_id", accountID)),
@@ -97,12 +99,16 @@ func (c *horizonClient) LoadAccountWithContext(ctx context.Context, accountID st
 }
 
 func (c *horizonClient) SubmitTransactionWithContext(ctx context.Context, tx *txnbuild.Transaction) (horizon.Transaction, error) {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.submit_transaction", trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 	return c.SubmitTransaction(tx)
 }
 
 func (c *horizonClient) TransactionDetailWithContext(ctx context.Context, hash string) (horizon.Transaction, error) {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.transaction_detail",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attribute.String("stellar.transaction_hash", hash)),
@@ -112,6 +118,8 @@ func (c *horizonClient) TransactionDetailWithContext(ctx context.Context, hash s
 }
 
 func (c *horizonClient) OperationsForTransactionWithContext(ctx context.Context, hash string) ([]operations.Operation, error) {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.operations",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attribute.String("stellar.transaction_hash", hash)),
@@ -121,6 +129,8 @@ func (c *horizonClient) OperationsForTransactionWithContext(ctx context.Context,
 }
 
 func (c *horizonClient) PaymentsWithContext(ctx context.Context, accountID, cursor string, limit uint) ([]operations.Operation, error) {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.payments",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attribute.String("stellar.account_id", accountID)),
@@ -130,6 +140,8 @@ func (c *horizonClient) PaymentsWithContext(ctx context.Context, accountID, curs
 }
 
 func (c *horizonClient) StreamPaymentsWithContext(ctx context.Context, accountID, cursor string, handler func(operations.Operation) error) error {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.stream_payments",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attribute.String("stellar.account_id", accountID)),
@@ -139,6 +151,8 @@ func (c *horizonClient) StreamPaymentsWithContext(ctx context.Context, accountID
 }
 
 func (c *horizonClient) OffersWithContext(ctx context.Context, accountID string, limit uint) ([]horizon.Offer, error) {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.offers",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attribute.String("stellar.account_id", accountID)),
@@ -147,13 +161,26 @@ func (c *horizonClient) OffersWithContext(ctx context.Context, accountID string,
 	return c.Offers(accountID, limit)
 }
 
-func (c *horizonClient) FindPathsStrictWithContext(ctx context.Context, sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+func (c *horizonClient) FindPathsStrictWithContext(ctx context.Context, sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+	ctx, cancel := c.boundCtx(ctx)
+	defer cancel()
 	_, span := tracing.Start(ctx, "stellar.horizon.find_paths",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attribute.String("stellar.source_account", sourceAccount)),
 	)
 	defer span.End()
-	return c.FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount)
+	return c.FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount)
 }
 
 var _ ContextClient = (*horizonClient)(nil)
+
+// boundCtx guarantees the call carries a deadline. Horizon non-streaming
+// endpoints in this SDK version ignore the context, so the HTTP client timeout
+// set at construction is what actually bounds the request; deriving a bounded
+// context here keeps the invariant that every call site has one.
+func (c *horizonClient) boundCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, c.timeout)
+}

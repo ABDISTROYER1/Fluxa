@@ -14,11 +14,11 @@ import (
 )
 
 type RegisterRequest struct {
-	Email       string `json:"email"`
-	Password    string `json:"password"`
-	Name        string `json:"name"`
-	AccountType string `json:"account_type"` // individual | organization
-	OrgName     string `json:"org_name"`     // required if account_type == organization
+	Email       string             `json:"email"`
+	Password    string             `json:"password"`
+	Name        string             `json:"name"`
+	AccountType domain.AccountType `json:"account_type"` // individual | organization
+	OrgName     string             `json:"org_name"`     // required if account_type == organization
 }
 
 type AuthResponse struct {
@@ -166,7 +166,7 @@ func (s *service) Register(ctx context.Context, req RegisterRequest) (*AuthRespo
 
 		webhookConfig := &domain.WebhookEndpoint{
 			ID:        uuid.New().String(),
-			TenantID:  tenantID,
+			TenantID:  &tenantID,
 			URL:       "", // to be configured later
 			Secret:    uuid.New().String(),
 			Active:    false,

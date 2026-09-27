@@ -131,7 +131,7 @@ func main() {
 	complianceRepo := postgres.NewComplianceRepo(repoDB).WithPrimary(db)
 	idemMW := idempotency.Middleware(idempotencyRepo)
 
-	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork)
+	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork, cfg.StellarHorizonTimeout)
 	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarNetwork)
 
 	asynqOpt, err := queue.AsynqRedisOptions(cfg.RedisURL, cfg.RedisSentinelMasterName, cfg.RedisSentinelAddrs, cfg.RedisSentinelPassword)
@@ -176,15 +176,20 @@ func main() {
 			log.Fatal().Err(err).Msg("parse COMPLIANCE_STRUCTURING_UNIT")
 		}
 
+		velocityScreener := compliance.NewVelocityScreener(complianceRepo, compliance.VelocityConfig{
+			Window:           time.Duration(cfg.ComplianceVelocityWindowMin) * time.Minute,
+			MaxTransfers:     cfg.ComplianceVelocityMax,
+			StructuringUnit:  structuringUnit,
+			RoundTripWindow:  time.Duration(cfg.ComplianceRoundTripMin) * time.Minute,
+			PlatformWalletID: cfg.PlatformWalletID,
+		})
+		if err := velocityScreener.Validate(); err != nil {
+			log.Fatal().Err(err).Msg("velocity screener misconfigured")
+		}
+
 		screener := compliance.NewCompositeScreener(
 			compliance.NewSanctionsScreener(sanctionsSet, cfg.ComplianceFuzzyThreshold),
-			compliance.NewVelocityScreener(complianceRepo, compliance.VelocityConfig{
-				Window:           time.Duration(cfg.ComplianceVelocityWindowMin) * time.Minute,
-				MaxTransfers:     cfg.ComplianceVelocityMax,
-				StructuringUnit:  structuringUnit,
-				RoundTripWindow:  time.Duration(cfg.ComplianceRoundTripMin) * time.Minute,
-				PlatformWalletID: cfg.PlatformWalletID,
-			}),
+			velocityScreener,
 		)
 
 		complianceSvc := compliance.NewService(complianceRepo, screener, sanctionsSet, txRepo, queueClient, webhookSvc)
@@ -229,6 +234,7 @@ func main() {
 		treasuryRepo, stellarClient, fxSvc, webhookSvc,
 		cfg.PlatformFeeWalletPublicKey, cfg.StellarNetwork, cfg.TreasurySecretKey,
 		cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer,
+		treasury.OptionsFromConfig(cfg.TreasuryBaseReserve, cfg.TreasuryReserveCacheTTLSec, cfg.TreasuryReserveConcurrency)...,
 	)
 
 	engine := settlement.NewEngine(
@@ -326,7 +332,7 @@ func main() {
 	claimableSvc := claimable.NewService(
 		postgres.NewClaimableBalanceRepo(repoDB),
 		stellarClient,
-		stellar.NewClaimableBalanceClient(cfg.StellarHorizonURL),
+		stellar.NewClaimableBalanceClientWithTimeout(cfg.StellarHorizonURL, cfg.StellarHorizonTimeout),
 		signer,
 		postgres.NewClaimableWalletResolver(walletRepo),
 		webhookSvc,
@@ -337,6 +343,7 @@ func main() {
 		},
 	)
 	claimableHandler := claimable.NewHandler(claimableSvc).
+		WithIdempotency(idemMW).
 		WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 
 	srv := server.New(

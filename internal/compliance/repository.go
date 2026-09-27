@@ -50,5 +50,5 @@ type Enqueuer interface {
 
 // Dispatcher emits compliance webhooks. webhook.Service satisfies it.
 type Dispatcher interface {
-	Dispatch(ctx context.Context, eventType string, payload interface{}) error
+	Dispatch(ctx context.Context, eventType domain.EventType, payload interface{}) error
 }

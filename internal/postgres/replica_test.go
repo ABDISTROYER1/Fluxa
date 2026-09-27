@@ -67,9 +67,9 @@ func TestFallbackRowFallsBackToPrimaryWhenReplicaFails(t *testing.T) {
 func TestIsReadRoutesOnlyReads(t *testing.T) {
 	reads := []string{"SELECT 1", "  select * from t", "WITH x AS (SELECT 1) SELECT * FROM x", "EXPLAIN SELECT 1"}
 	writes := []string{
-		"INSERT INTO t VALUES (1)", 
-		"UPDATE t SET a=1", 
-		"DELETE FROM t", 
+		"INSERT INTO t VALUES (1)",
+		"UPDATE t SET a=1",
+		"DELETE FROM t",
 		"ALTER TABLE t ADD COLUMN a INT",
 		"SELECT * FROM t FOR UPDATE",
 		"SELECT * FROM t FOR UPDATE SKIP LOCKED",

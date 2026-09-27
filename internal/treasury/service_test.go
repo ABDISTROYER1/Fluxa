@@ -3,7 +3,9 @@ package treasury_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/treasury"
@@ -72,21 +74,32 @@ func (m *mockRepo) ListSweeps(ctx context.Context, limit, offset int) ([]*treasu
 
 // mockStellarClient is a minimal stellar.Client double.
 type mockStellarClient struct {
-	accounts map[string]horizon.Account
-	offers   map[string][]horizon.Offer
+	mu        sync.Mutex
+	loadCalls int
+	accounts  map[string]horizon.Account
+	offers    map[string][]horizon.Offer
 }
 
 func (m *mockStellarClient) LoadAccount(accountID string) (horizon.Account, error) {
+	m.mu.Lock()
+	m.loadCalls++
+	m.mu.Unlock()
 	acct, ok := m.accounts[accountID]
 	if !ok {
 		return horizon.Account{}, errors.New("account not found")
 	}
 	return acct, nil
 }
+
+func (m *mockStellarClient) loadAccountCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loadCalls
+}
 func (m *mockStellarClient) SubmitTransaction(tx *txnbuild.Transaction) (horizon.Transaction, error) {
 	return horizon.Transaction{Hash: "fake-tx-hash"}, nil
 }
-func (m *mockStellarClient) FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+func (m *mockStellarClient) FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
 	return nil, nil
 }
 func (m *mockStellarClient) TransactionDetail(hash string) (horizon.Transaction, error) {
@@ -95,10 +108,6 @@ func (m *mockStellarClient) TransactionDetail(hash string) (horizon.Transaction,
 func (m *mockStellarClient) OperationsForTransaction(hash string) ([]operations.Operation, error) {
 	return nil, nil
 }
-func (m *mockStellarClient) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
-	return nil, nil
-}
-
 func (m *mockStellarClient) Payments(accountID, cursor string, limit uint) ([]operations.Operation, error) {
 	return nil, nil
 }
@@ -241,5 +250,110 @@ func TestExecuteSweepZeroAmountWritesAuditRecord(t *testing.T) {
 	}
 	if !repo.sweeps[0].Amount.IsZero() || repo.sweeps[0].TriggeredBy != treasury.TriggeredByAuto {
 		t.Errorf("unexpected sweep record: %+v", repo.sweeps[0])
+	}
+}
+
+// TestGetReserveBreakdown_OneBrokenWalletDoesNotAbortScan covers the
+// bounded-concurrency fan-out: a wallet whose account cannot be loaded (not
+// funded, Horizon error, deleted account) is skipped, and the remaining
+// wallets still contribute to the platform-wide total.
+func TestGetReserveBreakdown_OneBrokenWalletDoesNotAbortScan(t *testing.T) {
+	repo, stClient := newFixture()
+	// GBROKEN has no account in the fake, so LoadAccount fails for it.
+	repo.publicKeys = []string{"GWALLETA", "GBROKEN", "GWALLETB"}
+
+	svc := treasury.NewService(repo, stClient, nil, nil, feeWallet, "testnet", "", "GUSDC", "GEURC")
+
+	breakdown, err := svc.GetReserveBreakdown(context.Background())
+	if err != nil {
+		t.Fatalf("a single unreachable wallet must not abort the scan: %v", err)
+	}
+	// Every listed wallet is still counted for its own 2*baseReserve.
+	if breakdown.WalletCount != 3 {
+		t.Errorf("wallet_count = %d, want 3", breakdown.WalletCount)
+	}
+	// GWALLETA (1 trustline, 1 offer) + GWALLETB (2 trustlines) contribute.
+	if breakdown.TrustlineCount != 3 {
+		t.Errorf("trustline_count = %d, want 3", breakdown.TrustlineCount)
+	}
+	if breakdown.OfferCount != 1 {
+		t.Errorf("open_offers_count = %d, want 1", breakdown.OfferCount)
+	}
+}
+
+// TestGetReserveBreakdown_CachesSnapshot verifies the short-TTL cache: the
+// second read is served from cache (flagged Cached) without another Horizon
+// round-trip, and the timestamp stays the point-in-time of the real scan.
+func TestGetReserveBreakdown_CachesSnapshot(t *testing.T) {
+	repo, stClient := newFixture()
+	svc := treasury.NewService(repo, stClient, nil, nil, feeWallet, "testnet", "", "GUSDC", "GEURC")
+
+	first, err := svc.GetReserveBreakdown(context.Background())
+	if err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	if first.Cached {
+		t.Error("first scan must not be flagged as cached")
+	}
+	if first.AsOf.IsZero() {
+		t.Error("snapshot must carry a timestamp")
+	}
+	callsAfterFirst := stClient.loadAccountCalls()
+
+	second, err := svc.GetReserveBreakdown(context.Background())
+	if err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if !second.Cached {
+		t.Error("second read within the TTL must be served from cache")
+	}
+	if !second.AsOf.Equal(first.AsOf) {
+		t.Errorf("cached snapshot changed timestamp: %s -> %s", first.AsOf, second.AsOf)
+	}
+	if got := stClient.loadAccountCalls(); got != callsAfterFirst {
+		t.Errorf("cached read issued %d extra Horizon loads", got-callsAfterFirst)
+	}
+	if !second.TotalXLMRequired.Equal(first.TotalXLMRequired) {
+		t.Errorf("cached total changed: %s -> %s", first.TotalXLMRequired, second.TotalXLMRequired)
+	}
+}
+
+// TestGetReserveBreakdown_DisabledCacheRescans verifies the TTL is
+// configurable: a non-positive TTL disables reuse entirely.
+func TestGetReserveBreakdown_DisabledCacheRescans(t *testing.T) {
+	repo, stClient := newFixture()
+	svc := treasury.NewService(repo, stClient, nil, nil, feeWallet, "testnet", "", "GUSDC", "GEURC",
+		treasury.WithReserveCacheTTL(0))
+
+	if _, err := svc.GetReserveBreakdown(context.Background()); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	callsAfterFirst := stClient.loadAccountCalls()
+	second, err := svc.GetReserveBreakdown(context.Background())
+	if err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if second.Cached {
+		t.Error("cache is disabled, so the second read must be a fresh scan")
+	}
+	if got := stClient.loadAccountCalls(); got <= callsAfterFirst {
+		t.Errorf("expected a second Horizon scan, load calls stayed at %d", got)
+	}
+}
+
+// TestGetReserveBreakdown_BaseReserveIsConfigurable verifies the reported
+// figure follows the configured per-subentry base reserve.
+func TestGetReserveBreakdown_BaseReserveIsConfigurable(t *testing.T) {
+	repo, stClient := newFixture()
+	svc := treasury.NewService(repo, stClient, nil, nil, feeWallet, "testnet", "", "GUSDC", "GEURC",
+		treasury.WithBaseReserve(decimal.NewFromInt(1)), treasury.WithReserveCacheTTL(time.Minute))
+
+	breakdown, err := svc.GetReserveBreakdown(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 2 wallets * 2 * 1.0 = 4.0, 3 trustlines * 1.0 = 3.0, 1 offer * 1.0 = 1.0.
+	if want := decimal.RequireFromString("8"); !breakdown.TotalXLMRequired.Equal(want) {
+		t.Errorf("total_xlm_required = %s, want %s", breakdown.TotalXLMRequired, want)
 	}
 }

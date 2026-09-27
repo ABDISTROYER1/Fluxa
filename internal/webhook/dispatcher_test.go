@@ -56,7 +56,12 @@ func TestDispatcher_SendsNonEmptyBodyMatchingPayload(t *testing.T) {
 	}
 	_ = repo.CreateDelivery(context.Background(), deliv)
 
-	d := NewWebhookDispatcher(repo, nil, 3, false)
+	svc, ok := NewService(repo, nil, nil, 0, false).(*service)
+	if !ok {
+		t.Fatal("NewService did not return *service")
+	}
+	svc.allowPrivateNetworks = true // the destination is a loopback httptest server
+	d := svc
 	err = d.Deliver(context.Background(), deliv.ID)
 	if err != nil {
 		t.Fatalf("expected deliver success, got %v", err)

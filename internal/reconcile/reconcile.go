@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/alerting"
@@ -147,8 +148,12 @@ type Service struct {
 	webhookSvc        webhook.Service
 	svcName           string
 	balanceThreshold  decimal.Decimal
+	driftThreshold    decimal.Decimal
 	assetRegistry     *assets.Registry
 	platformFeeWallet string
+	driftRepo         DriftRepository
+	driftMu           sync.RWMutex
+	currentDrift      map[string]DriftSnapshot
 }
 
 func NewService(
@@ -365,32 +370,50 @@ func (s *Service) dispatchWebhook(ctx context.Context, event domain.EventType, t
 	}
 }
 
-// ForceSettle enqueues a settlement task for a specific transfer so the
-// settlement worker can process it. This is used by the admin force-settle
-// endpoint to re-trigger settlement for a stuck transfer without duplicating
-// worker logic.
-func (s *Service) ForceSettle(ctx context.Context, transferID string) error {
-	payload := map[string]interface{}{
-		"transfer_id": transferID,
-	}
+// EnqueueForceSettle queues a force-settle task for a specific transfer. It is
+// called by the admin force-settle endpoint; the worker-side ForceSettle does
+// the actual re-submission so the HTTP request never blocks on settlement.
+func (s *Service) EnqueueForceSettle(ctx context.Context, transferID, actor string) error {
+	payload := ForceSettlePayload{TransferID: transferID, Actor: actor}
 	if err := s.queue.Enqueue(ctx, queue.TypeForceSettle, payload); err != nil {
 		return fmt.Errorf("enqueue force-settle for transfer %s: %w", transferID, err)
 	}
-	log.Info().Str("transfer_id", transferID).Msg("reconcile: force-settle enqueued")
+	log.Info().Str("transfer_id", transferID).Str("actor", actor).Msg("reconcile: force-settle enqueued")
 	return nil
 }
 
-// ReconcileWallet enqueues a one-off reconciliation task for a wallet. The
-// worker will compare DB balances to Horizon and report any drift.
-func (s *Service) ReconcileWallet(ctx context.Context, walletID string) error {
-	payload := map[string]interface{}{
-		"wallet_id": walletID,
+// ForceSettle is the worker-side force-settle action: it re-submits the
+// transfer to the settlement worker, bypassing the stuck-pending heuristics.
+func (s *Service) ForceSettle(ctx context.Context, transferID, actor string) error {
+	if err := s.queue.EnqueueTransfer(ctx, transferID); err != nil {
+		return fmt.Errorf("force-settle transfer %s: %w", transferID, err)
 	}
+	log.Info().Str("transfer_id", transferID).Str("actor", actor).Msg("reconcile: force-settle submitted")
+	return nil
+}
+
+// EnqueueWalletReconcile queues a one-off wallet reconciliation task. The
+// worker-side RunWalletReconciliation compares DB balances to Horizon and
+// reports any drift so the admin request returns immediately.
+func (s *Service) EnqueueWalletReconcile(ctx context.Context, walletID, actor string) error {
+	payload := WalletReconcilePayload{WalletID: walletID, Actor: actor}
 	if err := s.queue.Enqueue(ctx, queue.TypeReconcileWallet, payload); err != nil {
 		return fmt.Errorf("enqueue wallet reconciliation for %s: %w", walletID, err)
 	}
-	log.Info().Str("wallet_id", walletID).Msg("reconcile: wallet reconciliation enqueued")
+	log.Info().Str("wallet_id", walletID).Str("actor", actor).Msg("reconcile: wallet reconciliation enqueued")
 	return nil
+}
+
+// RunWalletReconciliation is the worker-side one-off reconciliation for a
+// single wallet. It reuses the same balance comparison as the daily job so a
+// manual run cannot drift from the scheduled one.
+func (s *Service) RunWalletReconciliation(ctx context.Context, walletID, actor string) error {
+	wallet, err := s.walletLookup.GetByID(ctx, walletID)
+	if err != nil {
+		return fmt.Errorf("load wallet %s for reconciliation: %w", walletID, err)
+	}
+	log.Info().Str("wallet_id", walletID).Str("actor", actor).Msg("reconcile: wallet reconciliation starting")
+	return s.checkWalletBalance(ctx, wallet)
 }
 
 // Reconcile verifies confirmed transactions against Horizon and flags
@@ -778,13 +801,14 @@ func (s *Service) checkWalletBalance(ctx context.Context, w *domain.Wallet) erro
 		return fmt.Errorf("get DB balances for wallet %s: %w", w.ID, err)
 	}
 
-	// Build asset → balance map from Horizon, keyed by canonical identity
-	// (e.g. "XLM" for native, "USDC:GXXXX" for credit assets).
 	horizonBalances := make(map[string]decimal.Decimal)
-	for _, b := range acct.Balances {
-		asset := horizonAssetIdentity(&b)
-		amt, _ := decimal.NewFromString(b.Balance)
-		horizonBalances[asset] = horizonBalances[asset].Add(amt)
+	for _, balance := range acct.Balances {
+		amount, parseErr := decimal.NewFromString(balance.Balance)
+		if parseErr != nil {
+			return fmt.Errorf("parse Horizon balance %s for wallet %s: %w", balance.Balance, w.PublicKey, parseErr)
+		}
+		asset := horizonAssetIdentity(&balance)
+		horizonBalances[asset] = horizonBalances[asset].Add(amount)
 	}
 
 	assets := make(map[string]struct{}, len(dbBalances)+len(horizonBalances))
@@ -801,10 +825,40 @@ func (s *Service) checkWalletBalance(ctx context.Context, w *domain.Wallet) erro
 	}
 	logger := tracing.Logger(ctx)
 	for asset := range assets {
-		dbAmt := dbBalances[asset] // zero-value decimal if key absent
-		horizonAmt := horizonBalances[asset]
-		diff := dbAmt.Sub(horizonAmt).Abs()
-		if diff.LessThanOrEqual(s.balanceThreshold) {
+		expected := dbBalances[asset]
+		actual := horizonBalances[asset]
+		drift := expected.Sub(actual).Abs()
+		now := time.Now().UTC()
+		tenantID := ""
+		if w.TenantID != nil {
+			tenantID = *w.TenantID
+		}
+		snapshot := &DriftSnapshot{
+			ID:              uuid.New().String(),
+			TenantID:        tenantID,
+			WalletID:        w.ID,
+			WalletAddress:   w.PublicKey,
+			Asset:           asset,
+			ExpectedBalance: expected,
+			ActualBalance:   actual,
+			DriftAmount:     drift,
+			Threshold:       threshold,
+			DetectedAt:      now,
+		}
+		s.driftMu.Lock()
+		if s.currentDrift == nil {
+			s.currentDrift = make(map[string]DriftSnapshot)
+		}
+		s.currentDrift[w.ID+"|"+asset] = *snapshot
+		s.driftMu.Unlock()
+		if s.driftRepo != nil {
+			if writeErr := s.driftRepo.WriteDriftSnapshot(ctx, snapshot); writeErr != nil {
+				logger.Error().Err(writeErr).Str("wallet_id", w.ID).Str("asset", asset).
+					Msg("reconcile: write drift snapshot")
+			}
+		}
+
+		if drift.LessThanOrEqual(threshold) {
 			continue
 		}
 
@@ -859,12 +913,32 @@ func (s *Service) checkWalletBalance(ctx context.Context, w *domain.Wallet) erro
 	return nil
 }
 
-// horizonAssetIdentity returns a canonical string that uniquely identifies a
-// Horizon balance asset: "XLM" for native, or "CODE:ISSUER" for credit assets.
-// This ensures two issuers sharing the same asset code are compared independently.
+func (s *Service) GetDrift(ctx context.Context) ([]*DriftSnapshot, error) {
+	if s.driftRepo != nil {
+		snapshots, err := s.driftRepo.ListCurrentDrift(ctx)
+		if err == nil {
+			return snapshots, nil
+		}
+	}
+	s.driftMu.RLock()
+	defer s.driftMu.RUnlock()
+	snapshots := make([]*DriftSnapshot, 0, len(s.currentDrift))
+	for _, snapshot := range s.currentDrift {
+		copy := snapshot
+		snapshots = append(snapshots, &copy)
+	}
+	return snapshots, nil
+}
+
 func horizonAssetIdentity(b *horizon.Balance) string {
 	if b.Asset.Type == "native" {
 		return "XLM"
+	}
+	// Mirror the key format used by the balance store: an unissued code maps
+	// to the bare code, an issued asset to code:issuer. Otherwise the same
+	// asset would be counted twice under two different keys.
+	if b.Asset.Issuer == "" {
+		return b.Asset.Code
 	}
 	return b.Asset.Code + ":" + b.Asset.Issuer
 }

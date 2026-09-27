@@ -3,6 +3,8 @@ package stellar
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/protocols/horizon"
@@ -28,9 +30,24 @@ type horizonClaimableClient struct {
 	inner *horizonclient.Client
 }
 
+// NewClaimableBalanceClient builds a Horizon client for claimable-balance
+// lookups. timeout bounds each HTTP request; a non-positive value falls back to
+// defaultHorizonTimeout.
 func NewClaimableBalanceClient(horizonURL string) ClaimableBalanceClient {
+	return NewClaimableBalanceClientWithTimeout(horizonURL, defaultHorizonTimeout)
+}
+
+// NewClaimableBalanceClientWithTimeout is NewClaimableBalanceClient with an
+// explicit, configurable request timeout.
+func NewClaimableBalanceClientWithTimeout(horizonURL string, timeout time.Duration) ClaimableBalanceClient {
+	if timeout <= 0 {
+		timeout = defaultHorizonTimeout
+	}
 	return &horizonClaimableClient{
-		inner: &horizonclient.Client{HorizonURL: horizonURL},
+		inner: &horizonclient.Client{
+			HorizonURL: horizonURL,
+			HTTP:       &http.Client{Timeout: timeout},
+		},
 	}
 }
 

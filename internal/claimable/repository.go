@@ -33,5 +33,5 @@ type Repository interface {
 	MarkRevoked(ctx context.Context, id string, at time.Time) error
 	// ListExpiredPending returns pending balances whose expires_at has passed,
 	// across every tenant, for the background tracker.
-	ListExpiredPending(ctx context.Context, now time.Time) ([]*domain.ClaimableBalance, error)
+	ListExpiredPending(ctx context.Context, now time.Time, limit int) ([]*domain.ClaimableBalance, error)
 }

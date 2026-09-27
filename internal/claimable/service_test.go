@@ -172,14 +172,11 @@ func (m *mockStellar) SubmitTransaction(tx *txnbuild.Transaction) (horizon.Trans
 	return horizon.Transaction{Hash: fmt.Sprintf("tx-hash-%d", len(m.submitted))}, nil
 }
 
-func (m *mockStellar) FindPathsStrict(_, _, _, _ string) ([]horizon.Path, error) { return nil, nil }
+func (m *mockStellar) FindPathsStrict(_, _, _, _, _ string) ([]horizon.Path, error) { return nil, nil }
 func (m *mockStellar) TransactionDetail(string) (horizon.Transaction, error) {
 	return horizon.Transaction{}, nil
 }
 func (m *mockStellar) OperationsForTransaction(string) ([]operations.Operation, error) {
-	return nil, nil
-}
-func (m *mockStellar) PaymentsForAccount(_, _ string, _ int) ([]operations.Payment, error) {
 	return nil, nil
 }
 func (m *mockStellar) Payments(_, _ string, _ uint) ([]operations.Operation, error) { return nil, nil }
@@ -235,8 +232,8 @@ type mockWebhooks struct {
 	events []string
 }
 
-func (m *mockWebhooks) Dispatch(_ context.Context, _ *string, eventType string, _ interface{}) error {
-	m.events = append(m.events, eventType)
+func (m *mockWebhooks) Dispatch(_ context.Context, eventType domain.EventType, _ interface{}) error {
+	m.events = append(m.events, string(eventType))
 	return nil
 }
 

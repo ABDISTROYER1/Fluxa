@@ -90,13 +90,9 @@ func (m *mockStellarClient) LoadAccount(_ string) (horizon.Account, error) {
 func (m *mockStellarClient) SubmitTransaction(_ *txnbuild.Transaction) (horizon.Transaction, error) {
 	return horizon.Transaction{}, nil
 }
-func (m *mockStellarClient) FindPathsStrict(_, _, _, _ string) ([]horizon.Path, error) {
+func (m *mockStellarClient) FindPathsStrict(_, _, _, _, _ string) ([]horizon.Path, error) {
 	return nil, nil
 }
-func (m *mockStellarClient) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
-	return nil, nil
-}
-
 func (m *mockStellarClient) Payments(_, _ string, _ uint) ([]operations.Operation, error) {
 	return nil, nil
 }
@@ -119,16 +115,25 @@ type webhookDispatch struct {
 	payload interface{}
 }
 
-func (m *mockWebhookSvc) Register(_ context.Context, _ string, _ []string) (*domain.WebhookEndpoint, error) {
+func (m *mockWebhookSvc) RegisterEndpoint(_ context.Context, _ string, _ []string) (*domain.WebhookEndpoint, string, error) {
+	return nil, "", nil
+}
+func (m *mockWebhookSvc) ListEndpoints(_ context.Context) ([]*domain.WebhookEndpoint, error) {
 	return nil, nil
 }
-func (m *mockWebhookSvc) List(_ context.Context) ([]*domain.WebhookEndpoint, error) {
-	return nil, nil
-}
-func (m *mockWebhookSvc) Delete(_ context.Context, _ string) error {
+func (m *mockWebhookSvc) DeleteEndpoint(_ context.Context, _ string) error {
 	return nil
 }
-func (m *mockWebhookSvc) ListDeliveries(_ context.Context, _ string, _, _ int) ([]*domain.WebhookDelivery, error) {
+func (m *mockWebhookSvc) ListDeliveries(_ context.Context, _ string, _ int) ([]*domain.WebhookDelivery, error) {
+	return nil, nil
+}
+func (m *mockWebhookSvc) ListDeadLetters(_ context.Context, _ int) ([]*domain.WebhookDeadLetter, error) {
+	return nil, nil
+}
+func (m *mockWebhookSvc) ReplayDeadLetter(_ context.Context, _ string) error {
+	return nil
+}
+func (m *mockWebhookSvc) GetEndpointHealth(_ context.Context, _ string) (*domain.WebhookHealth, error) {
 	return nil, nil
 }
 func (m *mockWebhookSvc) Dispatch(_ context.Context, eventType domain.EventType, payload interface{}) error {
@@ -136,6 +141,15 @@ func (m *mockWebhookSvc) Dispatch(_ context.Context, eventType domain.EventType,
 	return nil
 }
 func (m *mockWebhookSvc) Deliver(_ context.Context, _ string) error {
+	return nil
+}
+func (m *mockWebhookSvc) CreateSubscription(_ context.Context, _, _ string) (*domain.WebhookSubscription, error) {
+	return nil, nil
+}
+func (m *mockWebhookSvc) ListSubscriptions(_ context.Context) ([]*domain.WebhookSubscription, error) {
+	return nil, nil
+}
+func (m *mockWebhookSvc) DeleteSubscription(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -526,10 +540,6 @@ type hashSwitchStellar struct {
 	responses map[string]horizon.Transaction
 }
 
-func (s *hashSwitchStellar) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
-	return nil, nil
-}
-
 func (s *hashSwitchStellar) TransactionDetail(hash string) (horizon.Transaction, error) {
 	if tx, ok := s.responses[hash]; ok {
 		return tx, nil
@@ -545,7 +555,7 @@ func (s *hashSwitchStellar) LoadAccount(_ string) (horizon.Account, error) {
 func (s *hashSwitchStellar) SubmitTransaction(_ *txnbuild.Transaction) (horizon.Transaction, error) {
 	return horizon.Transaction{}, nil
 }
-func (s *hashSwitchStellar) FindPathsStrict(_, _, _, _ string) ([]horizon.Path, error) {
+func (s *hashSwitchStellar) FindPathsStrict(_, _, _, _, _ string) ([]horizon.Path, error) {
 	return nil, nil
 }
 func (s *hashSwitchStellar) Payments(_, _ string, _ uint) ([]operations.Operation, error) {
@@ -584,10 +594,6 @@ type balanceStellarClient struct {
 	accounts map[string]horizon.Account // publicKey → account
 }
 
-func (s *balanceStellarClient) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
-	return nil, nil
-}
-
 func (s *balanceStellarClient) LoadAccount(publicKey string) (horizon.Account, error) {
 	if acct, ok := s.accounts[publicKey]; ok {
 		return acct, nil
@@ -603,7 +609,7 @@ func (s *balanceStellarClient) OperationsForTransaction(_ string) ([]operations.
 func (s *balanceStellarClient) SubmitTransaction(_ *txnbuild.Transaction) (horizon.Transaction, error) {
 	return horizon.Transaction{}, nil
 }
-func (s *balanceStellarClient) FindPathsStrict(_, _, _, _ string) ([]horizon.Path, error) {
+func (s *balanceStellarClient) FindPathsStrict(_, _, _, _, _ string) ([]horizon.Path, error) {
 	return nil, nil
 }
 func (s *balanceStellarClient) Payments(_, _ string, _ uint) ([]operations.Operation, error) {
