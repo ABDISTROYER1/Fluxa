@@ -38,10 +38,21 @@ func JSON(w http.ResponseWriter, status int, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// WriteJSON is an alias for JSON for compatibility.
+func WriteJSON(w http.ResponseWriter, status int, v interface{}) {
+	JSON(w, status, v)
+}
+
 func Error(w http.ResponseWriter, status int, code, message string) {
 	JSON(w, status, errorResponse{
 		Error: errorDetail{Code: code, Message: message},
 	})
+}
+
+// WriteError writes an error response using HandleDomainError for domain errors
+// or InternalError for unexpected errors.
+func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	HandleDomainError(w, err)
 }
 
 func BadRequest(w http.ResponseWriter, message string) {

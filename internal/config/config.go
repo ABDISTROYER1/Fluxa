@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -170,6 +171,12 @@ func containsLocalhostWildcard(origins []string) bool {
 		}
 	}
 	return false
+
+	// Indexer configuration
+	IndexerPaymentsPageLimit int
+	IndexerStreamMinBackoff  string
+	IndexerStreamMaxBackoff  string
+	IndexerSyncPageSize      int
 }
 
 func splitCSV(value string) []string {
@@ -218,6 +225,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("TREASURY_RESERVE_CONCURRENCY", "16")
 	viper.SetDefault("WEBHOOK_ALLOW_PRIVATE_NETWORKS", "false")
 	viper.SetDefault("CORS_ALLOWED_ORIGINS", "localhost:*")
+	viper.SetDefault("INDEXER_PAYMENTS_PAGE_LIMIT", "50")
+	viper.SetDefault("INDEXER_STREAM_MIN_BACKOFF", "1s")
+	viper.SetDefault("INDEXER_STREAM_MAX_BACKOFF", "30s")
+	viper.SetDefault("INDEXER_SYNC_PAGE_SIZE", "100")
 
 	viper.SetConfigFile(".env")
 	viper.SetConfigType("env")
@@ -238,6 +249,9 @@ func Load() (*Config, error) {
 	if len(keyBytes) != 32 {
 		return nil, fmt.Errorf("MASTER_ENCRYPTION_KEY must be 32 bytes (64 hex chars), got %d bytes", len(keyBytes))
 	}
+	if err := validateKeyEntropy(keyBytes); err != nil {
+		return nil, fmt.Errorf("MASTER_ENCRYPTION_KEY entropy check failed: %w", err)
+	}
 
 	env := viper.GetString("ENV")
 	jwtSecret := viper.GetString("JWT_SECRET")
@@ -251,6 +265,11 @@ func Load() (*Config, error) {
 	complianceEnabled, _ := strconv.ParseBool(viper.GetString("COMPLIANCE_ENABLED"))
 	workerEnabled, _ := strconv.ParseBool(viper.GetString("WORKER_ENABLED"))
 	webhookAllowPrivateNetworks, _ := strconv.ParseBool(viper.GetString("WEBHOOK_ALLOW_PRIVATE_NETWORKS"))
+
+	indexerPaymentsPageLimit := viper.GetInt("INDEXER_PAYMENTS_PAGE_LIMIT")
+	indexerStreamMinBackoff := viper.GetString("INDEXER_STREAM_MIN_BACKOFF")
+	indexerStreamMaxBackoff := viper.GetString("INDEXER_STREAM_MAX_BACKOFF")
+	indexerSyncPageSize := viper.GetInt("INDEXER_SYNC_PAGE_SIZE")
 
 	if webhookAllowPrivateNetworks && env != "development" {
 		return nil, fmt.Errorf("WEBHOOK_ALLOW_PRIVATE_NETWORKS can only be enabled in development environment")
@@ -319,4 +338,68 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
+		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
+		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
+		IndexerSyncPageSize:      indexerSyncPageSize,
+	}, nil
+}
+
+// validateKeyEntropy checks that the encryption key has sufficient entropy.
+// It uses a simple Shannon entropy estimation to reject obviously weak keys
+// (e.g., all zeros, repeated patterns, or low-entropy inputs).
+func validateKeyEntropy(key []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("key is empty")
+	}
+
+	// Check for all zeros
+	allZero := true
+	for _, b := range key {
+		if b != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		return fmt.Errorf("key cannot be all zeros")
+	}
+
+	// Check for all same byte
+	allSame := true
+	first := key[0]
+	for _, b := range key {
+		if b != first {
+			allSame = false
+			break
+		}
+	}
+	if allSame {
+		return fmt.Errorf("key cannot be all identical bytes")
+	}
+
+	// Calculate Shannon entropy (bits per byte)
+	// For a 32-byte key, we expect entropy close to 8 bits/byte
+	freq := make(map[byte]int)
+	for _, b := range key {
+		freq[b]++
+	}
+
+	entropy := 0.0
+	for _, count := range freq {
+		p := float64(count) / float64(len(key))
+		entropy -= p * log2(p)
+	}
+
+	// Require at least 7.5 bits/byte entropy (out of 8 max)
+	// This catches keys with obvious patterns while allowing natural randomness
+	if entropy < 7.5 {
+		return fmt.Errorf("key entropy too low: %.2f bits/byte (minimum 7.5)", entropy)
+	}
+
+	return nil
+}
+
+func log2(x float64) float64 {
+	return math.Log2(x)
 }

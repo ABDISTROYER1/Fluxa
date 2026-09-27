@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -95,17 +94,6 @@ func New(
 		r.Group(func(r chi.Router) {
 			r.Use(AuthMiddleware(apiKeyRepo, jwtSecret, membershipValidator))
 			r.Use(RateLimit(100, 200))
-
-			r.Get("/usage", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"request_count":   0,
-					"transfer_volume": "0",
-					"rate_limit":      100,
-					"period":          "current",
-					"note":            "derived on client — backend usage aggregation not yet implemented",
-				})
-			})
 
 			// API Keys (Owner & Admin only for creation & revocation)
 			r.Route("/keys", func(r chi.Router) {

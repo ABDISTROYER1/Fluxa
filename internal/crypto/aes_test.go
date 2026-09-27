@@ -2,7 +2,10 @@ package crypto
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +67,113 @@ func TestInvalidKeyLength(t *testing.T) {
 	_, err := Encrypt([]byte("data"), shortKey)
 	if err == nil {
 		t.Fatal("expected error for non-32-byte key")
+	}
+}
+
+func TestEnvelopeVersion(t *testing.T) {
+	key := make([]byte, 32)
+	rand.Read(key)
+	plaintext := []byte("test")
+
+	ciphertext, err := Encrypt(plaintext, key)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	// Check that ciphertext has version prefix
+	ciphertextStr := string(ciphertext)
+	if !strings.HasPrefix(ciphertextStr, "v1::") {
+		t.Fatalf("ciphertext should have v1:: prefix, got %q", ciphertextStr)
+	}
+
+	// Decrypt should work
+	decrypted, err := Decrypt(ciphertext, key)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Fatalf("got %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestDecryptLegacyFormat(t *testing.T) {
+	key := make([]byte, 32)
+	rand.Read(key)
+	plaintext := []byte("legacy format test")
+
+	// Create legacy format ciphertext (nonce||ciphertext without version)
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+	nonce := make([]byte, gcm.NonceSize())
+	rand.Read(nonce)
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+
+	// Decrypt should handle legacy format
+	decrypted, err := Decrypt(ciphertext, key)
+	if err != nil {
+		t.Fatalf("Decrypt legacy: %v", err)
+	}
+
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Fatalf("got %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestDecryptTamperedCiphertext(t *testing.T) {
+	key := make([]byte, 32)
+	rand.Read(key)
+	plaintext := []byte("tamper test")
+
+	ciphertext, _ := Encrypt(plaintext, key)
+
+	// Tamper with ciphertext
+	ciphertext[len(ciphertext)-1] ^= 0x01
+
+	_, err := Decrypt(ciphertext, key)
+	if err == nil {
+		t.Fatal("expected error when decrypting tampered ciphertext")
+	}
+}
+
+func TestParseEnvelope(t *testing.T) {
+	key := make([]byte, 32)
+	rand.Read(key)
+	plaintext := []byte("parse test")
+
+	ciphertext, _ := Encrypt(plaintext, key)
+
+	env, err := ParseEnvelope(ciphertext)
+	if err != nil {
+		t.Fatalf("ParseEnvelope: %v", err)
+	}
+
+	if env.Version != CurrentVersion {
+		t.Fatalf("expected version %d, got %d", CurrentVersion, env.Version)
+	}
+
+	decrypted, err := env.Decrypt(key)
+	if err != nil {
+		t.Fatalf("Envelope.Decrypt: %v", err)
+	}
+
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Fatalf("got %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestParseEnvelopeInvalidVersion(t *testing.T) {
+	// Create envelope with invalid version
+	invalidEnvelope := []byte("v99::deadbeef")
+	_, err := ParseEnvelope(invalidEnvelope)
+	if err == nil {
+		t.Fatal("expected error for invalid version")
+	}
+}
+
+func TestParseEnvelopeInvalidFormat(t *testing.T) {
+	_, err := ParseEnvelope([]byte("not-an-envelope"))
+	if err == nil {
+		t.Fatal("expected error for invalid format")
 	}
 }

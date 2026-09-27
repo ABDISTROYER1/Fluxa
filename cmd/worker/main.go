@@ -33,6 +33,14 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+func parseDuration(s string, defaultVal time.Duration) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return defaultVal
+	}
+	return d
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -107,15 +115,20 @@ func main() {
 	)
 	settlementWorker := settlement.NewWorker(engine)
 
-	idx := indexer.New(walletRepo, txRepo, stellarClient)
-	indexerWorker := indexer.NewWorker(idx)
+	idx := indexer.NewWithConfig(walletRepo, txRepo, stellarClient, indexer.Config{
+		PaymentsPageLimit: cfg.IndexerPaymentsPageLimit,
+		StreamMinBackoff:  parseDuration(cfg.IndexerStreamMinBackoff, 1*time.Second),
+		StreamMaxBackoff:  parseDuration(cfg.IndexerStreamMaxBackoff, 30*time.Second),
+		SyncPageSize:      cfg.IndexerSyncPageSize,
+	})
+	indexerWorker := indexer.NewWorker(idx, cfg)
 
 	// StreamAll keeps a live Horizon SSE connection open per wallet so new
 	// payments land in the DB in real time; the @every 30s indexer:sync task
 	// below is the incremental-poll fallback that also catches up any wallet
 	// whose stream is reconnecting.
 	go func() {
-		if err := idx.StreamAll(ctx, 1000, 0); err != nil {
+		if err := idx.StreamAll(ctx); err != nil {
 			log.Error().Err(err).Msg("indexer: stream all wallets failed")
 		}
 	}()

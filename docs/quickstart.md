@@ -76,8 +76,8 @@ curl -X POST http://localhost:3000/v1/keys \
 ```json
 {
   "id": "0193b0b4-1b33-7e9a-bcf6-2e2a0abb6d43",
-  "key": "YOUR_API_KEY_sk_live_replace_with_real_key",
-  "prefix": "sk_live_",
+  "key": "sk_test_abcdef1234567890abcdef1234567890",
+  "prefix": "abcdef12",
   "label": "My Integration Key",
   "created_at": "2026-06-22T12:00:00Z"
 }
@@ -92,7 +92,7 @@ curl -X POST http://localhost:3000/v1/keys \
 For the remaining steps, use the API key directly:
 
 ```
-Authorization: Bearer YOUR_API_KEY_sk_live_replace_with_real_key
+Authorization: Bearer sk_test_abcdef1234567890abcdef1234567890
 ```
 
 ---
@@ -104,7 +104,7 @@ Create a Stellar wallet. Fluxa generates a keypair and stores the secret key enc
 ```bash
 curl -X POST http://localhost:3000/v1/wallets \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk_live_..." \
+  -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000"
 ```
 
@@ -155,7 +155,7 @@ curl "https://friendbot.stellar.org?addr=GAIH3YPEXB6HHVH6RIC6LDGAB7G4WMFP7F2F3I4
 Verify the balance:
 
 ```bash
-curl -H "Authorization: Bearer sk_live_..." \
+curl -H "Authorization: Bearer sk_test_..." \
   "http://localhost:3000/v1/wallets/<wallet_id>/balances"
 ```
 
@@ -183,7 +183,7 @@ Before the wallet can hold USDC, it must establish a trustline to the USDC issue
 ```bash
 curl -X POST http://localhost:3000/v1/wallets/<wallet_id>/trustlines \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk_live_..." \
+  -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: 6ba7b810-9dad-11d1-80b4-00c04fd430c8" \
   -d '{
     "asset_code": "USDC",
@@ -218,7 +218,7 @@ Before converting currencies, get a 30-second exchange rate quote. This locks in
 ```bash
 curl -X POST http://localhost:3000/v1/fx/quote \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk_live_..." \
+  -H "Authorization: Bearer sk_test_..." \
   -d '{
     "from_asset": "USDC",
     "to_asset": "NGN",
@@ -257,7 +257,7 @@ Convert using the quote from Step 6. Pass the quote's `id` as `quote_id` — the
 ```bash
 curl -X POST http://localhost:3000/v1/fx/convert \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk_live_..." \
+  -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: 7c9e6679-7425-40de-944b-e07fc1f90ae7" \
   -d '{
     "wallet_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -300,7 +300,7 @@ First, create a **second wallet** (recipient) by repeating Step 3, and fund it w
 ```bash
 curl -X POST http://localhost:3000/v1/transfers \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk_live_..." \
+  -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: 123e4567-e89b-42d3-a456-426614174000" \
   -d '{
     "from_wallet_id": "<sender_wallet_id>",
@@ -344,7 +344,7 @@ curl -X POST http://localhost:3000/v1/transfers \
 Poll the transfer endpoint until the status changes from `pending` to `confirmed` or `failed`.
 
 ```bash
-curl -H "Authorization: Bearer sk_live_..." \
+curl -H "Authorization: Bearer sk_test_..." \
   "http://localhost:3000/v1/transfers/<transfer_id>"
 ```
 
@@ -381,7 +381,7 @@ A simple polling loop in bash:
 ```bash
 #!/bin/bash
 ID="<transfer_id>"
-KEY="sk_live_..."
+KEY="sk_test_..."
 URL="http://localhost:3000/v1/transfers/$ID"
 STATUS="pending"
 while [ "$STATUS" = "pending" ] || [ "$STATUS" = "submitted" ]; do
@@ -405,7 +405,7 @@ Instead of polling, register a webhook endpoint that Fluxa will call when a tran
 ```bash
 curl -X POST http://localhost:3000/v1/webhooks \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk_live_..." \
+  -H "Authorization: Bearer sk_test_..." \
   -d '{
     "url": "https://your-app.com/webhooks/fluxa",
     "events": [
@@ -465,7 +465,7 @@ function verifyWebhook(payload, signature, secret) {
 Check delivery status:
 
 ```bash
-curl -H "Authorization: Bearer sk_live_..." \
+curl -H "Authorization: Bearer sk_test_..." \
   "http://localhost:3000/v1/webhooks/<webhook_id>/deliveries"
 ```
 

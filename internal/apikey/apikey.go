@@ -3,6 +3,7 @@ package apikey
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"math/big"
 )
@@ -53,7 +54,8 @@ func Hash(raw string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Verify checks if the provided raw key matches the stored hash
+// Verify checks if the provided raw key matches the stored hash using constant-time comparison
 func Verify(raw, hashed string) bool {
-	return Hash(raw) == hashed
+	computed := Hash(raw)
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(hashed)) == 1
 }

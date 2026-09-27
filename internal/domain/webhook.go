@@ -7,6 +7,8 @@ import (
 // EventType is a string type for webhook event type constants.
 type EventType string
 
+type DeliveryStatus string
+
 const (
 	EventTypePaymentCompleted    = "payment.completed"
 	EventTypePaymentFailed       = "payment.failed"
@@ -31,6 +33,10 @@ const (
 	EventClaimableBalanceClaimed = "claimable_balance.claimed"
 	EventClaimableBalanceExpired = "claimable_balance.expired"
 	EventClaimableBalanceRevoked = "claimable_balance.revoked"
+
+	DeliveryStatusPending   = "pending"
+	DeliveryStatusDelivered = "delivered"
+	DeliveryStatusFailed    = "failed"
 )
 
 var SupportedEventTypes = []string{
