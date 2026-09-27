@@ -58,8 +58,15 @@ func New(
 	healthChecks map[string]DependencyCheck,
 	membershipValidator MembershipValidator,
 	corsOrigins []string,
+	authRateLimitCfg ...AuthRateLimitConfig,
 ) *Server {
 	r := chi.NewRouter()
+
+	rateCfg := DefaultAuthRateLimitConfig()
+	if len(authRateLimitCfg) > 0 {
+		rateCfg = authRateLimitCfg[0]
+	}
+	authLimiter := NewAuthRateLimiter(rateCfg)
 
 	r.Use(middleware.RealIP)
 	r.Use(requestID)
@@ -82,8 +89,12 @@ func New(
 
 	r.Route("/v1", func(r chi.Router) {
 		// Unauthenticated public endpoints
-		r.Route("/auth", authHandler.Routes())
-		r.Post("/org/invites/accept", orgHandler.AcceptInvite)
+		r.Route("/auth", func(r chi.Router) {
+			r.With(authLimiter.Limit(ExtractEmail)).Post("/register", authHandler.Register)
+			r.With(authLimiter.Limit(ExtractEmail)).Post("/login", authHandler.Login)
+			r.Post("/refresh", authHandler.Refresh)
+		})
+		r.With(authLimiter.Limit(ExtractInviteToken)).Post("/org/invites/accept", orgHandler.AcceptInvite)
 		// Registered as a direct path (not r.Route("/webhooks", ...)) because
 		// the authenticated group below already mounts a "/webhooks"
 		// sub-router for Register/List/Delete/deliveries; chi doesn't support
@@ -167,6 +178,10 @@ func New(
 
 func (s *Server) Start() error {
 	return s.http.ListenAndServe()
+}
+
+func (s *Server) Router() *chi.Mux {
+	return s.router
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

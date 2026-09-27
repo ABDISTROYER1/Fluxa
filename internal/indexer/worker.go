@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/config"
@@ -13,10 +12,10 @@ import (
 
 type Worker struct {
 	indexer *Indexer
-	config  config.Config
+	config  *config.Config
 }
 
-func NewWorker(indexer *Indexer, cfg config.Config) *Worker {
+func NewWorker(indexer *Indexer, cfg *config.Config) *Worker {
 	return &Worker{indexer: indexer, config: cfg}
 }
 

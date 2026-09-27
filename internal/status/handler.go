@@ -53,7 +53,6 @@ func (h *Handler) CreateIncident(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := api.Validate(req); err != nil {
 		api.BadRequest(w, err.Error())
-		api.WriteError(w, r, domain.NewValidationError(err.Error()))
 		return
 	}
 
@@ -74,7 +73,6 @@ func (h *Handler) UpdateIncident(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := api.Validate(req); err != nil {
 		api.BadRequest(w, err.Error())
-		api.WriteError(w, r, domain.NewValidationError(err.Error()))
 		return
 	}
 
