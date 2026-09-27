@@ -51,7 +51,7 @@ func (h *Handler) CreateIncident(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, domain.NewValidationError("invalid request body"))
 		return
 	}
-	if err := api.Validate.Struct(req); err != nil {
+	if err := api.Validate(req); err != nil {
 		api.WriteError(w, r, domain.NewValidationError(err.Error()))
 		return
 	}
@@ -71,7 +71,7 @@ func (h *Handler) UpdateIncident(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, domain.NewValidationError("invalid request body"))
 		return
 	}
-	if err := api.Validate.Struct(req); err != nil {
+	if err := api.Validate(req); err != nil {
 		api.WriteError(w, r, domain.NewValidationError(err.Error()))
 		return
 	}

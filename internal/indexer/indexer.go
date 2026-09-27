@@ -19,40 +19,80 @@ import (
 	"github.com/stellar/go/protocols/horizon/operations"
 )
 
-const (
-	paymentsPageLimit = 50
+type Config struct {
+	PaymentsPageLimit int
+	StreamMinBackoff  time.Duration
+	StreamMaxBackoff  time.Duration
+	SyncPageSize      int
+}
 
-	streamMinBackoff = 1 * time.Second
-	streamMaxBackoff = 30 * time.Second
-)
-
-const syncPageSize = 100
+func DefaultConfig() Config {
+	return Config{
+		PaymentsPageLimit: 50,
+		StreamMinBackoff:  1 * time.Second,
+		StreamMaxBackoff:  30 * time.Second,
+		SyncPageSize:      100,
+	}
+}
 
 type Indexer struct {
 	walletRepo wallet.Repository
 	txRepo     transfer.Repository
 	stellar    stellar.Client
+	config     Config
 }
 
 func New(walletRepo wallet.Repository, txRepo transfer.Repository, stellarClient stellar.Client) *Indexer {
+	return NewWithConfig(walletRepo, txRepo, stellarClient, DefaultConfig())
+}
+
+func NewWithConfig(walletRepo wallet.Repository, txRepo transfer.Repository, stellarClient stellar.Client, config Config) *Indexer {
+	if config.PaymentsPageLimit <= 0 {
+		config.PaymentsPageLimit = DefaultConfig().PaymentsPageLimit
+	}
+	if config.StreamMinBackoff <= 0 {
+		config.StreamMinBackoff = DefaultConfig().StreamMinBackoff
+	}
+	if config.StreamMaxBackoff <= 0 {
+		config.StreamMaxBackoff = DefaultConfig().StreamMaxBackoff
+	}
+	if config.SyncPageSize <= 0 {
+		config.SyncPageSize = DefaultConfig().SyncPageSize
+	}
 	return &Indexer{
 		walletRepo: walletRepo,
 		txRepo:     txRepo,
 		stellar:    stellarClient,
+		config:     config,
 	}
 }
 
 // SyncAll iterates over all wallets and syncs their recent payments from Horizon.
-func (idx *Indexer) SyncAll(ctx context.Context, limit, offset int) error {
-	wallets, err := idx.walletRepo.List(ctx, limit, offset)
-	if err != nil {
-		return fmt.Errorf("list wallets: %w", err)
-	}
+// It pages through all wallets using limit/offset until no more wallets are returned.
+func (idx *Indexer) SyncAll(ctx context.Context) error {
+	limit := idx.config.SyncPageSize
+	offset := 0
 
-	for _, w := range wallets {
-		if err := idx.SyncWallet(ctx, w); err != nil {
-			log.Error().Err(err).Str("wallet_id", w.ID).Msg("failed to sync wallet")
+	for {
+		wallets, err := idx.walletRepo.List(ctx, limit, offset)
+		if err != nil {
+			return fmt.Errorf("list wallets: %w", err)
 		}
+
+		if len(wallets) == 0 {
+			break
+		}
+
+		for _, w := range wallets {
+			if err := idx.SyncWallet(ctx, w); err != nil {
+				log.Error().Err(err).Str("wallet_id", w.ID).Msg("failed to sync wallet")
+			}
+		}
+
+		if len(wallets) < limit {
+			break
+		}
+		offset += limit
 	}
 	return nil
 }
@@ -77,7 +117,7 @@ func (idx *Indexer) SyncWallet(ctx context.Context, w *domain.Wallet) error {
 
 	cursor := w.SyncCursor
 	for {
-		ops, err := stellar.PaymentsWithContext(ctx, idx.stellar, w.PublicKey, cursor, paymentsPageLimit)
+		ops, err := stellar.PaymentsWithContext(ctx, idx.stellar, w.PublicKey, cursor, idx.config.PaymentsPageLimit)
 		if err != nil {
 			return fmt.Errorf("fetch payments since cursor %q: %w", cursor, err)
 		}
@@ -98,7 +138,7 @@ func (idx *Indexer) SyncWallet(ctx context.Context, w *domain.Wallet) error {
 		}
 		w.SyncCursor = cursor
 
-		if len(ops) < paymentsPageLimit {
+		if len(ops) < idx.config.PaymentsPageLimit {
 			break
 		}
 	}
@@ -125,22 +165,38 @@ func (idx *Indexer) persistBalances(ctx context.Context, walletID string, acct h
 }
 
 // StreamAll starts a real-time Horizon payment stream for every wallet and
-// blocks until ctx is canceled. Each wallet streams on its own goroutine so a
-// reconnect loop on one wallet never blocks or is affected by another.
-func (idx *Indexer) StreamAll(ctx context.Context, limit, offset int) error {
-	wallets, err := idx.walletRepo.List(ctx, limit, offset)
-	if err != nil {
-		return fmt.Errorf("list wallets: %w", err)
-	}
+// blocks until ctx is canceled. It pages through all wallets using limit/offset.
+// Each wallet streams on its own goroutine so a reconnect loop on one wallet
+// never blocks or is affected by another.
+func (idx *Indexer) StreamAll(ctx context.Context) error {
+	limit := idx.config.SyncPageSize
+	offset := 0
 
 	var wg sync.WaitGroup
-	for _, w := range wallets {
-		wg.Add(1)
-		go func(w *domain.Wallet) {
-			defer wg.Done()
-			idx.StreamWallet(ctx, w)
-		}(w)
+	for {
+		wallets, err := idx.walletRepo.List(ctx, limit, offset)
+		if err != nil {
+			return fmt.Errorf("list wallets: %w", err)
+		}
+
+		if len(wallets) == 0 {
+			break
+		}
+
+		for _, w := range wallets {
+			wg.Add(1)
+			go func(w *domain.Wallet) {
+				defer wg.Done()
+				idx.StreamWallet(ctx, w)
+			}(w)
+		}
+
+		if len(wallets) < limit {
+			break
+		}
+		offset += limit
 	}
+
 	wg.Wait()
 	return nil
 }
@@ -151,7 +207,7 @@ func (idx *Indexer) StreamAll(ctx context.Context, limit, offset int) error {
 // last processed cursor, until ctx is canceled.
 func (idx *Indexer) StreamWallet(ctx context.Context, w *domain.Wallet) {
 	cursor := w.SyncCursor
-	backoff := streamMinBackoff
+	backoff := idx.config.StreamMinBackoff
 
 	for {
 		select {
@@ -171,7 +227,7 @@ func (idx *Indexer) StreamWallet(ctx context.Context, w *domain.Wallet) {
 				log.Error().Err(updErr).Str("wallet_id", w.ID).Msg("indexer: update sync cursor failed")
 			}
 
-			backoff = streamMinBackoff // connection is healthy; reset for the next disconnect
+			backoff = idx.config.StreamMinBackoff // connection is healthy; reset for the next disconnect
 			return nil
 		})
 
@@ -190,16 +246,16 @@ func (idx *Indexer) StreamWallet(ctx context.Context, w *domain.Wallet) {
 		}
 
 		backoff *= 2
-		if backoff > streamMaxBackoff {
-			backoff = streamMaxBackoff
+		if backoff > idx.config.StreamMaxBackoff {
+			backoff = idx.config.StreamMaxBackoff
 		}
 	}
 }
 
 // processPayment records an inbound payment operation as a transaction, if it
 // isn't already known. Outgoing payments are skipped here since Fluxa records
-// its own outbound transfers at submission time; ExistsByTxHash guards against
-// double-processing the same operation across polling and streaming sync.
+// its own outbound transfers at submission time. Uses UpsertByTxHash to avoid
+// TOCTOU race between ExistsByTxHash check and Create.
 func (idx *Indexer) processPayment(ctx context.Context, w *domain.Wallet, op operations.Operation) error {
 	if !op.IsTransactionSuccessful() {
 		return nil
@@ -211,13 +267,6 @@ func (idx *Indexer) processPayment(ctx context.Context, w *domain.Wallet, op ope
 	}
 
 	hash := op.GetTransactionHash()
-	exists, err := idx.txRepo.ExistsByTxHash(ctx, hash)
-	if err != nil {
-		return fmt.Errorf("check existing transaction %s: %w", hash, err)
-	}
-	if exists {
-		return nil
-	}
 
 	var reference string
 	horizonTx, txErr := idx.stellar.TransactionDetail(hash)
@@ -235,8 +284,10 @@ func (idx *Indexer) processPayment(ctx context.Context, w *domain.Wallet, op ope
 	}
 	tx.Reference = reference
 
-	if err := idx.txRepo.Create(ctx, tx); err != nil {
-		return fmt.Errorf("create transaction %s: %w", hash, err)
+	// Use UpsertByTxHash to atomically insert only if tx_hash doesn't exist.
+	// This avoids the TOCTOU race in the previous check-then-act pattern.
+	if err := idx.txRepo.UpsertByTxHash(ctx, tx); err != nil {
+		return fmt.Errorf("upsert transaction %s: %w", hash, err)
 	}
 
 	log.Info().Str("wallet_id", w.ID).Str("tx_hash", hash).Str("asset", asset).Str("amount", amount).
