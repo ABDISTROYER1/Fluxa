@@ -2,6 +2,8 @@ package wallet
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/fluxa/fluxa/internal/api"
@@ -115,7 +117,10 @@ func (h *Handler) getWallet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createWallet(w http.ResponseWriter, r *http.Request) {
 	var req createWalletRequest
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			api.BadRequest(w, "invalid request body")
+			return
+		}
 	}
 
 	svc := h.svc
