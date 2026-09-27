@@ -243,15 +243,6 @@ func main() {
 	idx := indexer.New(walletRepo, txRepo, stellarClient)
 	indexerWorker := indexer.NewWorker(idx)
 
-	// Live Horizon SSE stream keeps local state in sync in near real time.
-	// processPayment is idempotent (guarded by ExistsByTxHash), so running
-	// this alongside cmd/worker's own stream is safe, just extra capacity.
-	go func() {
-		if err := idx.StreamAll(ctx, 1000, 0); err != nil {
-			log.Error().Err(err).Msg("indexer: stream all wallets failed")
-		}
-	}()
-
 	asynqSrv := asynq.NewServer(asynqOpt, asynq.Config{
 		Concurrency: 5,
 		Queues: map[string]int{
@@ -385,7 +376,7 @@ func main() {
 	<-quit
 	log.Info().Msg("shutting down")
 
-	cancel() // stop the indexer's live payment stream
+	cancel() // stop any background processes
 
 	asynqSrv.Shutdown()
 

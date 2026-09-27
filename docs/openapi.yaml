@@ -1584,10 +1584,10 @@ paths:
       summary: "List collected fees"
       description: |
         Returns fee collection totals grouped by asset and tenant.
-        Requires an admin API key (`sk_admin_` prefix).
+        Requires an admin role (Owner or Admin).
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: start_date
           in: query
@@ -1666,7 +1666,7 @@ paths:
         and the count of pending stuck transactions. Requires an admin API key.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: days
           in: query
@@ -1714,7 +1714,7 @@ paths:
         against the Stellar Horizon API. Requires an admin API key.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       responses:
         "202":
           description: "Reconciliation run started"
@@ -1745,7 +1745,7 @@ paths:
         enqueued for settlement until it is approved.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: status
           in: query
@@ -1794,7 +1794,7 @@ paths:
       summary: "Get a compliance review"
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -1832,7 +1832,7 @@ paths:
         releasing the same payment twice.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -1885,7 +1885,7 @@ paths:
         never enqueued for settlement.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -1938,7 +1938,7 @@ paths:
         every transfer is being held for review.
       tags: ["Admin"]
       security:
-        - AdminAuth: []
+        - BearerAuth: []
       responses:
         "200":
           description: "Sanctions list status"
@@ -1977,13 +1977,6 @@ components:
       description: |
         Pass a tenant API key (`sk_live_...` or `sk_test_...`) or JWT bearer token.
         In Swagger UI, enter your token in the Authorize dialog (the 'Bearer ' prefix is added automatically).
-    AdminAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: token
-      description: |
-        Pass an admin API key (`sk_admin_...`).
-        In Swagger UI, enter your admin key in the Authorize dialog (the 'Bearer ' prefix is added automatically).
     ApiKeyAuth:
       type: apiKey
       in: header

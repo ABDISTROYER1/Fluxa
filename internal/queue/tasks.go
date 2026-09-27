@@ -15,6 +15,7 @@ const (
 	TypeReconcile        = "reconcile:run"
 	TypeBalanceReconcile = "reconcile:balance"
 	TypeWebhookDeliver   = "webhook:deliver"
+	TypeTenantWebhookDeliver = "webhook:tenant_deliver"
 	TypeRunSchedules     = "schedule:run"
 	TypeTreasurySweep    = "treasury:sweep"
 	TypeRefreshSanctions = "compliance:sanctions_refresh"

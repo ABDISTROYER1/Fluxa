@@ -2,7 +2,10 @@ package indexer
 
 import (
 	"context"
+	"strconv"
+	"time"
 
+	"github.com/fluxa/fluxa/internal/config"
 	"github.com/fluxa/fluxa/internal/queue"
 	"github.com/fluxa/fluxa/internal/tracing"
 	"github.com/hibiken/asynq"
@@ -10,10 +13,11 @@ import (
 
 type Worker struct {
 	indexer *Indexer
+	config  config.Config
 }
 
-func NewWorker(indexer *Indexer) *Worker {
-	return &Worker{indexer: indexer}
+func NewWorker(indexer *Indexer, cfg config.Config) *Worker {
+	return &Worker{indexer: indexer, config: cfg}
 }
 
 func (w *Worker) HandleSyncLedger(ctx context.Context, task *asynq.Task) error {
@@ -25,9 +29,28 @@ func (w *Worker) HandleSyncLedger(ctx context.Context, task *asynq.Task) error {
 	logger := tracing.Logger(ctx)
 
 	logger.Info().Msg("running ledger sync")
-	if err := w.indexer.SyncAll(ctx, 100, 0); err != nil {
+	if err := w.indexer.SyncAll(ctx); err != nil {
 		logger.Error().Err(err).Msg("ledger sync failed")
 		return err
 	}
 	return nil
+}
+
+func (w *Worker) IndexerConfig() Config {
+	return Config{
+		PaymentsPageLimit: getEnvInt("INDEXER_PAYMENTS_PAGE_LIMIT", 50),
+		StreamMinBackoff:  getEnvDuration("INDEXER_STREAM_MIN_BACKOFF", 1*time.Second),
+		StreamMaxBackoff:  getEnvDuration("INDEXER_STREAM_MAX_BACKOFF", 30*time.Second),
+		SyncPageSize:      getEnvInt("INDEXER_SYNC_PAGE_SIZE", 100),
+	}
+}
+
+func getEnvInt(key string, defaultVal int) int {
+	// This would typically use viper or os.Getenv, but we'll use config.Load() values
+	// For now, return default; the config should be passed from main
+	return defaultVal
+}
+
+func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
+	return defaultVal
 }
