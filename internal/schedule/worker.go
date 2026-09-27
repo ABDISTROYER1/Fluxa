@@ -178,29 +178,6 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 
 		// Mark the schedule as failed so it does not silently advance past this
 		// occurrence without a visible record.
-	now := time.Now().UTC()
-	nextRun := AddInterval(sch.NextRunAt, sch.Frequency, sch.Timezone)
-	isMissedCycle := !nextRun.After(now)
-
-	if isMissedCycle && sch.MissedRunPolicy == domain.MissedRunPolicySkip {
-		for !nextRun.After(now) {
-			nextRun = AddInterval(nextRun, sch.Frequency, sch.Timezone)
-		}
-		sch.NextRunAt = nextRun
-		sch.Status = domain.ScheduleStatusActive
-		if sch.EndAt != nil && sch.NextRunAt.After(*sch.EndAt) {
-			sch.Status = domain.ScheduleStatusCompleted
-		}
-		sch.UpdatedAt = time.Now().UTC()
-		if updateErr := w.repo.Update(ctx, sch); updateErr != nil {
-			log.Error().Err(updateErr).Str("schedule_id", sch.ID).Msg("failed to update skipped schedule")
-		}
-		return
-	}
-
-	if _, err := w.transferSvc.InitiateTransfer(runCtx, sch.FromWallet, sch.ToWallet, sch.Asset, sch.Amount); err != nil {
-		log.Error().Err(err).Str("schedule_id", sch.ID).Msg("scheduled transfer failed to initiate")
-		// Fail the schedule to avoid blind advancement and skipping occurrences
 		sch.Status = domain.ScheduleStatusFailed
 		sch.UpdatedAt = time.Now().UTC()
 		if updateErr := w.repo.Update(ctx, sch); updateErr != nil {
@@ -233,15 +210,16 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 // advanceSchedule computes the next occurrence and writes it to the DB.
 // The schedule status is reset to active (it was 'processing') unless the
 // schedule has passed its end date, in which case it becomes completed.
+// With the 'skip' missed-run policy, stale occurrences between the old
+// next_run_at and now are skipped instead of replayed in a burst.
 func (w *Worker) advanceSchedule(ctx context.Context, sch *domain.Schedule) {
-	sch.NextRunAt = AddInterval(sch.NextRunAt, sch.Frequency)
-	sch.Status = domain.ScheduleStatusActive
-	if isMissedCycle {
+	now := time.Now().UTC()
+	nextRun := AddInterval(sch.NextRunAt, sch.Frequency, sch.Timezone)
+	if sch.MissedRunPolicy == domain.MissedRunPolicySkip {
 		for !nextRun.After(now) {
 			nextRun = AddInterval(nextRun, sch.Frequency, sch.Timezone)
 		}
 	}
-
 	sch.NextRunAt = nextRun
 	sch.Status = domain.ScheduleStatusActive // reset to active from processing
 	if sch.EndAt != nil && sch.NextRunAt.After(*sch.EndAt) {

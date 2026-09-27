@@ -594,19 +594,6 @@ paths:
       summary: "Initiate a transfer"
       description: "Moves an asset between two wallets, applying platform fees."
       tags: ["Transfers"]
-      parameters:
-        - name: X-Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate transfers on retries"
-        - name: Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate transfers on retries"
       requestBody:
         required: true
         content:
@@ -619,6 +606,12 @@ paths:
               asset: "USDC"
               amount: "100.0000000"
       parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+          description: "Optional idempotency key to prevent duplicate transfers on retries"
         - name: "Idempotency-Key"
           in: header
           required: true

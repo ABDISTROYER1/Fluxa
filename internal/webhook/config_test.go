@@ -124,7 +124,7 @@ func (m *mockConfigRepo) UpdateConfigLastDelivered(_ context.Context, tenantID s
 // destination checks relaxed so it can target loopback httptest servers.
 func newConfigTestService(t *testing.T, configRepo ConfigRepository) *service {
 	t.Helper()
-	svc := NewConfigService(newMockRepo(), configRepo, nil).(*service)
+	svc := NewConfigService(nil, configRepo, nil).(*service)
 	svc.allowPrivateNetworks = true
 	return svc
 }
@@ -511,7 +511,7 @@ func TestDispatchToTenants_SendsSignedPayloadAndRecordsSuccess(t *testing.T) {
 
 	// The one-time secret from creation is what signs deliveries; the config
 	// value returned to the caller is redacted.
-	if want := sign(created.Secret, deliveries[0].Payload); gotSig != want {
+	if want := signBody(created.Secret, deliveries[0].Payload); gotSig != want {
 		t.Fatalf("signature = %q, want %q", gotSig, want)
 	}
 	if gotEvent != string(domain.EventTransferSettled) {

@@ -11,7 +11,6 @@ import (
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/queue"
 	"github.com/hibiken/asynq"
-	"github.com/shopspring/decimal"
 )
 
 func TestWorker_HandleProcessTransfer_SkipsFailedTransaction(t *testing.T) {
@@ -46,7 +45,7 @@ type mockEngineRepo struct {
 }
 
 type errorSubmitEngine struct {
-	txRepo      transfer.Repository
+	txRepo      *fakeTxRepo
 	errToReturn error
 }
 
@@ -61,11 +60,7 @@ func TestWorker_HandleProcessTransfer_AmbiguousSubmission(t *testing.T) {
 		TxHash: "abc123hash",
 	}
 	txRepo := newFakeTxRepo(tx)
-	eng := &Engine{
-		txRepo: txRepo,
-	}
-	// Wrap in a custom engine or test via worker with an error containing "awaiting reconciliation"
-	worker := NewWorker(eng)
+	// Exercise the engine through the worker when the submission outcome is ambiguous.
 
 	// Directly test behavior when SubmitTransfer returns ambiguous error
 	// We can also test the repo/worker logic directly:
@@ -97,10 +92,7 @@ func TestWorker_HandleProcessTransfer_DefinitiveFailure(t *testing.T) {
 		Status: domain.StatusPending,
 	}
 	txRepo := newFakeTxRepo(tx)
-	eng := &Engine{
-		txRepo: txRepo,
-	}
-	worker := NewWorker(eng)
+	_ = NewWorker(&Engine{txRepo: txRepo})
 
 	// Simulate definitive failure update
 	err := txRepo.UpdateStatus(context.Background(), "tx-fail-1", domain.StatusFailed, "")

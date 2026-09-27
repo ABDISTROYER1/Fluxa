@@ -20,6 +20,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) AdminRoutes() func(r chi.Router) {
 	return func(r chi.Router) {
 		r.Get("/reconciliation/summary", h.summary)
+		r.Get("/reconciliation/drift", h.drift)
 		r.Post("/reconciliation/run", h.run)
 		r.Post("/transfers/{transferID}/force-settle", h.forceSettle)
 		r.Post("/reconcile/wallet/{walletID}/run", h.runReconcile)
@@ -78,7 +79,7 @@ func (h *Handler) forceSettle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actor := api.ActorFromContext(r.Context())
-	if err := h.svc.ForceSettle(r.Context(), transferID); err != nil {
+	if err := h.svc.EnqueueForceSettle(r.Context(), transferID, actor); err != nil {
 		api.InternalError(w, err)
 		return
 	}
@@ -93,7 +94,8 @@ func (h *Handler) runReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.ReconcileWallet(r.Context(), walletID); err != nil {
+	actor := api.ActorFromContext(r.Context())
+	if err := h.svc.EnqueueWalletReconcile(r.Context(), walletID, actor); err != nil {
 		api.InternalError(w, err)
 		return
 	}

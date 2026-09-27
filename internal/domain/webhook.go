@@ -14,6 +14,14 @@ const (
 	EventTypeSettlementCompleted = "settlement.completed"
 	EventTypeBatchCompleted      = "batch.completed"
 
+	EventTransferInitiated      = "transfer.initiated"
+	EventTransferSettled        = "transfer.settled"
+	EventTransferFailed         = "transfer.failed"
+	EventWalletFunded           = "wallet.funded"
+	EventConversionCompleted    = "conversion.completed"
+	EventTreasurySweepCompleted = "treasury.sweep_completed"
+	EventReconciliationDrift    = "reconciliation.drift"
+
 	EventTransferComplianceHold     = "transfer.compliance.hold"
 	EventTransferComplianceApproved = "transfer.compliance.approved"
 	EventTransferComplianceRejected = "transfer.compliance.rejected"
@@ -112,6 +120,16 @@ type TenantWebhookConfig struct {
 	// after the secret has been stripped from an API response.
 	SecretConfigured bool
 }
+
+// DeliveryStatus is the lifecycle state of a tenant webhook delivery attempt.
+type DeliveryStatus string
+
+const (
+	DeliveryPending DeliveryStatus = "pending"
+	DeliverySuccess DeliveryStatus = "success"
+	DeliveryFailed  DeliveryStatus = "failed"
+	DeliveryPaused  DeliveryStatus = "paused"
+)
 
 type TenantWebhookDelivery struct {
 	ID           string

@@ -13,9 +13,9 @@ import (
 )
 
 type CreateInput struct {
-	FromWalletID string
-	ToWalletID   string
-	Asset        string
+	FromWalletID    string
+	ToWalletID      string
+	Asset           string
 	Amount          decimal.Decimal
 	Frequency       domain.ScheduleFrequency
 	Timezone        string
@@ -71,20 +71,20 @@ func (s *service) Create(ctx context.Context, in CreateInput) (*domain.Schedule,
 
 	now := time.Now().UTC()
 	sch := &domain.Schedule{
-		ID:         uuid.New().String(),
-		TenantID:   tenantPtr,
-		FromWallet: in.FromWalletID,
-		ToWallet:   in.ToWalletID,
+		ID:              uuid.New().String(),
+		TenantID:        tenantPtr,
+		FromWallet:      in.FromWalletID,
+		ToWallet:        in.ToWalletID,
 		Asset:           in.Asset,
 		Amount:          in.Amount,
 		Frequency:       in.Frequency,
 		Timezone:        in.Timezone,
 		MissedRunPolicy: in.MissedRunPolicy,
 		NextRunAt:       in.StartAt,
-		EndAt:      in.EndAt,
-		Status:     domain.ScheduleStatusActive,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		EndAt:           in.EndAt,
+		Status:          domain.ScheduleStatusActive,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	if err := s.repo.Create(ctx, sch); err != nil {

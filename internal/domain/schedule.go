@@ -58,10 +58,10 @@ const (
 )
 
 type Schedule struct {
-	ID         string
-	TenantID   *string
-	FromWallet string
-	ToWallet   string
+	ID              string
+	TenantID        *string
+	FromWallet      string
+	ToWallet        string
 	Asset           string
 	Amount          decimal.Decimal
 	Frequency       ScheduleFrequency
@@ -69,9 +69,9 @@ type Schedule struct {
 	MissedRunPolicy MissedRunPolicy
 	NextRunAt       time.Time
 	EndAt           *time.Time
-	Status     ScheduleStatus
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	Status          ScheduleStatus
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // ScheduleRun is a durable record of a single scheduled-payout occurrence.

@@ -91,7 +91,7 @@ func (m *mockStellarClient) LoadAccount(accountID string) (horizon.Account, erro
 func (m *mockStellarClient) SubmitTransaction(tx *txnbuild.Transaction) (horizon.Transaction, error) {
 	return horizon.Transaction{}, nil
 }
-func (m *mockStellarClient) FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+func (m *mockStellarClient) FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
 	return nil, nil
 }
 func (m *mockStellarClient) TransactionDetail(hash string) (horizon.Transaction, error) {
@@ -100,10 +100,6 @@ func (m *mockStellarClient) TransactionDetail(hash string) (horizon.Transaction,
 func (m *mockStellarClient) OperationsForTransaction(hash string) ([]operations.Operation, error) {
 	return nil, nil
 }
-func (*mockStellarClient) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
-	return nil, nil
-}
-
 func (m *mockStellarClient) Payments(accountID, cursor string, limit uint) ([]operations.Operation, error) {
 	return nil, nil
 }
@@ -116,14 +112,21 @@ func (m *mockStellarClient) Offers(accountID string, limit uint) ([]horizon.Offe
 
 type mockFeeRepo struct{}
 
-func (m *mockFeeRepo) GetSchedule(ctx context.Context, tenantID *string, asset string) (*domain.FeeSchedule, error) {
+func (m *mockFeeRepo) GetSchedule(_ context.Context, _ *string, _ string) (*domain.FeeSchedule, error) {
 	return &domain.FeeSchedule{TransferFeeBps: 10}, nil
 }
-func (m *mockFeeRepo) RecordCollection(ctx context.Context, fc *domain.FeeCollection) error {
+func (m *mockFeeRepo) SetSchedule(_ context.Context, _ *domain.FeeSchedule) error { return nil }
+func (m *mockFeeRepo) RecordCollection(_ context.Context, _ *domain.FeeCollection) error {
 	return nil
 }
-func (m *mockFeeRepo) ListCollected(ctx context.Context, start, end *time.Time) ([]*domain.FeeCollection, error) {
+func (m *mockFeeRepo) ListCollected(_ context.Context, _, _ *time.Time, _ *string, _, _ int) ([]*domain.FeeCollection, error) {
 	return nil, nil
+}
+func (m *mockFeeRepo) GetMonthlyVolume(_ context.Context, _ string) (decimal.Decimal, error) {
+	return decimal.Zero, nil
+}
+func (m *mockFeeRepo) GetApplicableTier(_ context.Context, _ string, _ decimal.Decimal) *domain.FeeTier {
+	return &domain.FeeTier{TransferFeeBps: 10}
 }
 
 func TestTransferMissingTrustlineReturns422Error(t *testing.T) {

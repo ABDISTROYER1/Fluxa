@@ -153,7 +153,7 @@ func (f *fakeStellarClient) SubmitTransaction(tx *txnbuild.Transaction) (horizon
 	return horizon.Transaction{}, nil
 }
 
-func (f *fakeStellarClient) FindPathsStrict(sourceAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
+func (f *fakeStellarClient) FindPathsStrict(sourceAccount, destAccount, destAsset, destIssuer, destAmount string) ([]horizon.Path, error) {
 	return nil, nil
 }
 
@@ -162,10 +162,6 @@ func (f *fakeStellarClient) TransactionDetail(hash string) (horizon.Transaction,
 }
 
 func (f *fakeStellarClient) OperationsForTransaction(hash string) ([]operations.Operation, error) {
-	return nil, nil
-}
-
-func (m *fakeStellarClient) PaymentsForAccount(_ string, _ string, _ int) ([]operations.Payment, error) {
 	return nil, nil
 }
 

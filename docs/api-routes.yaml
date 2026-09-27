@@ -11,6 +11,9 @@ routes:
   - "DELETE /v1/keys/{id}"
   - "DELETE /v1/schedules/{id}"
   - "DELETE /v1/webhooks/{id}"
+  - GET /
+  - GET /docs
+  - GET /docs/openapi.yaml
   - GET /health
   - GET /metrics
   - GET /v1/admin/compliance/reviews
@@ -41,6 +44,8 @@ routes:
   - POST /v1/auth/register
   - POST /v1/claimable-balances
   - "POST /v1/claimable-balances/{id}/claim"
+  - POST /v1/fees/preview
+  - POST /v1/fiat/quote
   - POST /v1/fx/convert
   - POST /v1/fx/quote
   - POST /v1/keys
@@ -53,3 +58,4 @@ routes:
   - "POST /v1/wallets/{id}/withdraw/fiat"
   - POST /v1/webhooks
   - "POST /v1/webhooks/fiat/{provider}"
+  - POST /v1/withdrawals

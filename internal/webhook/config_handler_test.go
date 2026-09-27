@@ -18,7 +18,8 @@ import (
 func newConfigTestRouter(t *testing.T, svc Service, tenantID string) http.Handler {
 	t.Helper()
 	r := chi.NewRouter()
-	r.Route("/webhooks", NewHandler(svc).Routes())
+	h := NewHandler(svc)
+	r.Route("/webhooks", func(r chi.Router) { h.RegisterRoutes(r) })
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if tenantID != "" {
 			req = req.WithContext(tenant.WithID(req.Context(), tenantID))
@@ -179,7 +180,7 @@ func TestConfigHandler_RejectsInvalidBody(t *testing.T) {
 
 func TestConfigHandler_RejectsSSRFURL(t *testing.T) {
 	repo := newMockConfigRepo()
-	svc := NewConfigService(newMockRepo(), repo, nil).(*service)
+	svc := NewConfigService(nil, repo, nil).(*service)
 	// allowPrivateNetworks deliberately left false so SSRF validation applies.
 	h := newConfigTestRouter(t, svc, "tenant-1")
 
@@ -359,7 +360,7 @@ func TestConfigHandler_UpdateEvents(t *testing.T) {
 // degradation when the tenant-config tables are not present.
 func TestConfigHandler_UnavailableWithoutConfigRepo(t *testing.T) {
 	// A plain endpoint service has no config repository behind it.
-	svc := NewService(newMockRepo(), nil)
+	svc := NewService(nil, nil, nil, 0, false)
 	h := newConfigTestRouter(t, svc, "tenant-1")
 
 	for _, tc := range []struct{ method, path string }{

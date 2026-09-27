@@ -103,6 +103,9 @@ func (m *limitMockTenantRepo) GetByID(_ context.Context, id string) (*domain.Ten
 
 type limitMockFeeSvc struct{}
 
+func (m *limitMockFeeSvc) SetSchedule(_ context.Context, _ *domain.FeeSchedule) error {
+	return nil
+}
 func (m *limitMockFeeSvc) GetSchedule(_ context.Context, _ string) (*domain.FeeSchedule, error) {
 	return nil, nil
 }
@@ -115,7 +118,7 @@ func (m *limitMockFeeSvc) CalculateConversionFee(_ context.Context, _, _ string,
 func (m *limitMockFeeSvc) RecordCollection(_ context.Context, _ *domain.FeeCollection) error {
 	return nil
 }
-func (m *limitMockFeeSvc) ListCollectedSummary(_ context.Context, _, _ *time.Time) ([]domain.FeeCollectionSummary, error) {
+func (m *limitMockFeeSvc) ListCollected(_ context.Context, _, _ *time.Time, _ *string, _, _ int) ([]*domain.FeeCollection, error) {
 	return nil, nil
 }
 

@@ -32,10 +32,10 @@ func (h *Handler) Routes() func(r chi.Router) {
 }
 
 type createScheduleRequest struct {
-	FromWalletID string `json:"from_wallet_id" validate:"required,uuid"`
-	ToWalletID   string `json:"to_wallet_id"   validate:"required,uuid"`
-	Asset        string `json:"asset"          validate:"required"`
-	Amount       string `json:"amount"         validate:"required"`
+	FromWalletID    string `json:"from_wallet_id" validate:"required,uuid"`
+	ToWalletID      string `json:"to_wallet_id"   validate:"required,uuid"`
+	Asset           string `json:"asset"          validate:"required"`
+	Amount          string `json:"amount"         validate:"required"`
 	Frequency       string `json:"frequency"      validate:"required,oneof=daily weekly monthly"`
 	Timezone        string `json:"timezone"       validate:"required"`
 	MissedRunPolicy string `json:"missed_run_policy" validate:"required,oneof=skip run_once"`
@@ -44,7 +44,7 @@ type createScheduleRequest struct {
 }
 
 type updateScheduleRequest struct {
-	Status    string `json:"status"    validate:"omitempty,oneof=active paused"`
+	Status          string `json:"status"    validate:"omitempty,oneof=active paused"`
 	Amount          string `json:"amount"`
 	Frequency       string `json:"frequency"         validate:"omitempty,oneof=daily weekly monthly"`
 	Timezone        string `json:"timezone"`
@@ -53,10 +53,10 @@ type updateScheduleRequest struct {
 }
 
 type scheduleResponse struct {
-	ID           string `json:"id"`
-	FromWalletID string `json:"from_wallet_id"`
-	ToWalletID   string `json:"to_wallet_id"`
-	Asset        string `json:"asset"`
+	ID              string `json:"id"`
+	FromWalletID    string `json:"from_wallet_id"`
+	ToWalletID      string `json:"to_wallet_id"`
+	Asset           string `json:"asset"`
 	Amount          string `json:"amount"`
 	Frequency       string `json:"frequency"`
 	Timezone        string `json:"timezone"`
@@ -69,10 +69,10 @@ type scheduleResponse struct {
 
 func toScheduleResponse(s *domain.Schedule) scheduleResponse {
 	resp := scheduleResponse{
-		ID:           s.ID,
-		FromWalletID: s.FromWallet,
-		ToWalletID:   s.ToWallet,
-		Asset:        s.Asset,
+		ID:              s.ID,
+		FromWalletID:    s.FromWallet,
+		ToWalletID:      s.ToWallet,
+		Asset:           s.Asset,
 		Amount:          s.Amount.StringFixed(7),
 		Frequency:       string(s.Frequency),
 		Timezone:        s.Timezone,
@@ -127,9 +127,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sch, err := h.svc.Create(r.Context(), CreateInput{
-		FromWalletID: req.FromWalletID,
-		ToWalletID:   req.ToWalletID,
-		Asset:        req.Asset,
+		FromWalletID:    req.FromWalletID,
+		ToWalletID:      req.ToWalletID,
+		Asset:           req.Asset,
 		Amount:          amount,
 		Frequency:       domain.ScheduleFrequency(req.Frequency),
 		Timezone:        req.Timezone,

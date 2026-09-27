@@ -30,3 +30,4 @@ type Service interface {
 	CalculateConversionFee(ctx context.Context, tenantID, asset string, amount decimal.Decimal) (*TransferFee, error)
 	RecordCollection(ctx context.Context, collection *domain.FeeCollection) error
 	ListCollected(ctx context.Context, start, end *time.Time, tenantID *string, limit, offset int) ([]*domain.FeeCollection, error)
+}

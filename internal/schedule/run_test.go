@@ -112,6 +112,7 @@ func (f *fakeRunRepo) ListDue(_ context.Context, now time.Time) ([]*domain.Sched
 	}
 	return out, nil
 }
+
 // The first caller for a (scheduleID, expectedAt) inserts; subsequent callers
 // receive the existing record.  This simulates the database uniqueness constraint.
 func (f *fakeRunRepo) ClaimRun(_ context.Context, scheduleID string, tenantID *string, expectedAt time.Time) (*domain.ScheduleRun, error) {
@@ -192,8 +193,8 @@ func (f *fakeRunRepo) getRunForSchedule(scheduleID string, expectedAt time.Time)
 type idempTransferSvc struct {
 	mu      sync.Mutex
 	records map[string]*domain.Transaction // keyed by idempotency key
-	callLog []string                        // ordered list of idempotency keys seen
-	failFor map[string]error                // idempotency keys that should fail
+	callLog []string                       // ordered list of idempotency keys seen
+	failFor map[string]error               // idempotency keys that should fail
 }
 
 func newIdempTransferSvc() *idempTransferSvc {

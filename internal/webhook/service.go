@@ -3,12 +3,9 @@ package webhook
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -50,21 +47,49 @@ type Service interface {
 	ListDeadLetters(ctx context.Context, limit int) ([]*domain.WebhookDeadLetter, error)
 	ReplayDeadLetter(ctx context.Context, deadLetterID string) error
 	GetEndpointHealth(ctx context.Context, endpointID string) (*domain.WebhookHealth, error)
-	Dispatch(ctx context.Context, eventType string, payload interface{}) error
+	Dispatch(ctx context.Context, eventType domain.EventType, payload interface{}) error
 	Deliver(ctx context.Context, deliveryID string) error
 	CreateSubscription(ctx context.Context, eventType, webhookURL string) (*domain.WebhookSubscription, error)
 	ListSubscriptions(ctx context.Context) ([]*domain.WebhookSubscription, error)
 	DeleteSubscription(ctx context.Context, id string) error
 }
 
+// ConfigRepository stores the single tenant-scoped webhook configuration and
+// the delivery history produced against it. Every method is keyed by tenant ID
+// so one tenant can never read or mutate another tenant's configuration.
+type ConfigRepository interface {
+	GetConfig(ctx context.Context, tenantID string) (*domain.TenantWebhookConfig, error)
+	UpsertConfig(ctx context.Context, config *domain.TenantWebhookConfig) error
+	ListEnabledConfigs(ctx context.Context) ([]*domain.TenantWebhookConfig, error)
+	CreateConfigDelivery(ctx context.Context, delivery *domain.TenantWebhookDelivery) error
+	UpdateConfigDelivery(ctx context.Context, delivery *domain.TenantWebhookDelivery) error
+	GetConfigDelivery(ctx context.Context, id, tenantID string) (*domain.TenantWebhookDelivery, error)
+	ListConfigDeliveries(ctx context.Context, tenantID string, limit, offset int) ([]*domain.TenantWebhookDelivery, error)
+	UpdateConfigLastDelivered(ctx context.Context, tenantID string, deliveredAt time.Time) error
+}
+
+// ConfigService is the tenant-scoped webhook configuration surface. It is a
+// separate interface from Service so that deployments without tenant webhook
+// storage (and existing test doubles) can keep satisfying Service alone; the
+// HTTP handler and worker feature-detect it with a type assertion.
+type ConfigService interface {
+	GetConfig(ctx context.Context) (*domain.TenantWebhookConfig, error)
+	UpdateConfig(ctx context.Context, update domain.WebhookConfigUpdate) (*domain.WebhookConfigResult, error)
+	ListConfigDeliveries(ctx context.Context, limit, offset int) ([]*domain.TenantWebhookDelivery, error)
+	TestDelivery(ctx context.Context) (*domain.TenantWebhookDelivery, error)
+	DeliverConfig(ctx context.Context, deliveryID, tenantID string) error
+	DispatchToTenants(ctx context.Context, eventType domain.EventType, payload interface{}) error
+}
+
 type service struct {
-	repo               Repository
-	rdb                redis.UniversalClient
-	client             *http.Client
-	queueClient        *queue.Client
-	maxPerMinute       int
-	maxAttempts        int
-	backoffSchedule    []time.Time
+	repo                 Repository
+	configRepo           ConfigRepository
+	rdb                  redis.UniversalClient
+	client               *http.Client
+	queueClient          *queue.Client
+	maxPerMinute         int
+	maxAttempts          int
+	backoffSchedule      []time.Time
 	allowPrivateNetworks bool
 }
 
@@ -87,6 +112,22 @@ func NewService(repo Repository, rdb redis.UniversalClient, queueClient *queue.C
 		maxPerMinute:         maxPerMinute,
 		maxAttempts:          len(DefaultBackoffSchedule),
 		allowPrivateNetworks: allowPrivateNetworks,
+	}
+	s.client = s.newSafeHTTPClient()
+	return s
+}
+
+// NewConfigService builds a webhook service that also serves the tenant-scoped
+// webhook configuration API. The config repository is an explicit, required
+// argument so a caller exposing the config endpoints cannot forget to wire it;
+// NewService remains available for deployments without tenant webhook storage.
+func NewConfigService(repo Repository, configRepo ConfigRepository, q *queue.Client) Service {
+	s := &service{
+		repo:         repo,
+		configRepo:   configRepo,
+		queueClient:  q,
+		maxPerMinute: 120,
+		maxAttempts:  len(DefaultBackoffSchedule),
 	}
 	s.client = s.newSafeHTTPClient()
 	return s
@@ -215,8 +256,7 @@ func (s *service) ReplayDeadLetter(ctx context.Context, deadLetterID string) err
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
-	if err := s.repo.CreateDelivery(ctx, newDel);
-	err != nil {
+	if err := s.repo.CreateDelivery(ctx, newDel); err != nil {
 		return err
 	}
 
@@ -242,7 +282,7 @@ func (s *service) GetEndpointHealth(ctx context.Context, endpointID string) (*do
 	}, nil
 }
 
-func (s *service) Dispatch(ctx context.Context, eventType string, payload interface{}) error {
+func (s *service) Dispatch(ctx context.Context, eventType domain.EventType, payload interface{}) error {
 	bytesPayload, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -265,7 +305,7 @@ func (s *service) Dispatch(ctx context.Context, eventType string, payload interf
 		}
 		matched := false
 		for _, ev := range ep.Events {
-			if ev == eventType || ev == "*" {
+			if ev == string(eventType) || ev == "*" {
 				matched = true
 				break
 			}
@@ -278,7 +318,7 @@ func (s *service) Dispatch(ctx context.Context, eventType string, payload interf
 			ID:           uuid.New().String(),
 			EndpointID:   ep.ID,
 			TenantID:     ep.TenantID,
-			EventType:    eventType,
+			EventType:    string(eventType),
 			Payload:      string(bytesPayload),
 			Status:       "pending",
 			AttemptCount: 0,
@@ -405,10 +445,10 @@ func (s *service) handleDeliveryFailure(ctx context.Context, deliv *domain.Webho
 	deliv.Status = "failed"
 	deliv.ErrorMessage = errMsg
 	if code != nil {
-		deliv.ResponseCode = code
+		deliv.ResponseCode = *code
 	}
 	if body != nil {
-		deliv.ResponseBody = body
+		deliv.ResponseBody = *body
 	}
 	deliv.UpdatedAt = time.Now().UTC()
 
@@ -555,10 +595,7 @@ func (s *service) UpdateConfig(ctx context.Context, update domain.WebhookConfigU
 	// with otherwise. Rotation always mints a fresh one and invalidates the
 	// previous secret for the tenant's endpoint.
 	if config.Secret == "" || update.RotateSecret {
-		secret, err := generateSecret()
-		if err != nil {
-			return nil, fmt.Errorf("generate webhook secret: %w", err)
-		}
+		secret := generateSecret()
 		config.Secret = secret
 		revealedSecret = secret
 	}
@@ -757,8 +794,8 @@ func (s *service) DispatchToTenants(ctx context.Context, eventType domain.EventT
 				Msg("webhook: delivery recorded but not sent, tenant paused")
 			continue
 		}
-		if s.queue != nil {
-			if err := s.queue.EnqueueTenantWebhookDelivery(ctx, delivery.ID, config.TenantID); err != nil {
+		if s.queueClient != nil {
+			if err := s.queueClient.EnqueueTenantWebhookDelivery(ctx, delivery.ID, config.TenantID); err != nil {
 				// Delivery is persisted; the worker will pick it up on retry.
 				_ = err
 			}
@@ -800,7 +837,7 @@ func (s *service) attemptConfigDelivery(ctx context.Context, config *domain.Tena
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Fluxa-Signature", sign(config.Secret, delivery.Payload))
+	req.Header.Set("X-Fluxa-Signature", signBody(config.Secret, delivery.Payload))
 	req.Header.Set("X-Fluxa-Event", string(delivery.EventType))
 	req.Header.Set("X-Fluxa-Tenant-ID", delivery.TenantID)
 

@@ -16,9 +16,9 @@ func NewService(repo Repository) *Service {
 }
 
 type StatusResponse struct {
-	APIVersion     string            `json:"api_version"`
-	Status         string            `json:"status"` // operational, degraded, outage
-	Message        string            `json:"message"`
+	APIVersion      string            `json:"api_version"`
+	Status          string            `json:"status"` // operational, degraded, outage
+	Message         string            `json:"message"`
 	RecentIncidents []domain.Incident `json:"recent_incidents"`
 }
 

@@ -13,8 +13,8 @@ import (
 
 type mockFXService struct {
 	getQuoteFunc          func(ctx context.Context, from, to, amount string) (*Quote, error)
-	executeConversionFunc func(ctx context.Context, walletID, quoteID string) (*domain.Conversion, error)
-	getRatesFunc          func(ctx context.Context, from, to string) (*RatesResponse, error)
+	executeConversionFunc func(ctx context.Context, walletID, quoteID string, minAmountOut *decimal.Decimal, maxSlippageBps *int) (*domain.Conversion, error)
+	getRatesFunc          func(ctx context.Context, from, to string) (*RateResponse, error)
 }
 
 func (m *mockFXService) GetQuote(ctx context.Context, from, to, amount string) (*Quote, error) {
@@ -24,14 +24,14 @@ func (m *mockFXService) GetQuote(ctx context.Context, from, to, amount string) (
 	return nil, nil
 }
 
-func (m *mockFXService) ExecuteConversion(ctx context.Context, walletID, quoteID string) (*domain.Conversion, error) {
+func (m *mockFXService) ExecuteConversion(ctx context.Context, walletID, quoteID string, minAmountOut *decimal.Decimal, maxSlippageBps *int) (*domain.Conversion, error) {
 	if m.executeConversionFunc != nil {
-		return m.executeConversionFunc(ctx, walletID, quoteID)
+		return m.executeConversionFunc(ctx, walletID, quoteID, minAmountOut, maxSlippageBps)
 	}
 	return nil, nil
 }
 
-func (m *mockFXService) GetRates(ctx context.Context, from, to string) (*RatesResponse, error) {
+func (m *mockFXService) GetRates(ctx context.Context, from, to string) (*RateResponse, error) {
 	if m.getRatesFunc != nil {
 		return m.getRatesFunc(ctx, from, to)
 	}
@@ -60,7 +60,7 @@ func TestHandler_GetQuote(t *testing.T) {
 
 func TestHandler_Convert(t *testing.T) {
 	svc := &mockFXService{
-		executeConversionFunc: func(ctx context.Context, walletID, quoteID string) (*domain.Conversion, error) {
+		executeConversionFunc: func(ctx context.Context, walletID, quoteID string, minAmountOut *decimal.Decimal, maxSlippageBps *int) (*domain.Conversion, error) {
 			return &domain.Conversion{ID: "c-123"}, nil
 		},
 	}
@@ -81,8 +81,8 @@ func TestHandler_Convert(t *testing.T) {
 
 func TestHandler_GetRates(t *testing.T) {
 	svc := &mockFXService{
-		getRatesFunc: func(ctx context.Context, from, to string) (*RatesResponse, error) {
-			return &RatesResponse{Rate: decimal.NewFromInt(2)}, nil
+		getRatesFunc: func(ctx context.Context, from, to string) (*RateResponse, error) {
+			return &RateResponse{Rate: decimal.NewFromInt(2)}, nil
 		},
 	}
 	h := NewHandler(svc)

@@ -88,7 +88,7 @@ func TestDeliver_RevalidatesDestinationAtSendTime(t *testing.T) {
 	delivery := &domain.WebhookDelivery{
 		ID:         "dlv-ssrf",
 		EndpointID: ep.ID,
-		Payload:    []byte(`{}`),
+		Payload:    "{}",
 	}
 	svc.repo.(*fakeRepo).deliveries[delivery.ID] = delivery
 
@@ -98,7 +98,7 @@ func TestDeliver_RevalidatesDestinationAtSendTime(t *testing.T) {
 	}
 
 	stored := svc.repo.(*fakeRepo).deliveries[delivery.ID]
-	if stored.Status != domain.DeliveryFailed {
+	if stored.Status != string(domain.DeliveryFailed) {
 		t.Fatalf("delivery status = %s, want failed", stored.Status)
 	}
 }

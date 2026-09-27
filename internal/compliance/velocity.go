@@ -2,6 +2,7 @@ package compliance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -54,6 +55,21 @@ type VelocityScreener struct {
 	cfg  VelocityConfig
 }
 
+// ErrPlatformWalletNotConfigured is returned when the velocity screener is
+// asked to run without PLATFORM_WALLET_ID. Screening platform-originated
+// traffic as if the platform were an ordinary counterparty holds real customer
+// refunds, so an unconfigured screener refuses to run instead.
+var ErrPlatformWalletNotConfigured = errors.New("compliance: PLATFORM_WALLET_ID is not configured; the velocity screener cannot exempt platform traffic")
+
+// Validate reports whether the screener has the configuration it needs to run.
+// Callers should fail startup when it returns an error.
+func (v *VelocityScreener) Validate() error {
+	if v.cfg.PlatformWalletID == "" {
+		return ErrPlatformWalletNotConfigured
+	}
+	return nil
+}
+
 func NewVelocityScreener(repo VelocityRepository, cfg VelocityConfig) *VelocityScreener {
 	if cfg.Window <= 0 {
 		cfg.Window = 10 * time.Minute
@@ -84,8 +100,14 @@ func (v *VelocityScreener) Name() string { return "velocity" }
 func (v *VelocityScreener) Screen(ctx context.Context, req domain.ScreeningRequest) (domain.ScreeningDecision, error) {
 	clear := domain.ScreeningDecision{Status: domain.ScreeningClear}
 
-	if v.cfg.PlatformWalletID != "" &&
-		(req.FromWalletID == v.cfg.PlatformWalletID || req.ToWalletID == v.cfg.PlatformWalletID) {
+	// Refuse to run unconfigured: without the platform wallet ID the
+	// exemption below can never fire and the platform's own refunds and
+	// sweeps would be screened as if they were customer traffic.
+	if err := v.Validate(); err != nil {
+		return clear, err
+	}
+
+	if req.FromWalletID == v.cfg.PlatformWalletID || req.ToWalletID == v.cfg.PlatformWalletID {
 		return clear, nil
 	}
 

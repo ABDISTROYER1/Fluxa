@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
@@ -353,9 +355,28 @@ func isRetryable(err error) bool {
 	if errors.Is(err, ErrRetryableRateLimit) || errors.Is(err, ErrRetryableService) || errors.Is(err, ErrRetryableTimeout) {
 		return true
 	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	// A transport-level failure (dial timeout, connection reset, TLS error)
+	// leaves the on-chain outcome unknown: Horizon may have applied the
+	// transaction even though we never saw the response. Those errors do not
+	// always arrive as *horizonclient.Error, so recognise the net.Error
+	// interface and the usual 5xx/timeout wording explicitly.
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
 	var errCode interface{ HTTPStatus() int }
 	if errors.As(err, &errCode) {
-		if errCode.HTTPStatus() == 429 || errCode.HTTPStatus() == 503 {
+		status := errCode.HTTPStatus()
+		if status == 429 || status >= 500 {
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	for _, fragment := range []string{"timeout", "timed out", "connection reset", "connection refused", "unexpected eof", "unavailable", "503", "502", "504"} {
+		if strings.Contains(msg, fragment) {
 			return true
 		}
 	}

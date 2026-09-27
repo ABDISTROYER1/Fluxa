@@ -34,4 +34,3 @@ func RoleFromContext(ctx context.Context) string {
 	role, _ := ctx.Value(roleKey{}).(string)
 	return role
 }
-

@@ -7,13 +7,12 @@ import (
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
-	"github.com/shopspring/decimal"
 	"github.com/fluxa/fluxa/internal/queue"
 	"github.com/fluxa/fluxa/internal/stellar"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/hibiken/asynq"
+	"github.com/shopspring/decimal"
 )
-
 
 type transferCall struct {
 	fromID, toID, asset string
@@ -212,6 +211,7 @@ func TestHandleRunSchedules_MarksCompletedOncePastEndAt(t *testing.T) {
 		t.Fatalf("status = %s, want %s", repo.schedules[sch.ID].Status, domain.ScheduleStatusCompleted)
 	}
 }
+
 type failingTransferSvc struct {
 	fakeTransferSvc
 }
@@ -290,4 +290,16 @@ func TestRunOne_EndToEndFailure(t *testing.T) {
 	if updatedSch.Status != domain.ScheduleStatusFailed {
 		t.Fatalf("schedule status = %s, want failed", updatedSch.Status)
 	}
+}
+
+func (f *fakeTransferSvc) ForceSettleTransfer(_ context.Context, _, _ string) (*domain.Transaction, error) {
+	return &domain.Transaction{ID: "tx-1"}, nil
+}
+
+func (f *fakeTransferSvc) ReconcileWallet(_ context.Context, _, _ string) (*transfer.ReconcileResult, error) {
+	return &transfer.ReconcileResult{}, nil
+}
+
+func (f *fakeTransferSvc) WithAuditLogger(_ transfer.AuditLogger) transfer.Service {
+	return f
 }

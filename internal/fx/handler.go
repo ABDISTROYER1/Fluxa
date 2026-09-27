@@ -6,6 +6,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 )
 
 type Handler struct {

@@ -103,7 +103,7 @@ func (r *FeeRepo) SetSchedule(ctx context.Context, schedule *domain.FeeSchedule)
 			max_fee_amount = EXCLUDED.max_fee_amount
 	`, nullableUUID(schedule.TenantID), schedule.TransferFeeBps, schedule.ConversionFeeBps,
 		schedule.MinFeeAmount.String(), maxFee, schedule.Asset)
-	
+
 	if err != nil {
 		// Try the other conflict branch if tenant is null
 		if schedule.TenantID == nil {

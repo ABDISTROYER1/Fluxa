@@ -8,7 +8,6 @@ import (
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/fees"
-	"github.com/fluxa/fluxa/internal/queue"
 	"github.com/fluxa/fluxa/internal/stellar"
 	"github.com/fluxa/fluxa/internal/tenant"
 	walletpkg "github.com/fluxa/fluxa/internal/wallet"
@@ -71,18 +70,25 @@ type Service interface {
 	WithAuditLogger(audit AuditLogger) Service
 }
 
+// Queue is the subset of the asynq-backed queue client the transfer service
+// uses. Declaring it as an interface lets callers swap in a double and lets
+// ReconcileWallet feature-detect optional queue capabilities.
+type Queue interface {
+	EnqueueTransfer(ctx context.Context, txID string) error
+}
+
 type service struct {
 	repo       Repository
 	walletRepo walletpkg.Repository
 	feeSvc     fees.Service
-	queue      *queue.Client
+	queue      Queue
 	tenantRepo TenantGetter
 	stellar    stellar.Client
 	screener   Screener
 	audit      AuditLogger
 }
 
-func NewService(repo Repository, walletRepo walletpkg.Repository, feeSvc fees.Service, q *queue.Client, tenantRepo ...TenantGetter) Service {
+func NewService(repo Repository, walletRepo walletpkg.Repository, feeSvc fees.Service, q Queue, tenantRepo ...TenantGetter) Service {
 	s := &service{repo: repo, walletRepo: walletRepo, feeSvc: feeSvc, queue: q}
 	if len(tenantRepo) > 0 {
 		s.tenantRepo = tenantRepo[0]

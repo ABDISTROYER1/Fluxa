@@ -18,7 +18,7 @@ type Signer interface {
 
 // EnvSigner decrypts the wallet secret from AES-256-GCM storage and signs in-process.
 type EnvSigner struct {
-	masterKey       []byte
+	masterKey         []byte
 	networkPassphrase string
 }
 

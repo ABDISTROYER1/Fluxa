@@ -165,7 +165,7 @@ func (h *Handler) previewFee(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenantID := tenant.IDFromContext(r.Context())
-	
+
 	var fee *TransferFee
 	if req.Type == "transfer" {
 		fee, err = h.svc.CalculateTransferFee(r.Context(), tenantID, req.Asset, amount)
@@ -185,7 +185,6 @@ func (h *Handler) previewFee(w http.ResponseWriter, r *http.Request) {
 		FeeBps:      fee.FeeBps,
 	})
 }
-
 
 func (h *Handler) listCollected(w http.ResponseWriter, r *http.Request) {
 	var start, end *time.Time

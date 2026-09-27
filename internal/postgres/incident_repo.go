@@ -10,10 +10,10 @@ import (
 )
 
 type IncidentRepository struct {
-	db *DB
+	db DB
 }
 
-func NewIncidentRepository(db *DB) *IncidentRepository {
+func NewIncidentRepository(db DB) *IncidentRepository {
 	return &IncidentRepository{db: db}
 }
 
@@ -23,7 +23,7 @@ func (r *IncidentRepository) Create(ctx context.Context, inc *domain.Incident) e
 		VALUES (COALESCE(NULLIF($1, ''), gen_random_uuid()), $2, $3, $4, $5, COALESCE($6, NOW()), $7)
 		RETURNING id, title, description, severity, status, created_at, resolved_at
 	`
-	err := r.db.Pool.QueryRow(ctx, query,
+	err := r.db.QueryRow(ctx, query,
 		inc.ID,
 		inc.Title,
 		inc.Description,
@@ -35,14 +35,14 @@ func (r *IncidentRepository) Create(ctx context.Context, inc *domain.Incident) e
 	return err
 }
 
-func (r *IncidentRepository) GetByID(ctx context.Context, id string) (*domain.Incident, error {
+func (r *IncidentRepository) GetByID(ctx context.Context, id string) (*domain.Incident, error) {
 	query := `
 		SELECT id, title, description, severity, status, created_at, resolved_at
 		FROM incidents
 		WHERE id = $1
 	`
 	inc := &domain.Incident{}
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.QueryRow(ctx, query, id).Scan(
 		&inc.ID,
 		&inc.Title,
 		&inc.Description,
@@ -52,7 +52,7 @@ func (r *IncidentRepository) GetByID(ctx context.Context, id string) (*domain.In
 		&inc.ResolvedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
+		return nil, domain.ErrIncidentNotFound
 	}
 	return inc, err
 }
@@ -67,7 +67,7 @@ func (r *IncidentRepository) List(ctx context.Context, limit int) ([]domain.Inci
 		ORDER BY created_at DESC
 		LIMIT $1
 	`
-	rows, err := r.db.Pool.Query(ctx, query, limit)
+	rows, err := r.db.Query(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (r *IncidentRepository) Update(ctx context.Context, inc *domain.Incident) e
 		WHERE id = $1
 		RETURNING id, title, description, severity, status, created_at, resolved_at
 	`
-	err := r.db.Pool.QueryRow(ctx, query,
+	err := r.db.QueryRow(ctx, query,
 		inc.ID,
 		inc.Title,
 		inc.Description,
@@ -100,7 +100,7 @@ func (r *IncidentRepository) Update(ctx context.Context, inc *domain.Incident) e
 		inc.ResolvedAt,
 	).Scan(&inc.ID, &inc.Title, &inc.Description, &inc.Severity, &inc.Status, &inc.CreatedAt, &inc.ResolvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrNotFound
+		return domain.ErrIncidentNotFound
 	}
 	return err
 }

@@ -12,13 +12,13 @@ import (
 )
 
 type Claims struct {
-	Sub      string `json:"sub"`
-	TenantID string `json:"tenant_id"`
-	Role     string `json:"role"`
-	Email    string `json:"email"`
+	Sub       string `json:"sub"`
+	TenantID  string `json:"tenant_id"`
+	Role      string `json:"role"`
+	Email     string `json:"email"`
 	TokenType string `json:"token_type"` // access | refresh
-	Exp      int64  `json:"exp"`
-	Iat      int64  `json:"iat"`
+	Exp       int64  `json:"exp"`
+	Iat       int64  `json:"iat"`
 }
 
 type Header struct {

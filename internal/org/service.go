@@ -172,7 +172,7 @@ func (s *service) AcceptInvite(ctx context.Context, req AcceptInviteRequest) (*a
 		if err := s.orgRepo.UpdateInviteStatus(txCtx, inv.ID, "accepted"); err != nil {
 			return fmt.Errorf("update invite status: %w", err)
 		}
-		
+
 		return nil
 	}); err != nil {
 		return nil, err
