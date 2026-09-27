@@ -57,6 +57,14 @@ type Config struct {
 	// ClaimableBalanceSourceWalletID funds claimable balances whose request did
 	// not name a source wallet.
 	ClaimableBalanceSourceWalletID string
+
+	// IdempotencyTTLHours is the number of hours an idempotency record is
+	// retained after creation. The middleware uses this value when computing
+	// expires_at. The background cleanup job uses it as a cross-check but
+	// relies on the stored expires_at column — so changing this only affects
+	// new records, not ones already in the database.
+	// Default: 24 hours. Minimum enforced: 1 hour.
+	IdempotencyTTLHours int
 }
 
 func splitCSV(value string) []string {
@@ -96,6 +104,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("COMPLIANCE_RELOAD_MINUTES", "15")
 	viper.SetDefault("WORKER_ENABLED", "true")
 	viper.SetDefault("WEBHOOK_ALLOW_PRIVATE_NETWORKS", "false")
+	viper.SetDefault("IDEMPOTENCY_TTL_HOURS", "24")
 
 	viper.SetConfigFile(".env")
 	viper.SetConfigType("env")
@@ -181,5 +190,13 @@ func Load() (*Config, error) {
 		WebhookAllowPrivateNetworks: webhookAllowPrivateNetworks,
 
 		ClaimableBalanceSourceWalletID: viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
+
+		IdempotencyTTLHours: func() int {
+			h := viper.GetInt("IDEMPOTENCY_TTL_HOURS")
+			if h < 1 {
+				h = 1
+			}
+			return h
+		}(),
 	}, nil
 }

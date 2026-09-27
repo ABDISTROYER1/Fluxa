@@ -21,7 +21,9 @@ import (
 const (
 	headerKey  = "Idempotency-Key"
 	xHeaderKey = "X-Idempotency-Key"
-	ttl        = 24 * time.Hour
+	// DefaultTTL is the default idempotency key lifetime. It matches the value
+	// documented in docs/idempotency.md and the IDEMPOTENCY_TTL_HOURS default.
+	DefaultTTL = 24 * time.Hour
 )
 
 // Options controls middleware behavior for idempotency enforcement.
@@ -29,6 +31,9 @@ type Options struct {
 	// Required specifies whether the request must supply an idempotency key.
 	// If false, requests without an idempotency key proceed normally without deduplication.
 	Required bool
+	// TTL overrides the lifetime applied to new idempotency records.
+	// A zero value defaults to DefaultTTL.
+	TTL time.Duration
 }
 
 // Middleware returns middleware with optional idempotency-key semantics.
@@ -48,6 +53,10 @@ func RequiredMiddleware(repo Repository) func(http.Handler) http.Handler {
 
 // MiddlewareWithOptions returns middleware configured with the specified options.
 func MiddlewareWithOptions(repo Repository, opts Options) func(http.Handler) http.Handler {
+	ttl := opts.TTL
+	if ttl <= 0 {
+		ttl = DefaultTTL
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rawKey := ExtractKey(r)

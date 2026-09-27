@@ -129,7 +129,9 @@ func main() {
 	treasuryRepo := postgres.NewTreasuryRepo(repoDB)
 	idempotencyRepo := postgres.NewIdempotencyRepo(repoDB)
 	complianceRepo := postgres.NewComplianceRepo(repoDB).WithPrimary(db)
-	idemMW := idempotency.Middleware(idempotencyRepo)
+	idemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
+		TTL: time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
+	})
 
 	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork)
 	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarNetwork)

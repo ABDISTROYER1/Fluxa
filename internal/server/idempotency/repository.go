@@ -33,4 +33,9 @@ type Repository interface {
 	// Complete marks a record as complete and stores the response to replay
 	// on future retries of the same key.
 	Complete(ctx context.Context, orgID, key string, responseStatus int, responseBody []byte) error
+	// DeleteExpired removes all records whose expires_at is in the past.
+	// It is called by the background cleanup job and is intentionally
+	// batched to avoid long-held locks; the caller controls batch size.
+	// Returns the number of rows deleted.
+	DeleteExpired(ctx context.Context, batchSize int) (int64, error)
 }

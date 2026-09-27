@@ -131,3 +131,27 @@ func (r *IdempotencyRepo) Complete(ctx context.Context, orgID, key string, respo
 	}
 	return nil
 }
+
+// DeleteExpired removes up to batchSize rows whose expires_at is in the past.
+// Callers should loop until the returned count is zero to drain the backlog
+// without issuing one enormous DELETE that could spike I/O or hold locks.
+//
+// The per-key opportunistic delete in TryAcquire is kept: it clears the
+// unique-index conflict on the hot path (same key reused after expiry) without
+// waiting for the next scheduled sweep, which is important for low-traffic orgs
+// whose key may not be visited again within the TTL window.
+func (r *IdempotencyRepo) DeleteExpired(ctx context.Context, batchSize int) (int64, error) {
+	tag, err := r.db.Exec(ctx,
+		`DELETE FROM idempotency_records
+		 WHERE id IN (
+		     SELECT id FROM idempotency_records
+		     WHERE expires_at <= NOW()
+		     LIMIT $1
+		 )`,
+		batchSize,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("purge expired idempotency records: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

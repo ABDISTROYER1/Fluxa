@@ -9,10 +9,11 @@ second `POST /v1/transfers` that moves the same funds twice.
 
 An idempotency key breaks that ambiguity. The client generates a unique key
 once per *logical* operation and sends it as the `X-Idempotency-Key` (or `Idempotency-Key`) header.
-Fluxa remembers the outcome of the first request under that key for 24 hours;
-any retry with the same key and the same request body gets back the exact
-same response, byte for byte, without the operation running again. This is
-the same model used by Stripe, Adyen, and other payment processors.
+Fluxa remembers the outcome of the first request under that key for 24 hours
+(configurable via `IDEMPOTENCY_TTL_HOURS`); any retry with the same key and the
+same request body gets back the exact same response, byte for byte, without the
+operation running again. This is the same model used by Stripe, Adyen, and other
+payment processors.
 
 ## Endpoints that support idempotency keys
 
@@ -96,5 +97,51 @@ Any later request with the same key:
 - after it completed, with the same body → the cached response, replayed exactly
 - after it completed, with a different body → `409 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY`
 
-Records are scoped per organization and expire 24 hours after creation, after
-which the same key can be reused for a new operation.
+Records are scoped per organization and expire after the configured TTL
+(default 24 hours), after which the same key can be reused for a new operation.
+
+## TTL and cleanup
+
+The TTL for idempotency records defaults to **24 hours** and is controlled by
+the `IDEMPOTENCY_TTL_HOURS` environment variable (minimum: 1 hour). Setting a
+shorter TTL reduces storage but also shrinks the replay window — clients must
+complete all retries within the configured window.
+
+### Background cleanup job
+
+The worker process runs a cleanup goroutine every **hour** that removes all
+rows whose `expires_at` is in the past. Deletes are issued in batches of 1 000
+rows to avoid long-held locks or I/O spikes. On startup the worker immediately
+drains any backlog accumulated during downtime.
+
+The `idempotency_records` table has an index on `expires_at`
+(`idx_idempotency_records_expires_at`, added in migration
+`20260927000000`) so the batch delete uses an index scan rather than a
+sequential scan.
+
+### Per-key opportunistic delete
+
+`TryAcquire` also issues a targeted `DELETE … WHERE org_id = $1 AND key = $2
+AND expires_at <= NOW()` on the hot path when a key-reuse attempt hits an
+expired row blocking the unique index. This is deliberately kept alongside the
+background sweep:
+
+- It clears the conflict immediately on the request path, so a client reusing a
+  key after its TTL gets a fresh response without waiting for the next hourly
+  sweep.
+- It is scoped to a single `(org_id, key)` pair and never performs a
+  table-wide scan, so it has no impact on vacuum or I/O for unrelated rows.
+
+The background job covers the common case (keys used once, never retried) where
+the opportunistic delete never fires.
+
+## Data retention
+
+Every idempotency record stores a `request_hash` (a SHA-256 digest of the
+method, path, and request body) and a `response_body` (the serialized HTTP
+response). This data:
+
+- Is retained for the duration of the TTL (`IDEMPOTENCY_TTL_HOURS`, default 24h).
+- Is deleted by the background cleanup job once `expires_at` has elapsed.
+- Should be considered in any organization-level data-retention or right-to-erasure policy,
+  since `response_body` may contain transaction IDs and amounts.

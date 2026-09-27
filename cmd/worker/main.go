@@ -93,6 +93,7 @@ func main() {
 	treasuryRepo := postgres.NewTreasuryRepo(repoDB)
 	complianceRepo := postgres.NewComplianceRepo(repoDB).WithPrimary(db)
 	fiatRepo := postgres.NewFiatRepo(repoDB)
+	idempotencyRepo := postgres.NewIdempotencyRepo(repoDB)
 
 	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork)
 	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarNetwork)
@@ -159,6 +160,38 @@ func main() {
 			}
 			select {
 			case <-ticker.C:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Purge expired idempotency records every hour in batches of 1 000 rows.
+	// Batching avoids a single large DELETE that could lock the table or spike
+	// I/O. The loop drains the full backlog on each tick so that a missed tick
+	// (e.g. worker restart) does not leave a growing tail of stale rows.
+	go func() {
+		const batchSize = 1_000
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		purge := func() {
+			for {
+				n, err := idempotencyRepo.DeleteExpired(ctx, batchSize)
+				if err != nil {
+					log.Warn().Err(err).Msg("idempotency records cleanup failed")
+					return
+				}
+				log.Debug().Int64("deleted", n).Msg("idempotency records purge batch")
+				if n < batchSize {
+					return // backlog drained
+				}
+			}
+		}
+		purge() // run once at startup to clear any backlog
+		for {
+			select {
+			case <-ticker.C:
+				purge()
 			case <-ctx.Done():
 				return
 			}
