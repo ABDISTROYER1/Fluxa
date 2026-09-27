@@ -69,6 +69,14 @@ type Config struct {
 	// ClaimableBalanceSourceWalletID funds claimable balances whose request did
 	// not name a source wallet.
 	ClaimableBalanceSourceWalletID string
+
+	// IdempotencyTTLHours is the number of hours an idempotency record is
+	// retained after creation. The middleware uses this value when computing
+	// expires_at. The background cleanup job uses it as a cross-check but
+	// relies on the stored expires_at column — so changing this only affects
+	// new records, not ones already in the database.
+	// Default: 24 hours. Minimum enforced: 1 hour.
+	IdempotencyTTLHours int
 	// CORSAllowedOriginsConfiguredExplicitly is true when the operator set
 	// CORS_ALLOWED_ORIGINS rather than relying on the development default.
 	CORSAllowedOriginsConfiguredExplicitly bool
@@ -224,6 +232,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("TREASURY_RESERVE_CACHE_TTL_SECONDS", "120")
 	viper.SetDefault("TREASURY_RESERVE_CONCURRENCY", "16")
 	viper.SetDefault("WEBHOOK_ALLOW_PRIVATE_NETWORKS", "false")
+	viper.SetDefault("IDEMPOTENCY_TTL_HOURS", "24")
 	viper.SetDefault("CORS_ALLOWED_ORIGINS", "localhost:*")
 	viper.SetDefault("INDEXER_PAYMENTS_PAGE_LIMIT", "50")
 	viper.SetDefault("INDEXER_STREAM_MIN_BACKOFF", "1s")
@@ -331,6 +340,13 @@ func Load() (*Config, error) {
 
 		ClaimableBalanceSourceWalletID: viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
 
+		IdempotencyTTLHours: func() int {
+			h := viper.GetInt("IDEMPOTENCY_TTL_HOURS")
+			if h < 1 {
+				h = 1
+			}
+			return h
+		}(),
 		CORSAllowedOriginsConfiguredExplicitly: os.Getenv("CORS_ALLOWED_ORIGINS") != "",
 	}
 

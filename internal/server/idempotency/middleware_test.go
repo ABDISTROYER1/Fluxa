@@ -61,6 +61,24 @@ func (m *mockRepo) Complete(ctx context.Context, orgID, key string, responseStat
 	return nil
 }
 
+// DeleteExpired removes all records whose ExpiresAt is in the past,
+// up to batchSize rows. Returns the count of deleted records.
+func (m *mockRepo) DeleteExpired(_ context.Context, batchSize int) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var deleted int64
+	for k, rec := range m.records {
+		if !rec.ExpiresAt.IsZero() && time.Now().After(rec.ExpiresAt) {
+			delete(m.records, k)
+			deleted++
+			if int(deleted) >= batchSize {
+				break
+			}
+		}
+	}
+	return deleted, nil
+}
+
 func newRequest(t *testing.T, key, body string) *http.Request {
 	t.Helper()
 	ctx := tenant.WithID(context.Background(), "org-1")
@@ -347,5 +365,94 @@ func TestHandlerStillReceivesRequestBody(t *testing.T) {
 
 	if received != body {
 		t.Fatalf("expected handler to read original body %q, got %q", body, received)
+	}
+}
+
+// TestDeleteExpiredPurgesOnceUsedKey asserts the acceptance criterion:
+// a key used exactly once and never repeated must be removed by DeleteExpired
+// once its TTL has elapsed. Without a background sweep, such a row would stay
+// in the table forever because the opportunistic per-key delete in TryAcquire
+// only fires when the same key is reused.
+func TestDeleteExpiredPurgesOnceUsedKey(t *testing.T) {
+	repo := newMockRepo()
+	mw := idempotency.Middleware(repo)
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"id":"tx-once","status":"pending"}`))
+	}))
+
+	key := uuid.New().String()
+	dk := idempotency.DeterministicKey(key)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRequest(t, key, `{"amount":"10"}`))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	// Verify the record is present before expiry.
+	repo.mu.Lock()
+	_, present := repo.records["org-1:"+dk]
+	repo.mu.Unlock()
+	if !present {
+		t.Fatal("expected idempotency record to exist before expiry")
+	}
+
+	// Age the record so it is past its TTL.
+	repo.mu.Lock()
+	if r, ok := repo.records["org-1:"+dk]; ok {
+		r.ExpiresAt = time.Now().Add(-1 * time.Second)
+	}
+	repo.mu.Unlock()
+
+	// The key is never retried, so TryAcquire's opportunistic delete never
+	// fires. DeleteExpired must remove it.
+	n, err := repo.DeleteExpired(context.Background(), 1000)
+	if err != nil {
+		t.Fatalf("DeleteExpired returned error: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 deleted row, got %d", n)
+	}
+
+	repo.mu.Lock()
+	_, stillPresent := repo.records["org-1:"+dk]
+	repo.mu.Unlock()
+	if stillPresent {
+		t.Fatal("expected idempotency record to be removed after DeleteExpired")
+	}
+}
+
+// TestDeleteExpiredLeavesLiveRecordsAlone asserts that DeleteExpired does not
+// remove records that are still within their TTL window.
+func TestDeleteExpiredLeavesLiveRecordsAlone(t *testing.T) {
+	repo := newMockRepo()
+	mw := idempotency.Middleware(repo)
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	key := uuid.New().String()
+	dk := idempotency.DeterministicKey(key)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRequest(t, key, `{"amount":"5"}`))
+
+	// Record is fresh — DeleteExpired must not touch it.
+	n, err := repo.DeleteExpired(context.Background(), 1000)
+	if err != nil {
+		t.Fatalf("DeleteExpired returned error: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 deleted rows for live record, got %d", n)
+	}
+
+	repo.mu.Lock()
+	_, present := repo.records["org-1:"+dk]
+	repo.mu.Unlock()
+	if !present {
+		t.Fatal("expected live idempotency record to remain after DeleteExpired")
 	}
 }
