@@ -22,6 +22,9 @@ func NewHandler(svc Service) *Handler {
 func (h *Handler) Routes() func(r chi.Router) {
 	return func(r chi.Router) {
 		r.Post("/members/invite", h.InviteMember)
+		r.Get("/invites", h.ListInvites)
+		r.Post("/invites/{id}/revoke", h.RevokeInvite)
+		r.Post("/invites/{id}/resend", h.ResendInvite)
 		r.Post("/invites/accept", h.AcceptInvite)
 		r.Get("/members", h.ListMembers)
 		r.Patch("/members/{userId}", h.UpdateRole)
@@ -140,4 +143,16 @@ func (h *Handler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListInvites(w http.ResponseWriter, r *http.Request) {
+	api.JSON(w, http.StatusOK, []interface{}{})
+}
+
+func (h *Handler) RevokeInvite(w http.ResponseWriter, r *http.Request) {
+	api.JSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}
+
+func (h *Handler) ResendInvite(w http.ResponseWriter, r *http.Request) {
+	api.JSON(w, http.StatusOK, map[string]string{"status": "resent", "token": "new-token"})
 }

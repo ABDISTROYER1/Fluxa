@@ -34,6 +34,7 @@ func (h *Handler) Routes() func(r chi.Router) {
 		}
 		convert("/convert", h.convert)
 		r.Get("/rates", h.getRates)
+		r.Get("/catalog", h.getCatalog)
 	}
 }
 
@@ -115,4 +116,9 @@ func (h *Handler) getRates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.JSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) getCatalog(w http.ResponseWriter, r *http.Request) {
+	// Dummy implementation for now to satisfy routing
+	api.JSON(w, http.StatusOK, map[string]interface{}{"assets": []interface{}{}, "supported_pairs": []interface{}{}})
 }

@@ -1,0 +1,35 @@
+package fx
+
+import (
+	"context"
+	"github.com/fluxa/fluxa/internal/assets"
+)
+
+type CatalogPair struct {
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Provider string `json:"provider"`
+}
+
+type Catalog struct {
+	Assets []assets.Asset `json:"assets"`
+	Pairs  []CatalogPair  `json:"supported_pairs"`
+}
+
+func (s *service) GetCatalog(ctx context.Context, registry *assets.Registry) (*Catalog, error) {
+	pairs := make([]CatalogPair, 0)
+	for _, p := range s.providers {
+		for _, pair := range p.SupportedPairs() {
+			from, to, _ := parsePair(pair)
+			pairs = append(pairs, CatalogPair{
+				From:     from,
+				To:       to,
+				Provider: fmt.Sprintf("%T", p),
+			})
+		}
+	}
+	return &Catalog{
+		Assets: registry.List(),
+		Pairs:  pairs,
+	}, nil
+}

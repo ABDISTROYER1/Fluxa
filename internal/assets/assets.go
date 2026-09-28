@@ -53,3 +53,13 @@ func (r *Registry) IsSupported(code string) bool {
 	_, ok := r.assets[strings.ToUpper(code)]
 	return ok
 }
+
+func (r *Registry) List() []Asset {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := make([]Asset, 0, len(r.assets))
+	for _, a := range r.assets {
+		list = append(list, a)
+	}
+	return list
+}
