@@ -26,6 +26,15 @@ jobs:
       - name: Download modules
         run: go mod download
 
+      - name: Check Go formatting (gofmt)
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Run go vet
         run: go vet ./...
 

@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +69,12 @@ type Config struct {
 	// ClaimableBalanceSourceWalletID funds claimable balances whose request did
 	// not name a source wallet.
 	ClaimableBalanceSourceWalletID string
+
+	// Indexer configuration
+	IndexerPaymentsPageLimit int
+	IndexerStreamMinBackoff  string
+	IndexerStreamMaxBackoff  string
+	IndexerSyncPageSize      int
 
 	// IdempotencyTTLHours is the number of hours an idempotency record is
 	// retained after creation. The middleware uses this value when computing
@@ -179,12 +185,6 @@ func containsLocalhostWildcard(origins []string) bool {
 		}
 	}
 	return false
-
-	// Indexer configuration
-	IndexerPaymentsPageLimit int
-	IndexerStreamMinBackoff  string
-	IndexerStreamMaxBackoff  string
-	IndexerSyncPageSize      int
 }
 
 func splitCSV(value string) []string {
@@ -340,6 +340,11 @@ func Load() (*Config, error) {
 
 		ClaimableBalanceSourceWalletID: viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
 
+		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
+		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
+		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
+		IndexerSyncPageSize:      indexerSyncPageSize,
+
 		IdempotencyTTLHours: func() int {
 			h := viper.GetInt("IDEMPOTENCY_TTL_HOURS")
 			if h < 1 {
@@ -354,11 +359,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
-		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
-		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
-		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
-		IndexerSyncPageSize:      indexerSyncPageSize,
-	}, nil
 }
 
 // validateKeyEntropy checks that the encryption key has sufficient entropy.
