@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type StatusResponse } from '@/lib/api';
-import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, XCircle } from 'lucide-react';
 
 export function StatusBanner() {
   const [statusData, setStatusData] = useState<StatusResponse | null>(null);

@@ -13,6 +13,7 @@ import (
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/fees"
 	"github.com/fluxa/fluxa/internal/stellar"
+	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/fluxa/fluxa/internal/wallet"
 	"github.com/google/uuid"
@@ -29,11 +30,16 @@ var (
 )
 
 type Engine struct {
-	txRepo         transfer.Repository
-	walletRepo     wallet.Repository
-	feeSvc         fees.Service
-	stellar        stellar.Client
+	txRepo     transfer.Repository
+	walletRepo wallet.Repository
+	feeSvc     fees.Service
+	stellar    stellar.Client
+	// clientResolver and signerResolver select the live or testnet client for
+	// the request's environment. They are nil for single-environment callers,
+	// in which case stellar/signer are used directly.
+	clientResolver stellar.ClientResolver
 	signer         stellar.Signer
+	signerResolver stellar.SignerResolver
 	network        string
 	assetIssuers   map[string]string
 	feeWallet      string
@@ -74,11 +80,43 @@ func (e *Engine) SetRetryPolicy(attempts, backoffSeconds int) {
 	}
 }
 
+func (e *Engine) WithClientResolver(resolver stellar.ClientResolver) *Engine {
+	e.clientResolver = resolver
+	return e
+}
+
+func (e *Engine) WithSignerResolver(resolver stellar.SignerResolver) *Engine {
+	e.signerResolver = resolver
+	return e
+}
+
+func (e *Engine) client(ctx context.Context) stellar.Client {
+	if e.clientResolver != nil {
+		if client := e.clientResolver.ClientForMode(ctx); client != nil {
+			return client
+		}
+	}
+	return e.stellar
+}
+
+func (e *Engine) signerFor(ctx context.Context) stellar.Signer {
+	if e.signerResolver != nil {
+		if signer := e.signerResolver.SignerForMode(ctx); signer != nil {
+			return signer
+		}
+	}
+	return e.signer
+}
+
 func (e *Engine) SubmitTransfer(ctx context.Context, txID string) error {
 	tx, err := e.txRepo.GetByID(ctx, txID)
 	if err != nil {
 		return fmt.Errorf("load transaction: %w", err)
 	}
+	if tx.TenantID != nil {
+		ctx = tenant.WithID(ctx, *tx.TenantID)
+	}
+	ctx = tenant.WithMode(ctx, tx.Mode)
 
 	// Atomically claim the transaction before doing any work. This is what
 	// makes concurrent workers (duplicate queue delivery, overlapping
@@ -104,7 +142,7 @@ func (e *Engine) SubmitTransfer(ctx context.Context, txID string) error {
 		return fmt.Errorf("load source wallet: %w", err)
 	}
 
-	srcAccount, err := stellar.LoadAccountWithContext(ctx, e.stellar, srcWallet.PublicKey)
+	srcAccount, err := stellar.LoadAccountWithContext(ctx, e.client(ctx), srcWallet.PublicKey)
 	if err != nil {
 		return fmt.Errorf("load stellar account: %w", err)
 	}
@@ -170,12 +208,12 @@ func (e *Engine) SubmitTransfer(ctx context.Context, txID string) error {
 		return fmt.Errorf("decode encrypted secret: %w", err)
 	}
 
-	stellarTx, err = e.signer.Sign(stellarTx, string(encryptedSecret))
+	stellarTx, err = e.signerFor(ctx).Sign(stellarTx, string(encryptedSecret))
 	if err != nil {
 		return fmt.Errorf("sign transaction: %w", err)
 	}
 
-	txHash, err := stellarTx.HashHex(e.networkPassphrase())
+	txHash, err := stellarTx.HashHex(e.networkPassphraseFor(ctx))
 	if err != nil {
 		return fmt.Errorf("compute transaction hash: %w", err)
 	}
@@ -257,7 +295,7 @@ func (e *Engine) finalizeConfirmed(ctx context.Context, tx *domain.Transaction, 
 // `submitted` and is left for the periodic reconciliation sweep, which
 // performs this exact same lookup on a schedule until it resolves.
 func (e *Engine) tryResolveAmbiguous(ctx context.Context, tx *domain.Transaction, txID, txHash string, srcWallet, dstWallet *domain.Wallet) bool {
-	horizonTx, err := e.stellar.TransactionDetail(txHash)
+	horizonTx, err := e.client(ctx).TransactionDetail(txHash)
 	if err != nil {
 		return false
 	}
@@ -288,7 +326,10 @@ func (e *Engine) buildAsset(code string) (txnbuild.Asset, error) {
 	return txnbuild.CreditAsset{Code: code, Issuer: issuer}, nil
 }
 
-func (e *Engine) networkPassphrase() string {
+func (e *Engine) networkPassphraseFor(ctx context.Context) string {
+	if mode, ok := tenant.ModeFromContext(ctx); ok && mode == domain.ModeTest {
+		return stellarnet.TestNetworkPassphrase
+	}
 	if e.network == "mainnet" || e.network == "public" {
 		return stellarnet.PublicNetworkPassphrase
 	}
@@ -334,7 +375,7 @@ func (e *Engine) submitWithRetry(ctx context.Context, tx *txnbuild.Transaction) 
 			}
 		}
 
-		resp, err := stellar.SubmitTransactionWithContext(ctx, e.stellar, tx)
+		resp, err := stellar.SubmitTransactionWithContext(ctx, e.client(ctx), tx)
 		if err == nil {
 			return submitOutcome{hash: resp.Hash, confirmed: true}
 		}
@@ -387,7 +428,7 @@ func (e *Engine) syncWalletBalances(ctx context.Context, w *domain.Wallet) {
 	if w == nil {
 		return
 	}
-	if acct, err := stellar.LoadAccountWithContext(ctx, e.stellar, w.PublicKey); err == nil {
+	if acct, err := stellar.LoadAccountWithContext(ctx, e.client(ctx), w.PublicKey); err == nil {
 		for _, b := range acct.Balances {
 			code := b.Code
 			if code == "" {

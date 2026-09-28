@@ -2,7 +2,10 @@ package idempotency
 
 import (
 	"context"
+	"net/http"
 	"time"
+
+	"github.com/fluxa/fluxa/internal/domain"
 )
 
 const (
@@ -10,31 +13,65 @@ const (
 	StatusComplete   = "complete"
 )
 
-// Record is a persisted idempotency key and, once the original request has
-// completed, the cached response to replay on any retry.
+// AcquisitionState describes what happened when a key was looked up.
+type AcquisitionState uint8
+
+const (
+	// Acquired means the caller owns the processing lease and may run the
+	// downstream handler.
+	Acquired AcquisitionState = iota
+	// Replay means a completed response is available for the exact request.
+	Replay
+	// InProgress means another request currently owns an unexpired lease.
+	InProgress
+	// LeaseExpired means the previous owner stopped without completing the
+	// request. Only operations that are safe to retry may take this lease.
+	LeaseExpired
+	// BodyMismatch means the same key was previously used for another request.
+	BodyMismatch
+)
+
+// Record is a persisted idempotency request and, once complete, its exact
+// response. ID and LeaseToken fence stale owners from overwriting a recovered
+// record.
 type Record struct {
-	OrgID          string
-	Key            string
-	RequestHash    string
-	Status         string
-	ResponseStatus int
-	ResponseBody   []byte
-	ExpiresAt      time.Time
+	ID              string
+	OrgID           string
+	Mode            domain.Mode
+	Key             string
+	RequestHash     string
+	Status          string
+	LeaseToken      string
+	LeaseExpiresAt  time.Time
+	ExpiresAt       time.Time
+	ResponseStatus  int
+	ResponseHeaders http.Header
+	ResponseBody    []byte
 }
 
-// Repository persists idempotency records scoped by (org_id, key).
+// Acquisition is the result of atomically acquiring an idempotency key.
+type Acquisition struct {
+	State  AcquisitionState
+	Record Record
+}
+
+// Response is the durable HTTP response returned by the original request.
+type Response struct {
+	Status  int
+	Headers http.Header
+	Body    []byte
+}
+
+// Repository persists idempotency records scoped by (orgID, mode, key).
 type Repository interface {
-	// TryAcquire attempts to claim the (orgID, key) pair for a new request.
-	// If no record exists yet (or an expired one is cleared out of the way),
-	// it inserts one with status "processing" and returns (nil, false, nil) —
-	// the caller owns the request and should proceed to the handler.
-	// If a live record already exists, it returns (record, true, nil).
-	TryAcquire(ctx context.Context, orgID, key, requestHash string, expiresAt time.Time) (*Record, bool, error)
-	// Complete marks a record as complete and stores the response to replay
-	// on future retries of the same key.
-	Complete(ctx context.Context, orgID, key string, responseStatus int, responseBody []byte) error
-	// DeleteExpired removes all records whose expires_at is in the past.
-	// It is called by the background cleanup job and is intentionally
+	// Acquire atomically inserts a processing record, replays a completed
+	// response, reports an active request, or takes over an expired lease.
+	Acquire(ctx context.Context, orgID string, mode domain.Mode, key, requestHash string, now, leaseExpiresAt, recordExpiresAt time.Time, allowRecovery bool) (Acquisition, error)
+	// Complete stores the exact response and releases the processing lease.
+	// It must fail if recordID/leaseToken no longer own the processing record.
+	Complete(ctx context.Context, recordID, leaseToken string, response Response, recordExpiresAt time.Time) error
+	// DeleteExpired removes up to batchSize records whose retention window has
+	// elapsed. It is called by the background cleanup job and is intentionally
 	// batched to avoid long-held locks; the caller controls batch size.
 	// Returns the number of rows deleted.
 	DeleteExpired(ctx context.Context, batchSize int) (int64, error)

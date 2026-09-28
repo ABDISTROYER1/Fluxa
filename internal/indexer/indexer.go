@@ -117,7 +117,7 @@ func (idx *Indexer) SyncWallet(ctx context.Context, w *domain.Wallet) error {
 
 	cursor := w.SyncCursor
 	for {
-		ops, err := stellar.PaymentsWithContext(ctx, idx.stellar, w.PublicKey, cursor, idx.config.PaymentsPageLimit)
+		ops, err := stellar.PaymentsWithContext(ctx, idx.stellar, w.PublicKey, cursor, uint(idx.config.PaymentsPageLimit))
 		if err != nil {
 			return fmt.Errorf("fetch payments since cursor %q: %w", cursor, err)
 		}

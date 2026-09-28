@@ -8,6 +8,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/fees"
+	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/stellar"
 	"github.com/fluxa/fluxa/internal/tenant"
 	walletpkg "github.com/fluxa/fluxa/internal/wallet"
@@ -65,9 +66,6 @@ type Service interface {
 	// worker's screener-less wiring still compiles; when unset, transfers
 	// are not screened.
 	WithScreener(screener Screener) Service
-	ForceSettleTransfer(ctx context.Context, id, actor string) (*domain.Transaction, error)
-	ReconcileWallet(ctx context.Context, walletID, actor string) (*ReconcileResult, error)
-	WithAuditLogger(audit AuditLogger) Service
 }
 
 // Queue is the subset of the asynq-backed queue client the transfer service
@@ -78,14 +76,15 @@ type Queue interface {
 }
 
 type service struct {
-	repo       Repository
-	walletRepo walletpkg.Repository
-	feeSvc     fees.Service
-	queue      Queue
-	tenantRepo TenantGetter
-	stellar    stellar.Client
-	screener   Screener
-	audit      AuditLogger
+	repo           Repository
+	walletRepo     walletpkg.Repository
+	feeSvc         fees.Service
+	queue          Queue
+	tenantRepo     TenantGetter
+	stellar        stellar.Client
+	clientResolver stellar.ClientResolver
+	screener       Screener
+	audit          AuditLogger
 }
 
 func NewService(repo Repository, walletRepo walletpkg.Repository, feeSvc fees.Service, q Queue, tenantRepo ...TenantGetter) Service {
@@ -99,6 +98,31 @@ func NewService(repo Repository, walletRepo walletpkg.Repository, feeSvc fees.Se
 func (s *service) WithStellarClient(stellarClient stellar.Client) Service {
 	s.stellar = stellarClient
 	return s
+}
+
+func (s *service) WithClientResolver(resolver stellar.ClientResolver) Service {
+	s.clientResolver = resolver
+	return s
+}
+
+func (s *service) client(ctx context.Context) stellar.Client {
+	if s.clientResolver != nil {
+		if resolved := s.clientResolver.ClientForMode(ctx); resolved != nil {
+			return resolved
+		}
+	}
+	return s.stellar
+}
+
+// ConfigureClientResolver attaches mode-aware Horizon selection without
+// expanding the legacy Service interface implemented by downstream fakes.
+func ConfigureClientResolver(svc Service, resolver stellar.ClientResolver) Service {
+	if configurable, ok := svc.(interface {
+		WithClientResolver(stellar.ClientResolver) Service
+	}); ok {
+		return configurable.WithClientResolver(resolver)
+	}
+	return svc
 }
 
 func (s *service) WithScreener(screener Screener) Service {
@@ -117,6 +141,15 @@ func (s *service) InitiateTransfer(ctx context.Context, fromID, toID, asset stri
 
 func (s *service) InitiateTransferIdempotent(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, idempotencyKey string) (*domain.Transaction, error) {
 	if idempotencyKey != "" {
+		if recordRepo, ok := s.repo.(IdempotencyRecordRepository); ok {
+			if recordID := idempotency.RecordIDFromContext(ctx); recordID != "" {
+				if existing, err := recordRepo.GetByIdempotencyRecordID(ctx, recordID); err == nil {
+					return existing, nil
+				} else if !errors.Is(err, domain.ErrTransactionNotFound) {
+					return nil, fmt.Errorf("check idempotency record: %w", err)
+				}
+			}
+		}
 		if existing, err := s.repo.GetByIdempotencyKey(ctx, tenant.IDFromContext(ctx), idempotencyKey); err == nil {
 			return existing, nil
 		} else if !errors.Is(err, domain.ErrTransactionNotFound) {
@@ -136,6 +169,7 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 	}
 
 	tenantID := tenant.IDFromContext(ctx)
+	mode := tenant.ModeOrDefault(ctx, domain.ModeLive)
 	var monthlyLimit int
 	if tenantID != "" && s.tenantRepo != nil {
 		t, err := s.tenantRepo.GetByID(ctx, tenantID)
@@ -223,21 +257,32 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 		Fee:            feeResult.FeeAmount,
 		FeeBps:         feeResult.FeeBps,
 		TenantID:       tenantPtr,
+		Mode:           mode,
 		BatchID:        batchPtr,
 		Reference:      reference,
 		CreatedAt:      time.Now().UTC(),
 		IdempotencyKey: idempotencyKey,
 	}
+	if recordID := idempotency.RecordIDFromContext(ctx); recordID != "" && idempotencyKey != "" {
+		tx.IdempotencyRecordID = &recordID
+	}
 
+	var createErr error
 	if monthlyLimit > 0 {
 		now := time.Now().UTC()
-		if err := s.repo.CreateWithMonthlyLimit(ctx, tx, tenantID, now.Year(), now.Month(), monthlyLimit); err != nil {
-			return nil, err
-		}
+		createErr = s.repo.CreateWithMonthlyLimit(ctx, tx, tenantID, now.Year(), now.Month(), monthlyLimit)
 	} else {
-		if err := s.repo.Create(ctx, tx); err != nil {
-			return nil, fmt.Errorf("persist transaction: %w", err)
+		createErr = s.repo.Create(ctx, tx)
+	}
+	if createErr != nil {
+		if tx.IdempotencyRecordID != nil && errors.Is(createErr, domain.ErrConcurrentUpdate) {
+			if recordRepo, ok := s.repo.(IdempotencyRecordRepository); ok {
+				if existing, lookupErr := recordRepo.GetByIdempotencyRecordID(ctx, *tx.IdempotencyRecordID); lookupErr == nil {
+					return existing, nil
+				}
+			}
 		}
+		return nil, createErr
 	}
 
 	if tx.Status == domain.StatusComplianceHold {
@@ -265,7 +310,7 @@ func (s *service) validateTrustline(ctx context.Context, walletID, publicKey, as
 	hasTrustline := false
 
 	if s.stellar != nil {
-		acct, err := stellar.LoadAccountWithContext(ctx, s.stellar, publicKey)
+		acct, err := stellar.LoadAccountWithContext(ctx, s.client(ctx), publicKey)
 		if err != nil {
 			hErr, ok := err.(*horizonclient.Error)
 			if ok && hErr.Response.Status == "404" {
@@ -318,7 +363,7 @@ func (s *service) ForceSettleTransfer(ctx context.Context, id, actor string) (*d
 	if err != nil {
 		return nil, fmt.Errorf("get transaction: %w", err)
 	}
-	if tx.Status == domain.StatusSettled || tx.Status == domain.StatusFailed || tx.Status == domain.StatusReversed {
+	if tx.Status == domain.StatusConfirmed || tx.Status == domain.StatusFailed || tx.Status == domain.StatusReconciliationFailed {
 		return nil, ErrTransferFinal
 	}
 	if s.queue == nil {

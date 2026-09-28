@@ -2,14 +2,19 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+var ErrIdempotencyLeaseLost = errors.New("idempotency processing lease is no longer owned")
 
 type IdempotencyRepo struct {
 	db DB
@@ -19,127 +24,212 @@ func NewIdempotencyRepo(db DB) *IdempotencyRepo {
 	return &IdempotencyRepo{db: db}
 }
 
-func (r *IdempotencyRepo) TryAcquire(ctx context.Context, orgID, key, requestHash string, expiresAt time.Time) (*idempotency.Record, bool, error) {
-	acquired, err := r.insertIfAbsent(ctx, orgID, key, requestHash, expiresAt)
+// Acquire atomically claims (orgID, mode, key) for a new request. A record that
+// has outlived its retention window is replaced with a fresh generation so a
+// recovered request can never be confused with a later one that reuses the key.
+func (r *IdempotencyRepo) Acquire(ctx context.Context, orgID string, mode domain.Mode, key, requestHash string, now, leaseExpiresAt, recordExpiresAt time.Time, allowRecovery bool) (idempotency.Acquisition, error) {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return nil, false, err
+		return idempotency.Acquisition{}, fmt.Errorf("begin idempotency acquisition: %w", err)
 	}
-	if acquired {
-		return nil, false, nil
-	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	rec, found, err := r.lookupLive(ctx, orgID, key)
+	acquisition, inserted, err := insertProcessingRecord(ctx, tx, orgID, mode, key, requestHash, leaseExpiresAt, recordExpiresAt)
 	if err != nil {
-		return nil, false, err
+		return idempotency.Acquisition{}, err
 	}
-	if found {
-		return rec, true, nil
-	}
-
-	// No live record was found, so whatever is blocking the unique index is
-	// expired — clear it and retry the insert once.
-	if _, err := r.db.Exec(ctx,
-		`DELETE FROM idempotency_records WHERE org_id = $1 AND key = $2 AND expires_at <= NOW()`,
-		orgID, key,
-	); err != nil {
-		return nil, false, fmt.Errorf("clear expired idempotency record: %w", err)
-	}
-
-	acquired, err = r.insertIfAbsent(ctx, orgID, key, requestHash, expiresAt)
-	if err != nil {
-		return nil, false, err
-	}
-	if acquired {
-		return nil, false, nil
-	}
-
-	// Lost a race against a concurrent retry of the same expired key —
-	// whoever won is now the live record.
-	rec, _, err = r.lookupLive(ctx, orgID, key)
-	if err != nil {
-		return nil, false, err
-	}
-	return rec, true, nil
-}
-
-func (r *IdempotencyRepo) insertIfAbsent(ctx context.Context, orgID, key, requestHash string, expiresAt time.Time) (bool, error) {
-	var insertedID string
-	err := r.db.QueryRow(ctx,
-		`INSERT INTO idempotency_records (id, org_id, key, request_hash, status, created_at, expires_at)
-		 VALUES ($1, $2, $3, $4, 'processing', NOW(), $5)
-		 ON CONFLICT (org_id, key) DO NOTHING
-		 RETURNING id`,
-		uuid.New().String(), orgID, key, requestHash, expiresAt,
-	).Scan(&insertedID)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	return false, fmt.Errorf("acquire idempotency record: %w", err)
-}
-
-// lookupLive reads the current record for (orgID, key), if any that has not
-// expired. It runs the read as SELECT ... FOR UPDATE SKIP LOCKED inside its
-// own short transaction, matching the locking discipline used elsewhere in
-// this codebase for claim-style reads (see TransactionRepo.GetPendingTxesForReconciliation).
-func (r *IdempotencyRepo) lookupLive(ctx context.Context, orgID, key string) (*idempotency.Record, bool, error) {
-	dbTx, err := r.db.Begin(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf("begin idempotency lookup: %w", err)
-	}
-	defer dbTx.Rollback(ctx)
-
-	rec := &idempotency.Record{OrgID: orgID, Key: key}
-	var responseStatus *int
-	var responseBody []byte
-	err = dbTx.QueryRow(ctx,
-		`SELECT status, request_hash, response_status, response_body
-		 FROM idempotency_records
-		 WHERE org_id = $1 AND key = $2 AND expires_at > NOW()
-		 FOR UPDATE SKIP LOCKED`,
-		orgID, key,
-	).Scan(&rec.Status, &rec.RequestHash, &responseStatus, &responseBody)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, false, nil
+	if inserted {
+		if err := tx.Commit(ctx); err != nil {
+			return idempotency.Acquisition{}, fmt.Errorf("commit idempotency acquisition: %w", err)
 		}
-		return nil, false, fmt.Errorf("lookup idempotency record: %w", err)
+		return acquisition, nil
 	}
 
-	if err := dbTx.Commit(ctx); err != nil {
-		return nil, false, fmt.Errorf("commit idempotency lookup: %w", err)
+	rec, err := lockExistingRecord(ctx, tx, orgID, mode, key)
+	if err != nil {
+		return idempotency.Acquisition{}, err
 	}
 
+	// A fully retained generation gets a new record ID. Transactions linked to
+	// an expired generation therefore cannot be mistaken for a later request
+	// that happens to reuse the same client key.
+	if !rec.ExpiresAt.After(now.UTC()) {
+		if _, err := tx.Exec(ctx, `DELETE FROM idempotency_records WHERE id = $1`, rec.ID); err != nil {
+			return idempotency.Acquisition{}, fmt.Errorf("delete expired idempotency record: %w", err)
+		}
+		acquisition, _, err = insertProcessingRecord(ctx, tx, orgID, mode, key, requestHash, leaseExpiresAt, recordExpiresAt)
+		if err != nil {
+			return idempotency.Acquisition{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return idempotency.Acquisition{}, fmt.Errorf("commit idempotency generation rollover: %w", err)
+		}
+		return acquisition, nil
+	}
+
+	// A request that is still (or was never) finished owns the key. Its body is
+	// irrelevant: the client must retry later rather than start a competing
+	// generation, so the body-mismatch check runs only once the original has
+	// completed and a response actually exists to compare against.
+	now = now.UTC()
+	if rec.Status == idempotency.StatusProcessing {
+		if rec.LeaseExpiresAt.IsZero() || !rec.LeaseExpiresAt.After(now) {
+			if allowRecovery {
+				newToken := uuid.New().String()
+				if _, err := tx.Exec(ctx,
+					`UPDATE idempotency_records
+					 SET lease_token = $2, lease_expires_at = $3, updated_at = NOW()
+					 WHERE id = $1 AND status = 'processing'`,
+					rec.ID, newToken, leaseExpiresAt.UTC(),
+				); err != nil {
+					return idempotency.Acquisition{}, fmt.Errorf("take over idempotency lease: %w", err)
+				}
+				rec.LeaseToken = newToken
+				rec.LeaseExpiresAt = leaseExpiresAt.UTC()
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return idempotency.Acquisition{}, fmt.Errorf("commit idempotency lease takeover: %w", err)
+			}
+			return idempotency.Acquisition{State: idempotency.LeaseExpired, Record: rec}, nil
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return idempotency.Acquisition{}, fmt.Errorf("commit idempotency in-progress lookup: %w", err)
+		}
+		return idempotency.Acquisition{State: idempotency.InProgress, Record: rec}, nil
+	}
+
+	if rec.RequestHash != requestHash {
+		if err := tx.Commit(ctx); err != nil {
+			return idempotency.Acquisition{}, fmt.Errorf("commit idempotency body mismatch: %w", err)
+		}
+		return idempotency.Acquisition{State: idempotency.BodyMismatch, Record: rec}, nil
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return idempotency.Acquisition{}, fmt.Errorf("commit idempotency replay lookup: %w", err)
+	}
+	return idempotency.Acquisition{State: idempotency.Replay, Record: rec}, nil
+}
+
+func insertProcessingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domain.Mode, key, requestHash string, leaseExpiresAt, recordExpiresAt time.Time) (idempotency.Acquisition, bool, error) {
+	recordID := uuid.New().String()
+	leaseToken := uuid.New().String()
+	var insertedID string
+	err := tx.QueryRow(ctx,
+		`INSERT INTO idempotency_records
+			(id, org_id, mode, key, request_hash, status, lease_token, lease_expires_at, created_at, updated_at, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, NOW(), NOW(), $8)
+		 ON CONFLICT (org_id, mode, key) DO NOTHING
+		 RETURNING id`,
+		recordID, orgID, mode, key, requestHash, leaseToken, leaseExpiresAt.UTC(), recordExpiresAt.UTC(),
+	).Scan(&insertedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return idempotency.Acquisition{}, false, nil
+	}
+	if err != nil {
+		return idempotency.Acquisition{}, false, fmt.Errorf("insert idempotency record: %w", err)
+	}
+	return idempotency.Acquisition{
+		State: idempotency.Acquired,
+		Record: idempotency.Record{
+			ID:             insertedID,
+			OrgID:          orgID,
+			Mode:           mode,
+			Key:            key,
+			RequestHash:    requestHash,
+			Status:         idempotency.StatusProcessing,
+			LeaseToken:     leaseToken,
+			LeaseExpiresAt: leaseExpiresAt.UTC(),
+			ExpiresAt:      recordExpiresAt.UTC(),
+		},
+	}, true, nil
+}
+
+func lockExistingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domain.Mode, key string) (idempotency.Record, error) {
+	rec := idempotency.Record{OrgID: orgID, Mode: mode, Key: key}
+	var responseStatus *int
+	var responseHeaders []byte
+	var leaseToken *string
+	var leaseExpiresAt *time.Time
+	var recordExpiresAt time.Time
+	err := tx.QueryRow(ctx,
+		`SELECT id, mode, request_hash, status, response_status, response_headers,
+		        response_body_bytes, lease_token, lease_expires_at, expires_at
+		 FROM idempotency_records
+		 WHERE org_id = $1 AND mode = $2 AND key = $3
+		 FOR UPDATE`,
+		orgID, mode, key,
+	).Scan(
+		&rec.ID,
+		&rec.Mode,
+		&rec.RequestHash,
+		&rec.Status,
+		&responseStatus,
+		&responseHeaders,
+		&rec.ResponseBody,
+		&leaseToken,
+		&leaseExpiresAt,
+		&recordExpiresAt,
+	)
+	if err != nil {
+		return idempotency.Record{}, fmt.Errorf("lock idempotency record: %w", err)
+	}
+	if leaseToken != nil {
+		rec.LeaseToken = *leaseToken
+	}
+	if leaseExpiresAt != nil {
+		rec.LeaseExpiresAt = leaseExpiresAt.UTC()
+	}
+	rec.ExpiresAt = recordExpiresAt.UTC()
 	if responseStatus != nil {
 		rec.ResponseStatus = *responseStatus
 	}
-	rec.ResponseBody = responseBody
-	return rec, true, nil
+	if len(responseHeaders) > 0 {
+		rec.ResponseHeaders = make(http.Header)
+		if err := json.Unmarshal(responseHeaders, &rec.ResponseHeaders); err != nil {
+			return idempotency.Record{}, fmt.Errorf("decode idempotency response headers: %w", err)
+		}
+	}
+	return rec, nil
 }
 
-func (r *IdempotencyRepo) Complete(ctx context.Context, orgID, key string, responseStatus int, responseBody []byte) error {
-	_, err := r.db.Exec(ctx,
+// Complete stores the exact response and releases the processing lease. It is
+// fenced on the lease token: if the lease was taken over (or the record was
+// already completed) the write is rejected so a stale owner cannot overwrite
+// the recovered generation's response.
+func (r *IdempotencyRepo) Complete(ctx context.Context, recordID, leaseToken string, response idempotency.Response, recordExpiresAt time.Time) error {
+	headers, err := json.Marshal(response.Headers)
+	if err != nil {
+		return fmt.Errorf("encode idempotency response headers: %w", err)
+	}
+	tag, err := r.db.Exec(ctx,
 		`UPDATE idempotency_records
-		 SET status = 'complete', response_status = $3, response_body = $4
-		 WHERE org_id = $1 AND key = $2`,
-		orgID, key, responseStatus, responseBody,
+		 SET status = 'complete',
+		     response_status = $3,
+		     response_headers = $4,
+		     response_body_bytes = $5,
+		     lease_token = NULL,
+		     lease_expires_at = NULL,
+		     expires_at = $6,
+		     updated_at = NOW()
+		 WHERE id = $1
+		   AND lease_token = $2
+		   AND status = 'processing'`,
+		recordID, leaseToken, response.Status, headers, response.Body, recordExpiresAt.UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("complete idempotency record: %w", err)
 	}
+	if tag.RowsAffected() != 1 {
+		return ErrIdempotencyLeaseLost
+	}
 	return nil
 }
 
-// DeleteExpired removes up to batchSize rows whose expires_at is in the past.
-// Callers should loop until the returned count is zero to drain the backlog
-// without issuing one enormous DELETE that could spike I/O or hold locks.
-//
-// The per-key opportunistic delete in TryAcquire is kept: it clears the
-// unique-index conflict on the hot path (same key reused after expiry) without
-// waiting for the next scheduled sweep, which is important for low-traffic orgs
-// whose key may not be visited again within the TTL window.
+// DeleteExpired removes up to batchSize rows whose retention window has
+// elapsed. Callers should loop until the returned count is zero to drain the
+// backlog without issuing one enormous DELETE that could spike I/O or hold
+// locks.
 func (r *IdempotencyRepo) DeleteExpired(ctx context.Context, batchSize int) (int64, error) {
 	tag, err := r.db.Exec(ctx,
 		`DELETE FROM idempotency_records

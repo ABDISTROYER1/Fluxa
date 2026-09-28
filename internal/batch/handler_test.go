@@ -68,30 +68,56 @@ func newMockIdemRepo() *mockIdemRepo {
 	return &mockIdemRepo{records: map[string]*idempotency.Record{}}
 }
 
-func (m *mockIdemRepo) TryAcquire(_ context.Context, orgID, key, requestHash string, _ time.Time) (*idempotency.Record, bool, error) {
+func (m *mockIdemRepo) Acquire(_ context.Context, orgID string, mode domain.Mode, key, requestHash string, now, leaseExpiresAt, recordExpiresAt time.Time, _ bool) (idempotency.Acquisition, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	k := orgID + ":" + key
+	k := orgID + ":" + string(mode) + ":" + key
 	if rec, ok := m.records[k]; ok {
-		cp := *rec
-		return &cp, true, nil
+		if rec.RequestHash != requestHash {
+			return idempotency.Acquisition{State: idempotency.BodyMismatch, Record: *rec}, nil
+		}
+		if rec.Status == idempotency.StatusComplete {
+			return idempotency.Acquisition{State: idempotency.Replay, Record: *rec}, nil
+		}
+		return idempotency.Acquisition{State: idempotency.InProgress, Record: *rec}, nil
 	}
-	m.records[k] = &idempotency.Record{OrgID: orgID, Key: key, RequestHash: requestHash, Status: idempotency.StatusProcessing}
-	return nil, false, nil
+	rec := &idempotency.Record{ID: uuid.NewString(), OrgID: orgID, Mode: mode, Key: key, RequestHash: requestHash, Status: idempotency.StatusProcessing, LeaseToken: uuid.NewString(), LeaseExpiresAt: leaseExpiresAt, ExpiresAt: recordExpiresAt}
+	m.records[k] = rec
+	return idempotency.Acquisition{State: idempotency.Acquired, Record: *rec}, nil
 }
 
-func (m *mockIdemRepo) Complete(_ context.Context, orgID, key string, responseStatus int, responseBody []byte) error {
+func (m *mockIdemRepo) Complete(_ context.Context, recordID, leaseToken string, response idempotency.Response, recordExpiresAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	k := orgID + ":" + key
-	rec, ok := m.records[k]
-	if !ok {
-		return nil
+	for _, rec := range m.records {
+		if rec.ID == recordID && rec.LeaseToken == leaseToken {
+			rec.Status = idempotency.StatusComplete
+			rec.ResponseStatus = response.Status
+			rec.ResponseBody = response.Body
+			rec.ResponseHeaders = response.Headers
+			rec.ExpiresAt = recordExpiresAt
+			rec.LeaseToken = ""
+			rec.LeaseExpiresAt = time.Time{}
+		}
 	}
-	rec.Status = idempotency.StatusComplete
-	rec.ResponseStatus = responseStatus
-	rec.ResponseBody = responseBody
 	return nil
+}
+
+// DeleteExpired removes records whose retention window has elapsed.
+func (m *mockIdemRepo) DeleteExpired(_ context.Context, batchSize int) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var deleted int64
+	for k, rec := range m.records {
+		if !rec.ExpiresAt.IsZero() && time.Now().After(rec.ExpiresAt) {
+			delete(m.records, k)
+			deleted++
+			if int(deleted) >= batchSize {
+				break
+			}
+		}
+	}
+	return deleted, nil
 }
 
 func newBatchRouter(svc Service, repo idempotency.Repository) http.Handler {
@@ -105,6 +131,7 @@ func newBatchRequest(t *testing.T, key string) *http.Request {
 	t.Helper()
 	body := `{"from_wallet_id":"11111111-1111-4111-8111-111111111111","transfers":[{"to_wallet_id":"22222222-2222-4222-8222-222222222222","asset":"USDC","amount":"10"}]}`
 	ctx := tenant.WithID(context.Background(), "org-1")
+	ctx = tenant.WithMode(ctx, domain.ModeLive)
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body)).WithContext(ctx)
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
@@ -166,17 +193,28 @@ func TestCreateBatchDuplicateKeyReplaysCachedResponseWithoutReprocessing(t *test
 	}
 }
 
-func TestCreateBatchInvalidIdempotencyKeyFormatIsRejected(t *testing.T) {
+// TestCreateBatchNormalizesClientSuppliedKey asserts the documented contract
+// for the Idempotency-Key header: any stable client-supplied string is mapped
+// to a deterministic UUID, so opaque reference ids (not just UUIDs) dedupe.
+func TestCreateBatchNormalizesClientSuppliedKey(t *testing.T) {
 	svc := &fakeService{}
 	router := newBatchRouter(svc, newMockIdemRepo())
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, newBatchRequest(t, "not-a-uuid"))
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, newBatchRequest(t, "not-a-uuid"))
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for a malformed client-supplied key, got %d", rec.Code)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for a client-supplied reference key, got %d: %s", first.Code, first.Body.String())
 	}
-	if svc.hits() != 0 {
-		t.Fatalf("expected CreateBatch not to run for a rejected key, ran %d times", svc.hits())
+
+	// The same raw key must replay rather than create a second batch.
+	second := httptest.NewRecorder()
+	router.ServeHTTP(second, newBatchRequest(t, "not-a-uuid"))
+
+	if svc.hits() != 1 {
+		t.Fatalf("expected CreateBatch to run exactly once, ran %d times", svc.hits())
+	}
+	if first.Body.String() != second.Body.String() {
+		t.Fatalf("expected identical replayed response, got %q vs %q", first.Body.String(), second.Body.String())
 	}
 }

@@ -61,13 +61,30 @@ func (r *IncidentRepository) List(ctx context.Context, limit int) ([]domain.Inci
 	if limit <= 0 {
 		limit = 50
 	}
-	query := `
+	return r.list(ctx, `
 		SELECT id, title, description, severity, status, created_at, resolved_at
 		FROM incidents
 		ORDER BY created_at DESC
 		LIMIT $1
-	`
-	rows, err := r.db.Query(ctx, query, limit)
+	`, limit)
+}
+
+// ListActive returns unresolved incidents, worst severity first, so the public
+// status endpoint can derive the platform state without paging the full
+// incident history.
+func (r *IncidentRepository) ListActive(ctx context.Context) ([]domain.Incident, error) {
+	return r.list(ctx, `
+		SELECT id, title, description, severity, status, created_at, resolved_at
+		FROM incidents
+		WHERE status <> 'resolved'
+		ORDER BY
+			CASE severity WHEN 'critical' THEN 1 WHEN 'major' THEN 2 ELSE 3 END,
+			created_at DESC
+	`)
+}
+
+func (r *IncidentRepository) list(ctx context.Context, query string, args ...interface{}) ([]domain.Incident, error) {
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +98,7 @@ func (r *IncidentRepository) List(ctx context.Context, limit int) ([]domain.Inci
 		}
 		incidents = append(incidents, inc)
 	}
-	return incidents, nil
+	return incidents, rows.Err()
 }
 
 func (r *IncidentRepository) Update(ctx context.Context, inc *domain.Incident) error {

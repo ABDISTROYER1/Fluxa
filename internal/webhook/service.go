@@ -399,7 +399,7 @@ func (s *service) Deliver(ctx context.Context, deliveryID string) error {
 	sig := sign(ep.Secret, timestamp, []byte(deliv.Payload))
 
 	if err := s.validateWebhookURL(ctx, ep.URL); err != nil {
-		return s.handleDeliveryFailure(ctx, deliv, ep, err.Error(), nil, nil)
+		return s.handleDeliveryFailure(ctx, deliv, ep, err.Error(), nil, nil, err)
 	}
 
 	method := deliv.Method
@@ -408,7 +408,7 @@ func (s *service) Deliver(ctx context.Context, deliveryID string) error {
 	}
 	req, err := http.NewRequestWithContext(ctx, method, ep.URL, bytes.NewBufferString(deliv.Payload))
 	if err != nil {
-		return s.handleDeliveryFailure(ctx, deliv, ep, err.Error(), nil, nil)
+		return s.handleDeliveryFailure(ctx, deliv, ep, err.Error(), nil, nil, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Fluxa-Signature", sig)
@@ -416,7 +416,7 @@ func (s *service) Deliver(ctx context.Context, deliveryID string) error {
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return s.handleDeliveryFailure(ctx, deliv, ep, err.Error(), nil, nil)
+		return s.handleDeliveryFailure(ctx, deliv, ep, err.Error(), nil, nil, err)
 	}
 	defer resp.Body.Close()
 
@@ -438,10 +438,13 @@ func (s *service) Deliver(ctx context.Context, deliveryID string) error {
 		return nil
 	}
 
-	return s.handleDeliveryFailure(ctx, deliv, ep, fmt.Sprintf("status code %d", code), &code, nil)
+	return s.handleDeliveryFailure(ctx, deliv, ep, fmt.Sprintf("status code %d", code), &code, nil, nil)
 }
 
-func (s *service) handleDeliveryFailure(ctx context.Context, deliv *domain.WebhookDelivery, ep *domain.WebhookEndpoint, errMsg string, code *int, body *string) error {
+// handleDeliveryFailure records a failed attempt and returns an error that
+// still wraps cause, so callers can match sentinels such as
+// ErrUnsafeWebhookURL instead of only seeing a formatted message.
+func (s *service) handleDeliveryFailure(ctx context.Context, deliv *domain.WebhookDelivery, ep *domain.WebhookEndpoint, errMsg string, code *int, body *string, cause error) error {
 	deliv.Status = "failed"
 	deliv.ErrorMessage = errMsg
 	if code != nil {
@@ -482,6 +485,9 @@ func (s *service) handleDeliveryFailure(ctx context.Context, deliv *domain.Webho
 			CreatedAt:    time.Now().UTC(),
 		}
 		_ = s.repo.CreateDeadLetter(ctx, dl)
+		if cause != nil {
+			return fmt.Errorf("webhook delivery reached max attempts (%d) and was sent to dead letter queue: %w", s.maxAttempts, cause)
+		}
 		return fmt.Errorf("webhook delivery reached max attempts (%d) and was sent to dead letter queue: %s", s.maxAttempts, errMsg)
 	}
 
@@ -497,6 +503,9 @@ func (s *service) handleDeliveryFailure(ctx context.Context, deliv *domain.Webho
 		_, _ = s.queueClient.EnqueueWebhookDelivery(ctx, deliv.ID, asynq.ProcessIn(nextDelay))
 	}
 
+	if cause != nil {
+		return fmt.Errorf("webhook delivery failed (attempt %d/%d): %w", deliv.AttemptCount, s.maxAttempts, cause)
+	}
 	return fmt.Errorf("webhook delivery failed (attempt %d/%d): %s", deliv.AttemptCount, s.maxAttempts, errMsg)
 }
 

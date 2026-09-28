@@ -112,6 +112,18 @@ func (a *ContractWalletAdapter) WithFXService(fxSvc FXRateGetter) Service {
 	return a
 }
 
+func (a *ContractWalletAdapter) WithClientResolver(resolver stellar.ClientResolver) Service {
+	return a
+}
+
+func (a *ContractWalletAdapter) WithSignerResolver(resolver stellar.SignerResolver) Service {
+	return a
+}
+
+func (a *ContractWalletAdapter) WithTestnetProvisioner(provisioner TestnetProvisioner) Service {
+	return a
+}
+
 // WithIssuers is a no-op: asset issuers are resolved by the AssetResolver,
 // which the adapter is constructed with.
 func (a *ContractWalletAdapter) WithIssuers(usdcIssuer, eurcIssuer string) Service {
@@ -150,6 +162,7 @@ func (a *ContractWalletAdapter) CreateWallet(ctx context.Context, ownerPublicKey
 	w := &domain.Wallet{
 		ID:          uuid.New().String(),
 		PublicKey:   owner,
+		Mode:        tenant.ModeOrDefault(ctx, domain.ModeLive),
 		CustodyType: domain.CustodyContract,
 		ContractID:  contractID,
 		CreatedAt:   time.Now().UTC(),
@@ -166,6 +179,10 @@ func (a *ContractWalletAdapter) CreateWallet(ctx context.Context, ownerPublicKey
 // Soroban contract holds tokens in contract storage rather than in a classic
 // account, so these come from Fluxa's own records rather than Horizon, and
 // includeFX is not applied.
+func (a *ContractWalletAdapter) ListWallets(ctx context.Context, limit, offset int) ([]*domain.Wallet, error) {
+	return a.repo.List(ctx, limit, offset)
+}
+
 func (a *ContractWalletAdapter) GetWalletForHandler(ctx context.Context, walletID string) (*domain.Wallet, error) {
 	return a.repo.GetByID(ctx, walletID)
 }

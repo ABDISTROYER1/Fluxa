@@ -25,7 +25,10 @@ func setRequiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://localhost/fluxa")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
-	t.Setenv("MASTER_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	// A high-entropy 32-byte key: the entropy guard rejects repeated-byte keys
+	// before any other validation runs, so fixtures must use real-looking
+	// material to exercise the checks under test.
+	t.Setenv("MASTER_ENCRYPTION_KEY", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
 	t.Setenv("COMPLIANCE_ENABLED", "false")
 	t.Setenv("ENV", "development")
 }

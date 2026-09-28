@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -26,43 +28,89 @@ func newMemoryIdemRepo() *memoryIdemRepo {
 	return &memoryIdemRepo{records: make(map[string]*idempotency.Record)}
 }
 
-func (m *memoryIdemRepo) TryAcquire(_ context.Context, orgID, key, requestHash string, expiresAt time.Time) (*idempotency.Record, bool, error) {
+func (m *memoryIdemRepo) Acquire(_ context.Context, orgID string, mode domain.Mode, key, requestHash string, now, leaseExpiresAt, recordExpiresAt time.Time, allowRecovery bool) (idempotency.Acquisition, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	k := orgID + ":" + key
 	if rec, ok := m.records[k]; ok {
-		if !rec.ExpiresAt.IsZero() && time.Now().After(rec.ExpiresAt) {
+		if !rec.ExpiresAt.IsZero() && now.After(rec.ExpiresAt) {
 			delete(m.records, k)
 		} else {
 			cp := *rec
-			return &cp, true, nil
+			if cp.Status == idempotency.StatusProcessing {
+				if cp.LeaseExpiresAt.IsZero() || !cp.LeaseExpiresAt.After(now) {
+					if allowRecovery {
+						cp.LeaseToken = uuid.New().String()
+						cp.LeaseExpiresAt = leaseExpiresAt
+						rec.LeaseToken = cp.LeaseToken
+						rec.LeaseExpiresAt = cp.LeaseExpiresAt
+					}
+					return idempotency.Acquisition{State: idempotency.LeaseExpired, Record: cp}, nil
+				}
+				return idempotency.Acquisition{State: idempotency.InProgress, Record: cp}, nil
+			}
+			if cp.RequestHash != requestHash {
+				return idempotency.Acquisition{State: idempotency.BodyMismatch, Record: cp}, nil
+			}
+			return idempotency.Acquisition{State: idempotency.Replay, Record: cp}, nil
 		}
 	}
 
-	m.records[k] = &idempotency.Record{
-		OrgID:       orgID,
-		Key:         key,
-		RequestHash: requestHash,
-		Status:      idempotency.StatusProcessing,
-		ExpiresAt:   expiresAt,
+	rec := &idempotency.Record{
+		ID:             uuid.New().String(),
+		OrgID:          orgID,
+		Mode:           mode,
+		Key:            key,
+		RequestHash:    requestHash,
+		Status:         idempotency.StatusProcessing,
+		LeaseToken:     uuid.New().String(),
+		LeaseExpiresAt: leaseExpiresAt,
+		ExpiresAt:      recordExpiresAt,
 	}
-	return nil, false, nil
+	m.records[k] = rec
+	return idempotency.Acquisition{State: idempotency.Acquired, Record: *rec}, nil
 }
 
-func (m *memoryIdemRepo) Complete(_ context.Context, orgID, key string, responseStatus int, responseBody []byte) error {
+func (m *memoryIdemRepo) Complete(_ context.Context, recordID, leaseToken string, response idempotency.Response, recordExpiresAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	k := orgID + ":" + key
-	rec, ok := m.records[k]
-	if !ok {
+	for _, rec := range m.records {
+		if rec.ID != recordID {
+			continue
+		}
+		if rec.LeaseToken != leaseToken {
+			return errors.New("idempotency processing lease is no longer owned")
+		}
+		rec.Status = idempotency.StatusComplete
+		rec.ResponseStatus = response.Status
+		rec.ResponseHeaders = response.Headers
+		rec.ResponseBody = response.Body
+		rec.ExpiresAt = recordExpiresAt
+		rec.LeaseToken = ""
+		rec.LeaseExpiresAt = time.Time{}
 		return nil
 	}
-	rec.Status = idempotency.StatusComplete
-	rec.ResponseStatus = responseStatus
-	rec.ResponseBody = responseBody
-	return nil
+	return errors.New("idempotency record not found")
+}
+
+// DeleteExpired removes records whose retention window has elapsed, up to
+// batchSize rows.
+func (m *memoryIdemRepo) DeleteExpired(_ context.Context, batchSize int) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var deleted int64
+	for k, rec := range m.records {
+		if !rec.ExpiresAt.IsZero() && time.Now().After(rec.ExpiresAt) {
+			delete(m.records, k)
+			deleted++
+			if int(deleted) >= batchSize {
+				break
+			}
+		}
+	}
+	return deleted, nil
 }
 
 func (m *memoryIdemRepo) expireKey(orgID, key string) {

@@ -4,65 +4,114 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/google/uuid"
 )
 
 type mockRepo struct {
-	mu      sync.Mutex
-	records map[string]*idempotency.Record
+	mu           sync.Mutex
+	records      map[string]*idempotency.Record
+	completeErr  error
+	completeCall int
 }
 
 func newMockRepo() *mockRepo {
 	return &mockRepo{records: map[string]*idempotency.Record{}}
 }
 
-func (m *mockRepo) TryAcquire(ctx context.Context, orgID, key, requestHash string, expiresAt time.Time) (*idempotency.Record, bool, error) {
+func (m *mockRepo) record(orgID, key string) *idempotency.Record {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	k := orgID + ":" + key
-	if rec, ok := m.records[k]; ok {
-		// Handle 24-hour expiration simulation
-		if !rec.ExpiresAt.IsZero() && time.Now().After(rec.ExpiresAt) {
-			delete(m.records, k)
-		} else {
-			cp := *rec
-			return &cp, true, nil
-		}
+	if rec, ok := m.records[orgID+":"+idempotency.DeterministicKey(key)]; ok {
+		cp := *rec
+		return &cp
 	}
-	m.records[k] = &idempotency.Record{
-		OrgID:       orgID,
-		Key:         key,
-		RequestHash: requestHash,
-		Status:      idempotency.StatusProcessing,
-		ExpiresAt:   expiresAt,
-	}
-	return nil, false, nil
-}
-
-func (m *mockRepo) Complete(ctx context.Context, orgID, key string, responseStatus int, responseBody []byte) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	k := orgID + ":" + key
-	rec, ok := m.records[k]
-	if !ok {
-		return nil
-	}
-	rec.Status = idempotency.StatusComplete
-	rec.ResponseStatus = responseStatus
-	rec.ResponseBody = responseBody
 	return nil
 }
 
-// DeleteExpired removes all records whose ExpiresAt is in the past,
-// up to batchSize rows. Returns the count of deleted records.
+func (m *mockRepo) Acquire(_ context.Context, orgID string, mode domain.Mode, key, requestHash string, now, leaseExpiresAt, recordExpiresAt time.Time, allowRecovery bool) (idempotency.Acquisition, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	k := orgID + ":" + key
+	if rec, ok := m.records[k]; ok {
+		if !rec.ExpiresAt.IsZero() && now.After(rec.ExpiresAt) {
+			// Retention lapsed: the generation is replaced below.
+			delete(m.records, k)
+		} else {
+			cp := *rec
+			if cp.Status == idempotency.StatusProcessing {
+				if cp.LeaseExpiresAt.IsZero() || !cp.LeaseExpiresAt.After(now) {
+					if allowRecovery {
+						cp.LeaseToken = uuid.New().String()
+						cp.LeaseExpiresAt = leaseExpiresAt
+						rec.LeaseToken = cp.LeaseToken
+						rec.LeaseExpiresAt = cp.LeaseExpiresAt
+					}
+					return idempotency.Acquisition{State: idempotency.LeaseExpired, Record: cp}, nil
+				}
+				return idempotency.Acquisition{State: idempotency.InProgress, Record: cp}, nil
+			}
+			if cp.RequestHash != requestHash {
+				return idempotency.Acquisition{State: idempotency.BodyMismatch, Record: cp}, nil
+			}
+			return idempotency.Acquisition{State: idempotency.Replay, Record: cp}, nil
+		}
+	}
+
+	rec := &idempotency.Record{
+		ID:             uuid.New().String(),
+		OrgID:          orgID,
+		Mode:           mode,
+		Key:            key,
+		RequestHash:    requestHash,
+		Status:         idempotency.StatusProcessing,
+		LeaseToken:     uuid.New().String(),
+		LeaseExpiresAt: leaseExpiresAt,
+		ExpiresAt:      recordExpiresAt,
+	}
+	m.records[k] = rec
+	cp := *rec
+	return idempotency.Acquisition{State: idempotency.Acquired, Record: cp}, nil
+}
+
+func (m *mockRepo) Complete(_ context.Context, recordID, leaseToken string, response idempotency.Response, recordExpiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completeCall++
+	if m.completeErr != nil {
+		return m.completeErr
+	}
+	for _, rec := range m.records {
+		if rec.ID != recordID {
+			continue
+		}
+		if rec.LeaseToken != leaseToken {
+			return errors.New("lease lost")
+		}
+		rec.Status = idempotency.StatusComplete
+		rec.ResponseStatus = response.Status
+		rec.ResponseHeaders = response.Headers
+		rec.ResponseBody = response.Body
+		rec.ExpiresAt = recordExpiresAt
+		rec.LeaseToken = ""
+		rec.LeaseExpiresAt = time.Time{}
+		return nil
+	}
+	return errors.New("record not found")
+}
+
+// DeleteExpired removes all records whose retention window has elapsed, up to
+// batchSize rows. Returns the count of deleted records.
 func (m *mockRepo) DeleteExpired(_ context.Context, batchSize int) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -327,7 +376,14 @@ func TestConcurrentRequestInProgressReturns409(t *testing.T) {
 	repo := newMockRepo()
 	key := uuid.New().String()
 	dk := idempotency.DeterministicKey(key)
-	repo.records["org-1:"+dk] = &idempotency.Record{OrgID: "org-1", Key: dk, Status: idempotency.StatusProcessing}
+	repo.records["org-1:"+dk] = &idempotency.Record{
+		ID:             uuid.New().String(),
+		OrgID:          "org-1",
+		Key:            dk,
+		Status:         idempotency.StatusProcessing,
+		LeaseToken:     uuid.New().String(),
+		LeaseExpiresAt: time.Now().Add(time.Minute),
+	}
 
 	mw := idempotency.Middleware(repo)
 	called := false
@@ -344,6 +400,122 @@ func TestConcurrentRequestInProgressReturns409(t *testing.T) {
 	}
 	if called {
 		t.Fatal("handler should not run for a request that lost the race")
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After to be set while a lease is held")
+	}
+}
+
+// TestStaleLeaseIsRecoveredWithRecoveryEnabled covers the #192 recovery path:
+// a request whose process died leaves a processing row behind. Once its lease
+// lapses, a retry that opted into recovery may re-run the handler instead of
+// being told forever that the request is in progress.
+func TestStaleLeaseIsRecoveredWithRecoveryEnabled(t *testing.T) {
+	repo := newMockRepo()
+	key := uuid.New().String()
+	dk := idempotency.DeterministicKey(key)
+	repo.records["org-1:"+dk] = &idempotency.Record{
+		ID:             uuid.New().String(),
+		OrgID:          "org-1",
+		Key:            dk,
+		Status:         idempotency.StatusProcessing,
+		LeaseToken:     uuid.New().String(),
+		LeaseExpiresAt: time.Now().Add(-time.Minute),
+	}
+
+	mw := idempotency.MiddlewareWithOptions(repo, idempotency.Options{AllowLeaseRecovery: true})
+	called := false
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRequest(t, key, `{"amount":"10"}`))
+
+	if !called {
+		t.Fatal("expected the handler to re-run after the lease expired")
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+	if stored := repo.record("org-1", key); stored == nil || stored.Status != idempotency.StatusComplete {
+		t.Fatal("expected the recovered request to be recorded as complete")
+	}
+}
+
+// TestResponseIsBufferedUntilDurable asserts the core #192 guarantee: when the
+// idempotency record cannot be persisted, the client must not receive the
+// handler's success response.
+func TestResponseIsBufferedUntilDurable(t *testing.T) {
+	repo := newMockRepo()
+	repo.completeErr = errors.New("database unavailable")
+
+	mw := idempotency.Middleware(repo)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"id":"tx-dup","status":"pending"}`))
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRequest(t, uuid.New().String(), `{"amount":"10"}`))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when the idempotency record cannot be persisted, got %d", rec.Code)
+	}
+	if code := decodeErrorCode(t, rec.Body.Bytes()); code != "IDEMPOTENCY_RECORD_PERSISTENCE_FAILED" {
+		t.Fatalf("expected IDEMPOTENCY_RECORD_PERSISTENCE_FAILED, got %s", code)
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("tx-dup")) {
+		t.Fatal("handler response leaked to the client before the record was durable")
+	}
+}
+
+func TestReplayRestoresHandlerHeaders(t *testing.T) {
+	repo := newMockRepo()
+	mw := idempotency.Middleware(repo)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Fluxa-Test", "preserved")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"tx-h"}`))
+	}))
+
+	key := uuid.New().String()
+	body := `{"amount":"7"}`
+	h.ServeHTTP(httptest.NewRecorder(), newRequest(t, key, body))
+
+	second := httptest.NewRecorder()
+	h.ServeHTTP(second, newRequest(t, key, body))
+
+	if second.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", second.Code)
+	}
+	if second.Header().Get("X-Fluxa-Test") != "preserved" {
+		t.Fatalf("expected handler header to be replayed, got %q", second.Header().Get("X-Fluxa-Test"))
+	}
+	if second.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatal("expected replayed response to be marked with Idempotency-Replayed")
+	}
+}
+
+// TestHandlerCanReadDurableRecordID asserts the transfer service can fence its
+// own persistence to the exact idempotency generation that owns the request.
+func TestHandlerCanReadDurableRecordID(t *testing.T) {
+	repo := newMockRepo()
+	var got string
+	h := idempotency.Middleware(repo)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = idempotency.RecordIDFromContext(r.Context())
+		w.WriteHeader(http.StatusCreated)
+	}))
+	key := uuid.New().String()
+	h.ServeHTTP(httptest.NewRecorder(), newRequest(t, key, `{}`))
+	if got == "" {
+		t.Fatal("handler did not receive idempotency record ID")
+	}
+	if stored := repo.record("org-1", key); stored == nil || stored.ID != got {
+		t.Fatal("handler record ID does not match durable record")
 	}
 }
 
@@ -370,9 +542,7 @@ func TestHandlerStillReceivesRequestBody(t *testing.T) {
 
 // TestDeleteExpiredPurgesOnceUsedKey asserts the acceptance criterion:
 // a key used exactly once and never repeated must be removed by DeleteExpired
-// once its TTL has elapsed. Without a background sweep, such a row would stay
-// in the table forever because the opportunistic per-key delete in TryAcquire
-// only fires when the same key is reused.
+// once its TTL has elapsed.
 func TestDeleteExpiredPurgesOnceUsedKey(t *testing.T) {
 	repo := newMockRepo()
 	mw := idempotency.Middleware(repo)
@@ -407,8 +577,8 @@ func TestDeleteExpiredPurgesOnceUsedKey(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	// The key is never retried, so TryAcquire's opportunistic delete never
-	// fires. DeleteExpired must remove it.
+	// The key is never retried, so no opportunistic delete ever fires.
+	// DeleteExpired must remove it.
 	n, err := repo.DeleteExpired(context.Background(), 1000)
 	if err != nil {
 		t.Fatalf("DeleteExpired returned error: %v", err)

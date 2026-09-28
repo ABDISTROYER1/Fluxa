@@ -25,6 +25,12 @@ type FXRateGetter interface {
 	GetRates(ctx context.Context, from, to string) (*domain.RateResponse, error)
 }
 
+// TestnetProvisioner funds a newly generated test account. Live mode never
+// invokes it.
+type TestnetProvisioner interface {
+	EnsureAccount(ctx context.Context, publicKey string) error
+}
+
 type Balance struct {
 	AssetCode     string `json:"asset_code"`
 	Issuer        string `json:"issuer"`
@@ -36,10 +42,11 @@ type Service interface {
 	// CreateWallet provisions a wallet. Contract wallets require the owner's
 	// public key; the custodial adapter generates its own keypair and ignores it.
 	CreateWallet(ctx context.Context, ownerPublicKey ...string) (*domain.Wallet, error)
-	GetBalances(ctx context.Context, walletID string, includeFX ...string) ([]Balance, error)
+	ListWallets(ctx context.Context, limit, offset int) ([]*domain.Wallet, error)
 	// GetWalletForHandler returns a wallet by ID for read paths. It never
 	// exposes the encrypted secret.
 	GetWalletForHandler(ctx context.Context, walletID string) (*domain.Wallet, error)
+	GetBalances(ctx context.Context, walletID string, includeFX ...string) ([]Balance, error)
 	AddTrustline(ctx context.Context, walletID, assetCode, issuer, limit string) (string, error)
 	// ExecuteTransfer moves an asset out of the wallet and returns the
 	// transaction hash. Custodial wallets use a classic Stellar payment;
@@ -47,20 +54,26 @@ type Service interface {
 	// spending limit and time-lock.
 	ExecuteTransfer(ctx context.Context, walletID, destination, assetCode, issuer string, amount decimal.Decimal, memo string) (string, error)
 	WithSigner(signer stellar.Signer) Service
+	WithClientResolver(resolver stellar.ClientResolver) Service
+	WithSignerResolver(resolver stellar.SignerResolver) Service
+	WithTestnetProvisioner(provisioner TestnetProvisioner) Service
 	WithFXService(fxSvc FXRateGetter) Service
 	WithIssuers(usdcIssuer, eurcIssuer string) Service
 }
 
 type service struct {
-	repo          Repository
-	stellar       stellar.Client
-	signer        stellar.Signer
-	masterKey     []byte
-	tenantRepo    TenantGetter
-	assetRegistry *assets.Registry
-	fxSvc         FXRateGetter
-	usdcIssuer    string
-	eurcIssuer    string
+	repo           Repository
+	stellar        stellar.Client
+	clientResolver stellar.ClientResolver
+	signer         stellar.Signer
+	signerResolver stellar.SignerResolver
+	provisioner    TestnetProvisioner
+	masterKey      []byte
+	tenantRepo     TenantGetter
+	assetRegistry  *assets.Registry
+	fxSvc          FXRateGetter
+	usdcIssuer     string
+	eurcIssuer     string
 }
 
 func NewService(repo Repository, stellarClient stellar.Client, masterKey []byte, tenantRepo ...TenantGetter) Service {
@@ -78,6 +91,21 @@ func NewService(repo Repository, stellarClient stellar.Client, masterKey []byte,
 
 func (s *service) WithSigner(signer stellar.Signer) Service {
 	s.signer = signer
+	return s
+}
+
+func (s *service) WithClientResolver(resolver stellar.ClientResolver) Service {
+	s.clientResolver = resolver
+	return s
+}
+
+func (s *service) WithSignerResolver(resolver stellar.SignerResolver) Service {
+	s.signerResolver = resolver
+	return s
+}
+
+func (s *service) WithTestnetProvisioner(provisioner TestnetProvisioner) Service {
+	s.provisioner = provisioner
 	return s
 }
 
@@ -112,6 +140,13 @@ func (s *service) CreateWallet(ctx context.Context, ownerPublicKey ...string) (*
 	if err != nil {
 		return nil, fmt.Errorf("generate keypair: %w", err)
 	}
+	mode := tenant.ModeOrDefault(ctx, domain.ModeLive)
+	if mode == domain.ModeTest && s.provisioner != nil {
+		if err := s.provisioner.EnsureAccount(ctx, pubKey); err != nil {
+			return nil, fmt.Errorf("fund test account: %w", err)
+		}
+
+	}
 
 	encryptedBytes, err := crypto.Encrypt([]byte(secretKey), s.masterKey)
 	if err != nil {
@@ -122,6 +157,7 @@ func (s *service) CreateWallet(ctx context.Context, ownerPublicKey ...string) (*
 		ID:              uuid.New().String(),
 		PublicKey:       pubKey,
 		EncryptedSecret: hex.EncodeToString(encryptedBytes),
+		Mode:            mode,
 		CustodyType:     domain.CustodyCustodial,
 		CreatedAt:       time.Now().UTC(),
 	}
@@ -131,6 +167,10 @@ func (s *service) CreateWallet(ctx context.Context, ownerPublicKey ...string) (*
 	}
 
 	return w, nil
+}
+
+func (s *service) ListWallets(ctx context.Context, limit, offset int) ([]*domain.Wallet, error) {
+	return s.repo.List(ctx, limit, offset)
 }
 
 func (s *service) GetWalletForHandler(ctx context.Context, walletID string) (*domain.Wallet, error) {
@@ -145,7 +185,7 @@ func (s *service) GetBalances(ctx context.Context, walletID string, includeFX ..
 
 	var balances []Balance
 
-	acct, err := s.stellar.LoadAccount(w.PublicKey)
+	acct, err := s.client(ctx).LoadAccount(w.PublicKey)
 	if err != nil {
 		hErr, ok := err.(*horizonclient.Error)
 		if ok && hErr.Response.Status == "404" {
@@ -234,7 +274,7 @@ func (s *service) ExecuteTransfer(
 		return "", err
 	}
 
-	acct, err := s.stellar.LoadAccount(w.PublicKey)
+	acct, err := s.client(ctx).LoadAccount(w.PublicKey)
 	if err != nil {
 		return "", fmt.Errorf("load account: %w", err)
 	}
@@ -259,12 +299,12 @@ func (s *service) ExecuteTransfer(
 		return "", fmt.Errorf("build payment transaction: %w", err)
 	}
 
-	signedTx, err := s.sign(stellarTx, w.EncryptedSecret)
+	signedTx, err := s.sign(ctx, stellarTx, w.EncryptedSecret)
 	if err != nil {
 		return "", fmt.Errorf("sign payment transaction: %w", err)
 	}
 
-	resp, err := s.stellar.SubmitTransaction(signedTx)
+	resp, err := s.client(ctx).SubmitTransaction(signedTx)
 	if err != nil {
 		return "", fmt.Errorf("submit payment to stellar: %w", err)
 	}
@@ -294,9 +334,27 @@ func (s *service) resolveAsset(assetCode, issuer string) (txnbuild.Asset, error)
 	return txnbuild.CreditAsset{Code: assetCode, Issuer: issuer}, nil
 }
 
-func (s *service) sign(tx *txnbuild.Transaction, encryptedSecret string) (*txnbuild.Transaction, error) {
-	if s.signer != nil {
-		return s.signer.Sign(tx, encryptedSecret)
+func (s *service) client(ctx context.Context) stellar.Client {
+	if s.clientResolver != nil {
+		if client := s.clientResolver.ClientForMode(ctx); client != nil {
+			return client
+		}
+	}
+	return s.stellar
+}
+
+func (s *service) signerFor(ctx context.Context) stellar.Signer {
+	if s.signerResolver != nil {
+		if signer := s.signerResolver.SignerForMode(ctx); signer != nil {
+			return signer
+		}
+	}
+	return s.signer
+}
+
+func (s *service) sign(ctx context.Context, tx *txnbuild.Transaction, encryptedSecret string) (*txnbuild.Transaction, error) {
+	if signer := s.signerFor(ctx); signer != nil {
+		return signer.Sign(tx, encryptedSecret)
 	}
 	return stellar.NewEnvSigner(s.masterKey, "testnet").Sign(tx, encryptedSecret)
 }
@@ -325,7 +383,7 @@ func (s *service) AddTrustline(ctx context.Context, walletID, assetCode, issuer,
 		return "", err
 	}
 
-	acct, err := s.stellar.LoadAccount(w.PublicKey)
+	acct, err := s.client(ctx).LoadAccount(w.PublicKey)
 	if err != nil {
 		return "", fmt.Errorf("load account: %w", err)
 	}
@@ -356,12 +414,12 @@ func (s *service) AddTrustline(ctx context.Context, walletID, assetCode, issuer,
 		return "", fmt.Errorf("build change trust transaction: %w", err)
 	}
 
-	signedTx, err := s.sign(stellarTx, w.EncryptedSecret)
+	signedTx, err := s.sign(ctx, stellarTx, w.EncryptedSecret)
 	if err != nil {
 		return "", fmt.Errorf("sign trustline transaction: %w", err)
 	}
 
-	resp, err := s.stellar.SubmitTransaction(signedTx)
+	resp, err := s.client(ctx).SubmitTransaction(signedTx)
 	if err != nil {
 		return "", fmt.Errorf("submit trustline to stellar: %w", err)
 	}

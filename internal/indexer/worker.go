@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/config"

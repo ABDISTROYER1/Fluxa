@@ -57,6 +57,7 @@ type transferResponse struct {
 	TxHash     string `json:"tx_hash,omitempty"`
 	Type       string `json:"type"`
 	Status     string `json:"status"`
+	Mode       string `json:"mode"`
 	FromWallet string `json:"from_wallet_id"`
 	ToWallet   string `json:"to_wallet_id"`
 	Asset      string `json:"asset"`
@@ -74,6 +75,7 @@ func toTransferResponse(tx *domain.Transaction) transferResponse {
 		TxHash:     tx.TxHash,
 		Type:       string(tx.Type),
 		Status:     string(tx.Status),
+		Mode:       string(tx.Mode),
 		FromWallet: tx.FromWallet,
 		ToWallet:   tx.ToWallet,
 		Asset:      tx.Asset,

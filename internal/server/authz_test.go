@@ -18,6 +18,7 @@ import (
 	"github.com/fluxa/fluxa/internal/org"
 	"github.com/fluxa/fluxa/internal/reconcile"
 	"github.com/fluxa/fluxa/internal/schedule"
+	"github.com/fluxa/fluxa/internal/status"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/fluxa/fluxa/internal/wallet"
@@ -62,10 +63,14 @@ func (nilValidator) GetMember(_ context.Context, _, _ string) (*domain.OrgMember
 // Helpers
 // ---------------------------------------------------------------------------
 
-func newAuthzTestServerWithValidator(t *testing.T, validator MembershipValidator) *Server {
+func newAuthzTestServerWithValidator(t *testing.T, validator MembershipValidator, statusHandlers ...*status.Handler) *Server {
 	t.Helper()
 
 	treasuryHandler := treasury.NewHandler(nil).WithMutationGate(RequireRole(domain.RoleOwner, domain.RoleAdmin))
+	var statusHandler *status.Handler
+	if len(statusHandlers) > 0 {
+		statusHandler = statusHandlers[0]
+	}
 
 	return New(
 		auth.NewHandler(nil),
@@ -85,6 +90,7 @@ func newAuthzTestServerWithValidator(t *testing.T, validator MembershipValidator
 		schedule.NewHandler(nil),
 		treasuryHandler,
 		nil,
+		statusHandler,
 		nil,
 		authzJWTSecret,
 		"0",

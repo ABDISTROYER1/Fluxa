@@ -103,9 +103,6 @@ func (m *mockStellarClient) Offers(_ string, _ uint) ([]horizon.Offer, error) {
 	return nil, nil
 }
 
-// Compile-time interface check.
-var _ webhook.Service = (*mockWebhookSvc)(nil)
-
 type mockWebhookSvc struct {
 	calls []webhookDispatch
 }

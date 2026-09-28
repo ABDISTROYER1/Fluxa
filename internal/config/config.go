@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -14,19 +14,28 @@ import (
 )
 
 type Config struct {
-	Port                            string
-	CORSAllowedOrigins              []string
-	Env                             string
-	LogLevel                        string
-	DatabaseURL                     string
-	ReplicaDatabaseURL              string
-	RedisURL                        string
-	RedisSentinelMasterName         string
-	RedisSentinelAddrs              []string
-	RedisSentinelPassword           string
-	StellarNetwork                  string
-	StellarHorizonURL               string
-	StellarHorizonTimeout           time.Duration
+	Port                    string
+	CORSAllowedOrigins      []string
+	Env                     string
+	LogLevel                string
+	DatabaseURL             string
+	ReplicaDatabaseURL      string
+	RedisURL                string
+	RedisSentinelMasterName string
+	RedisSentinelAddrs      []string
+	RedisSentinelPassword   string
+	StellarNetwork          string
+	StellarHorizonURL       string
+	StellarHorizonTimeout   time.Duration
+	// StellarLive* / StellarTestnet* describe the two isolated environments a
+	// tenant can operate in. Live mode talks to mainnet; test mode talks to
+	// testnet and funds wallets from Friendbot instead of real funds.
+	StellarLiveNetwork              string
+	StellarLiveHorizonURL           string
+	StellarTestnetNetwork           string
+	StellarTestnetHorizonURL        string
+	StellarTestnetSorobanRPCURL     string
+	FriendbotURL                    string
 	StellarUSDCIssuer               string
 	StellarEURCIssuer               string
 	MasterEncryptionKey             []byte
@@ -80,6 +89,12 @@ type Config struct {
 	// CORSAllowedOriginsConfiguredExplicitly is true when the operator set
 	// CORS_ALLOWED_ORIGINS rather than relying on the development default.
 	CORSAllowedOriginsConfiguredExplicitly bool
+
+	// Indexer configuration.
+	IndexerPaymentsPageLimit int
+	IndexerStreamMinBackoff  string
+	IndexerStreamMaxBackoff  string
+	IndexerSyncPageSize      int
 }
 
 // defaultCORSOrigins is the development-friendly default. Serving it outside
@@ -179,12 +194,6 @@ func containsLocalhostWildcard(origins []string) bool {
 		}
 	}
 	return false
-
-	// Indexer configuration
-	IndexerPaymentsPageLimit int
-	IndexerStreamMinBackoff  string
-	IndexerStreamMaxBackoff  string
-	IndexerSyncPageSize      int
 }
 
 func splitCSV(value string) []string {
@@ -207,6 +216,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("STELLAR_NETWORK", "testnet")
 	viper.SetDefault("STELLAR_HORIZON_URL", "https://horizon-testnet.stellar.org")
 	viper.SetDefault("STELLAR_HORIZON_TIMEOUT_SECONDS", "10")
+	viper.SetDefault("STELLAR_LIVE_NETWORK", "mainnet")
+	viper.SetDefault("STELLAR_LIVE_HORIZON_URL", "https://horizon.stellar.org")
+	viper.SetDefault("STELLAR_TESTNET_NETWORK", "testnet")
+	viper.SetDefault("STELLAR_TESTNET_HORIZON_URL", "https://horizon-testnet.stellar.org")
+	viper.SetDefault("STELLAR_TESTNET_SOROBAN_RPC_URL", "https://soroban-testnet.stellar.org")
+	viper.SetDefault("FRIENDBOT_URL", "https://friendbot.stellar.org")
 	viper.SetDefault("MIGRATIONS_PATH", "db/migrations")
 	viper.SetDefault("RECONCILIATION_DRIFT_THRESHOLD_USD", "1.00")
 	viper.SetDefault("OTEL_ENABLED", false)
@@ -298,6 +313,12 @@ func Load() (*Config, error) {
 		StellarNetwork:                  viper.GetString("STELLAR_NETWORK"),
 		StellarHorizonURL:               viper.GetString("STELLAR_HORIZON_URL"),
 		StellarHorizonTimeout:           time.Duration(viper.GetInt("STELLAR_HORIZON_TIMEOUT_SECONDS")) * time.Second,
+		StellarLiveNetwork:              viper.GetString("STELLAR_LIVE_NETWORK"),
+		StellarLiveHorizonURL:           viper.GetString("STELLAR_LIVE_HORIZON_URL"),
+		StellarTestnetNetwork:           viper.GetString("STELLAR_TESTNET_NETWORK"),
+		StellarTestnetHorizonURL:        viper.GetString("STELLAR_TESTNET_HORIZON_URL"),
+		StellarTestnetSorobanRPCURL:     viper.GetString("STELLAR_TESTNET_SOROBAN_RPC_URL"),
+		FriendbotURL:                    viper.GetString("FRIENDBOT_URL"),
 		StellarUSDCIssuer:               viper.GetString("STELLAR_USDC_ISSUER"),
 		StellarEURCIssuer:               viper.GetString("STELLAR_EURC_ISSUER"),
 		MasterEncryptionKey:             keyBytes,
@@ -350,15 +371,15 @@ func Load() (*Config, error) {
 		CORSAllowedOriginsConfiguredExplicitly: os.Getenv("CORS_ALLOWED_ORIGINS") != "",
 	}
 
+	cfg.IndexerPaymentsPageLimit = indexerPaymentsPageLimit
+	cfg.IndexerStreamMinBackoff = indexerStreamMinBackoff
+	cfg.IndexerStreamMaxBackoff = indexerStreamMaxBackoff
+	cfg.IndexerSyncPageSize = indexerSyncPageSize
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
-		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
-		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
-		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
-		IndexerSyncPageSize:      indexerSyncPageSize,
-	}, nil
 }
 
 // validateKeyEntropy checks that the encryption key has sufficient entropy.
@@ -407,10 +428,17 @@ func validateKeyEntropy(key []byte) error {
 		entropy -= p * log2(p)
 	}
 
-	// Require at least 7.5 bits/byte entropy (out of 8 max)
-	// This catches keys with obvious patterns while allowing natural randomness
-	if entropy < 7.5 {
-		return fmt.Errorf("key entropy too low: %.2f bits/byte (minimum 7.5)", entropy)
+	// Shannon entropy over n samples is bounded by log2(n): a 32-byte key can
+	// never exceed 5 bits/byte however random it is, so comparing the raw figure
+	// against the 8-bit ceiling would reject every possible key. Compare against
+	// the maximum this key length can actually reach instead.
+	maxEntropy := log2(float64(len(key)))
+	if maxEntropy > 8 {
+		maxEntropy = 8
+	}
+	minimum := 0.9 * maxEntropy
+	if entropy < minimum {
+		return fmt.Errorf("key entropy too low: %.2f bits/byte (minimum %.2f for a %d-byte key)", entropy, minimum, len(key))
 	}
 
 	return nil

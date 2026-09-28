@@ -32,6 +32,11 @@ func (m *MockRepository) List(ctx context.Context, limit int) ([]domain.Incident
 	return args.Get(0).([]domain.Incident), args.Error(1)
 }
 
+func (m *MockRepository) ListActive(ctx context.Context) ([]domain.Incident, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]domain.Incident), args.Error(1)
+}
+
 func (m *MockRepository) Update(ctx context.Context, inc *domain.Incident) error {
 	args := m.Called(ctx, inc)
 	return args.Error(0)
@@ -40,6 +45,7 @@ func (m *MockRepository) Update(ctx context.Context, inc *domain.Incident) error
 func TestService_GetStatus_Operational(t *testing.T) {
 	repo := new(MockRepository)
 	repo.On("List", mock.Anything, 20).Return([]domain.Incident{}, nil)
+	repo.On("ListActive", mock.Anything).Return([]domain.Incident{}, nil)
 
 	svc := NewService(repo)
 	res, err := svc.GetStatus(context.Background())
@@ -55,9 +61,37 @@ func TestService_GetStatus_Outage(t *testing.T) {
 	repo.On("List", mock.Anything, 20).Return([]domain.Incident{
 		{ID: "1", Title: "API Down", Severity: string(domain.SeverityCritical), Status: string(domain.StatusInvestigating)},
 	}, nil)
+	repo.On("ListActive", mock.Anything).Return([]domain.Incident{
+		{ID: "1", Title: "API Down", Severity: string(domain.SeverityCritical), Status: string(domain.StatusInvestigating)},
+	}, nil)
 
 	svc := NewService(repo)
 	res, err := svc.GetStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, "outage", res.Status)
+	repo.AssertExpectations(t)
+}
+
+func TestService_GetStatus_UsesActiveIncidentsBeyondRecentLimit(t *testing.T) {
+	repo := new(MockRepository)
+	recent := make([]domain.Incident, 20)
+	for i := range recent {
+		recent[i] = domain.Incident{
+			ID:       "resolved",
+			Severity: string(domain.SeverityCritical),
+			Status:   string(domain.StatusResolved),
+		}
+	}
+	active := []domain.Incident{{
+		ID:       "old-active",
+		Severity: string(domain.SeverityCritical),
+		Status:   string(domain.StatusInvestigating),
+	}}
+	repo.On("List", mock.Anything, 20).Return(recent, nil)
+	repo.On("ListActive", mock.Anything).Return(active, nil)
+
+	res, err := NewService(repo).GetStatus(context.Background())
 
 	assert.NoError(t, err)
 	assert.Equal(t, "outage", res.Status)

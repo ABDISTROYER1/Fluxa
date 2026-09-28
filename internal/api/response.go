@@ -96,6 +96,7 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 
 		errors.Is(err, domain.ErrWebhookNotFound), errors.Is(err, domain.ErrWebhookDeliveryNotFound),
 		errors.Is(err, domain.ErrWebhookConfigNotFound),
+		errors.Is(err, domain.ErrIncidentNotFound),
 		errors.Is(err, domain.ErrBatchNotFound), errors.Is(err, domain.ErrScheduleNotFound),
 		errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrOrgMemberNotFound),
 		errors.Is(err, domain.ErrInviteNotFound), errors.Is(err, domain.ErrClaimableBalanceNotFound):
