@@ -132,6 +132,8 @@ type TenantWebhookConfig struct {
 	SecretConfigured bool
 }
 
+type DeliveryStatus string
+
 const (
 	DeliveryPending DeliveryStatus = "pending"
 	DeliverySuccess DeliveryStatus = "success"
