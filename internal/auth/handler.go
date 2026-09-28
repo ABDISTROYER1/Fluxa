@@ -7,6 +7,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 )
 
 type Handler struct {
@@ -25,6 +26,16 @@ func (h *Handler) Routes() func(r chi.Router) {
 	}
 }
 
+func isRegisterValidationError(err error) bool {
+	if IsPasswordValidationError(err) {
+		return true
+	}
+	msg := err.Error()
+	return msg == "email, password, and name are required" ||
+		msg == "account_type must be 'individual' or 'organization'" ||
+		msg == "org_name is required for organization account registration"
+}
+
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -38,7 +49,12 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if isRegisterValidationError(err) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		log.Error().Err(err).Msg("auth: register internal error")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -63,7 +79,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Error().Err(err).Msg("auth: login internal error")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 

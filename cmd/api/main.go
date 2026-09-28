@@ -249,7 +249,7 @@ func main() {
 	settlementWorker := settlement.NewWorker(engine)
 
 	idx := indexer.New(walletRepo, txRepo, stellarClient)
-	indexerWorker := indexer.NewWorker(idx)
+	indexerWorker := indexer.NewWorker(idx, cfg)
 
 	asynqSrv := asynq.NewServer(asynqOpt, asynq.Config{
 		Concurrency: 5,
@@ -370,6 +370,12 @@ func main() {
 
 		orgRepo,
 		cfg.CORSAllowedOrigins,
+		server.AuthRateLimitConfig{
+			IPRPS:        cfg.AuthRateLimitIPRPS,
+			IPBurst:      cfg.AuthRateLimitIPBurst,
+			AccountRPS:   cfg.AuthRateLimitAccountRPS,
+			AccountBurst: cfg.AuthRateLimitAccountBurst,
+		},
 	)
 	server.RegisterDocsRoutes(srv.Router())
 

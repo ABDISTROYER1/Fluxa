@@ -94,6 +94,10 @@ func (m *mockIdemRepo) Complete(_ context.Context, orgID, key string, responseSt
 	return nil
 }
 
+func (m *mockIdemRepo) DeleteExpired(_ context.Context, _ int) (int64, error) {
+	return 0, nil
+}
+
 func newBatchRouter(svc Service, repo idempotency.Repository) http.Handler {
 	h := NewHandler(svc).WithIdempotency(idempotency.Middleware(repo))
 	r := chi.NewRouter()

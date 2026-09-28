@@ -2,7 +2,6 @@ package apikey
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"strings"
 	"testing"

@@ -80,6 +80,18 @@ type Config struct {
 	// CORSAllowedOriginsConfiguredExplicitly is true when the operator set
 	// CORS_ALLOWED_ORIGINS rather than relying on the development default.
 	CORSAllowedOriginsConfiguredExplicitly bool
+
+	// Indexer configuration
+	IndexerPaymentsPageLimit int
+	IndexerStreamMinBackoff  string
+	IndexerStreamMaxBackoff  string
+	IndexerSyncPageSize      int
+
+	// Auth rate limiting configuration for /v1/auth/register, /v1/auth/login, /v1/org/invites/accept
+	AuthRateLimitIPRPS        float64
+	AuthRateLimitIPBurst      int
+	AuthRateLimitAccountRPS   float64
+	AuthRateLimitAccountBurst int
 }
 
 // defaultCORSOrigins is the development-friendly default. Serving it outside
@@ -179,12 +191,6 @@ func containsLocalhostWildcard(origins []string) bool {
 		}
 	}
 	return false
-
-	// Indexer configuration
-	IndexerPaymentsPageLimit int
-	IndexerStreamMinBackoff  string
-	IndexerStreamMaxBackoff  string
-	IndexerSyncPageSize      int
 }
 
 func splitCSV(value string) []string {
@@ -238,6 +244,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("INDEXER_STREAM_MIN_BACKOFF", "1s")
 	viper.SetDefault("INDEXER_STREAM_MAX_BACKOFF", "30s")
 	viper.SetDefault("INDEXER_SYNC_PAGE_SIZE", "100")
+	viper.SetDefault("AUTH_RATE_LIMIT_IP_RPS", "5")
+	viper.SetDefault("AUTH_RATE_LIMIT_IP_BURST", "10")
+	viper.SetDefault("AUTH_RATE_LIMIT_ACCOUNT_RPS", "1")
+	viper.SetDefault("AUTH_RATE_LIMIT_ACCOUNT_BURST", "5")
 
 	viper.SetConfigFile(".env")
 	viper.SetConfigType("env")
@@ -279,6 +289,23 @@ func Load() (*Config, error) {
 	indexerStreamMinBackoff := viper.GetString("INDEXER_STREAM_MIN_BACKOFF")
 	indexerStreamMaxBackoff := viper.GetString("INDEXER_STREAM_MAX_BACKOFF")
 	indexerSyncPageSize := viper.GetInt("INDEXER_SYNC_PAGE_SIZE")
+
+	authRateLimitIPRPS := viper.GetFloat64("AUTH_RATE_LIMIT_IP_RPS")
+	if authRateLimitIPRPS <= 0 {
+		authRateLimitIPRPS = 5
+	}
+	authRateLimitIPBurst := viper.GetInt("AUTH_RATE_LIMIT_IP_BURST")
+	if authRateLimitIPBurst <= 0 {
+		authRateLimitIPBurst = 10
+	}
+	authRateLimitAccountRPS := viper.GetFloat64("AUTH_RATE_LIMIT_ACCOUNT_RPS")
+	if authRateLimitAccountRPS <= 0 {
+		authRateLimitAccountRPS = 1
+	}
+	authRateLimitAccountBurst := viper.GetInt("AUTH_RATE_LIMIT_ACCOUNT_BURST")
+	if authRateLimitAccountBurst <= 0 {
+		authRateLimitAccountBurst = 5
+	}
 
 	if webhookAllowPrivateNetworks && env != "development" {
 		return nil, fmt.Errorf("WEBHOOK_ALLOW_PRIVATE_NETWORKS can only be enabled in development environment")
@@ -348,17 +375,22 @@ func Load() (*Config, error) {
 			return h
 		}(),
 		CORSAllowedOriginsConfiguredExplicitly: os.Getenv("CORS_ALLOWED_ORIGINS") != "",
+
+		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
+		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
+		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
+		IndexerSyncPageSize:      indexerSyncPageSize,
+
+		AuthRateLimitIPRPS:        authRateLimitIPRPS,
+		AuthRateLimitIPBurst:      authRateLimitIPBurst,
+		AuthRateLimitAccountRPS:   authRateLimitAccountRPS,
+		AuthRateLimitAccountBurst: authRateLimitAccountBurst,
 	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
-		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
-		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
-		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
-		IndexerSyncPageSize:      indexerSyncPageSize,
-	}, nil
 }
 
 // validateKeyEntropy checks that the encryption key has sufficient entropy.
@@ -407,10 +439,10 @@ func validateKeyEntropy(key []byte) error {
 		entropy -= p * log2(p)
 	}
 
-	// Require at least 7.5 bits/byte entropy (out of 8 max)
-	// This catches keys with obvious patterns while allowing natural randomness
-	if entropy < 7.5 {
-		return fmt.Errorf("key entropy too low: %.2f bits/byte (minimum 7.5)", entropy)
+	// Require at least 4.0 bits entropy (out of 5.0 max for a 32-byte sample).
+	// This catches keys with obvious patterns while allowing natural randomness.
+	if entropy < 4.0 {
+		return fmt.Errorf("key entropy too low: %.2f bits (minimum 4.0)", entropy)
 	}
 
 	return nil

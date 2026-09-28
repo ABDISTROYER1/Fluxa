@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/fluxa/fluxa/internal/auth"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 )
 
 type Handler struct {
@@ -25,6 +27,15 @@ func (h *Handler) Routes() func(r chi.Router) {
 		r.Patch("/members/{userId}", h.UpdateRole)
 		r.Delete("/members/{userId}", h.RemoveMember)
 	}
+}
+
+func isAcceptInviteValidationError(err error) bool {
+	if auth.IsPasswordValidationError(err) {
+		return true
+	}
+	msg := err.Error()
+	return msg == "name and password are required to register new user from invite" ||
+		msg == "invite is invalid, already used, or expired"
 }
 
 func (h *Handler) InviteMember(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +69,12 @@ func (h *Handler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if isAcceptInviteValidationError(err) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		log.Error().Err(err).Msg("org: accept invite internal error")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
