@@ -132,6 +132,9 @@ func (s *service) AcceptInvite(ctx context.Context, req AcceptInviteRequest) (*a
 		if req.Name == "" || req.Password == "" {
 			return nil, errors.New("name and password are required to register new user from invite")
 		}
+		if err := auth.ValidatePassword(req.Password); err != nil {
+			return nil, err
+		}
 
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
