@@ -26,10 +26,7 @@ export default function TeamPage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <PageHeader
-        title="Team Management"
-        description="Manage organization members and roles."
-      >
+      <PageHeader title="Team Management" description="Manage organization members and roles.">
         <Button onClick={() => setIsInviting(true)}>
           <Plus className="h-4 w-4" />
           Invite Member
@@ -55,21 +52,14 @@ export default function TeamPage() {
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">Role</label>
-            <Select
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value)}
-            >
+            <Select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
               <option value="developer">Developer</option>
               <option value="finance">Finance</option>
               <option value="admin">Admin</option>
             </Select>
           </div>
           <div className="flex justify-end gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setIsInviting(false)}
-            >
+            <Button type="button" variant="secondary" onClick={() => setIsInviting(false)}>
               Cancel
             </Button>
             <Button type="submit">Send Invite</Button>

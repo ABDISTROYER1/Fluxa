@@ -45,7 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       setToasts((prev) => [...prev, { id, message, type }]);
       setTimeout(() => dismiss(id), 4000);
     },
-    [dismiss]
+    [dismiss],
   );
 
   return (
@@ -59,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               key={t.id}
               className={cn(
                 'pointer-events-auto flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium shadow-lg animate-in fade-in slide-in-from-bottom-4 duration-300 cursor-pointer',
-                styles[t.type]
+                styles[t.type],
               )}
               onClick={() => dismiss(t.id)}
             >

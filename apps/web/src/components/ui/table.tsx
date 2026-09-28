@@ -1,17 +1,9 @@
 import { cn } from '@/lib/utils';
 
-export function Table({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className="w-full overflow-x-auto">
-      <table className={cn('w-full caption-bottom text-sm', className)}>
-        {children}
-      </table>
+      <table className={cn('w-full caption-bottom text-sm', className)}>{children}</table>
     </div>
   );
 }
@@ -23,11 +15,7 @@ export function TableHead({
   children: React.ReactNode;
   className?: string;
 }) {
-  return (
-    <thead className={cn('border-b border-border bg-muted/50', className)}>
-      {children}
-    </thead>
-  );
+  return <thead className={cn('border-b border-border bg-muted/50', className)}>{children}</thead>;
 }
 
 export function TableBody({
@@ -47,11 +35,7 @@ export function TableRow({
   children: React.ReactNode;
   className?: string;
 }) {
-  return (
-    <tr className={cn('transition-colors hover:bg-surface-hover', className)}>
-      {children}
-    </tr>
-  );
+  return <tr className={cn('transition-colors hover:bg-surface-hover', className)}>{children}</tr>;
 }
 
 export function TableHeader({
@@ -65,7 +49,7 @@ export function TableHeader({
     <th
       className={cn(
         'h-12 px-4 text-left align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground',
-        className
+        className,
       )}
     >
       {children}

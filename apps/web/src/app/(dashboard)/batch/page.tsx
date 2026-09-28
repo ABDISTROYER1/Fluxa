@@ -1,21 +1,15 @@
-"use client";
+'use client';
 
-import { useState, useMemo } from "react";
-import { api, type BatchResponse } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
-import { useToast } from "@/lib/toast-context";
-import { PageHeader } from "@/components/ui/page-header";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useState, useMemo } from 'react';
+import { api, type BatchResponse } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { useToast } from '@/lib/toast-context';
+import { PageHeader } from '@/components/ui/page-header';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -23,8 +17,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { Layers, Plus, Trash2, Download } from "lucide-react";
+} from '@/components/ui/table';
+import { Layers, Plus, Trash2, Download } from 'lucide-react';
 
 interface BatchItem {
   to_wallet_id: string;
@@ -38,26 +32,20 @@ export default function BatchPage() {
   const { toast } = useToast();
   const walletIds = useMemo(() => getStoredWalletIds(), [getStoredWalletIds]);
 
-  const [fromWalletId, setFromWalletId] = useState("");
+  const [fromWalletId, setFromWalletId] = useState('');
   const [items, setItems] = useState<BatchItem[]>([
-    { to_wallet_id: "", asset: "XLM", amount: "", reference: "" },
+    { to_wallet_id: '', asset: 'XLM', amount: '', reference: '' },
   ]);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<BatchResponse | null>(null);
-  const [lookupId, setLookupId] = useState("");
+  const [lookupId, setLookupId] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
 
   const addItem = () =>
-    setItems((p) => [
-      ...p,
-      { to_wallet_id: "", asset: "XLM", amount: "", reference: "" },
-    ]);
-  const removeItem = (idx: number) =>
-    setItems((p) => p.filter((_, i) => i !== idx));
+    setItems((p) => [...p, { to_wallet_id: '', asset: 'XLM', amount: '', reference: '' }]);
+  const removeItem = (idx: number) => setItems((p) => p.filter((_, i) => i !== idx));
   const updateItem = (idx: number, field: keyof BatchItem, val: string) =>
-    setItems((p) =>
-      p.map((it, i) => (i === idx ? { ...it, [field]: val } : it)),
-    );
+    setItems((p) => p.map((it, i) => (i === idx ? { ...it, [field]: val } : it)));
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,9 +56,9 @@ export default function BatchPage() {
         transfers: items,
       });
       setResult(res);
-      toast(`Batch ${res.status} — ${res.total_count} transfers`, "success");
+      toast(`Batch ${res.status} — ${res.total_count} transfers`, 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Batch failed", "error");
+      toast(err instanceof Error ? err.message : 'Batch failed', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -82,9 +70,9 @@ export default function BatchPage() {
     try {
       const r = await api.getBatch(lookupId);
       setResult(r);
-      toast("Batch fetched", "success");
+      toast('Batch fetched', 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Not found", "error");
+      toast(err instanceof Error ? err.message : 'Not found', 'error');
     } finally {
       setLookupLoading(false);
     }
@@ -94,23 +82,23 @@ export default function BatchPage() {
     if (!result) return;
     try {
       const csv = await api.exportBatchCsv(result.id);
-      const blob = new Blob([csv], { type: "text/csv" });
+      const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
       a.download = `batch-${result.id}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      toast("CSV downloaded", "success");
+      toast('CSV downloaded', 'success');
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Export failed", "error");
+      toast(err instanceof Error ? err.message : 'Export failed', 'error');
     }
   };
 
   const statusBadge = (s: string) => {
-    if (s === "completed") return <Badge variant="success">{s}</Badge>;
-    if (s === "partial") return <Badge variant="warning">{s}</Badge>;
-    if (s === "failed") return <Badge variant="danger">{s}</Badge>;
+    if (s === 'completed') return <Badge variant="success">{s}</Badge>;
+    if (s === 'partial') return <Badge variant="warning">{s}</Badge>;
+    if (s === 'failed') return <Badge variant="danger">{s}</Badge>;
     return <Badge variant="default">{s}</Badge>;
   };
 
@@ -127,11 +115,7 @@ export default function BatchPage() {
             placeholder="Batch ID"
             className="w-64"
           />
-          <Button
-            variant="secondary"
-            onClick={handleLookup}
-            isLoading={lookupLoading}
-          >
+          <Button variant="secondary" onClick={handleLookup} isLoading={lookupLoading}>
             Fetch
           </Button>
         </div>
@@ -170,14 +154,10 @@ export default function BatchPage() {
                   className="grid grid-cols-12 gap-2 items-end rounded-lg border border-border p-3"
                 >
                   <div className="col-span-5 flex flex-col gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      To Wallet
-                    </label>
+                    <label className="text-xs font-medium text-muted-foreground">To Wallet</label>
                     <Select
                       value={it.to_wallet_id}
-                      onChange={(e) =>
-                        updateItem(idx, "to_wallet_id", e.target.value)
-                      }
+                      onChange={(e) => updateItem(idx, 'to_wallet_id', e.target.value)}
                       required
                     >
                       <option value="">Select</option>
@@ -189,37 +169,27 @@ export default function BatchPage() {
                     </Select>
                   </div>
                   <div className="col-span-2 flex flex-col gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Asset
-                    </label>
+                    <label className="text-xs font-medium text-muted-foreground">Asset</label>
                     <Input
                       value={it.asset}
-                      onChange={(e) => updateItem(idx, "asset", e.target.value)}
+                      onChange={(e) => updateItem(idx, 'asset', e.target.value)}
                       required
                     />
                   </div>
                   <div className="col-span-2 flex flex-col gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Amount
-                    </label>
+                    <label className="text-xs font-medium text-muted-foreground">Amount</label>
                     <Input
                       value={it.amount}
-                      onChange={(e) =>
-                        updateItem(idx, "amount", e.target.value)
-                      }
+                      onChange={(e) => updateItem(idx, 'amount', e.target.value)}
                       required
                       className="font-mono"
                     />
                   </div>
                   <div className="col-span-2 flex flex-col gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Reference
-                    </label>
+                    <label className="text-xs font-medium text-muted-foreground">Reference</label>
                     <Input
                       value={it.reference}
-                      onChange={(e) =>
-                        updateItem(idx, "reference", e.target.value)
-                      }
+                      onChange={(e) => updateItem(idx, 'reference', e.target.value)}
                     />
                   </div>
                   <div className="col-span-1">
@@ -260,8 +230,8 @@ export default function BatchPage() {
             <div>
               <CardTitle>Batch {result.id.slice(0, 8)}</CardTitle>
               <CardDescription>
-                {result.total_count} total · {result.success_count} success ·{" "}
-                {result.failed_count} failed
+                {result.total_count} total · {result.success_count} success · {result.failed_count}{' '}
+                failed
               </CardDescription>
             </div>
             <div className="flex items-center gap-3">
@@ -288,9 +258,7 @@ export default function BatchPage() {
                 <TableBody>
                   {result.transfers.map((t) => (
                     <TableRow key={t.id}>
-                      <TableCell className="font-mono text-xs">
-                        {t.id.slice(0, 8)}
-                      </TableCell>
+                      <TableCell className="font-mono text-xs">{t.id.slice(0, 8)}</TableCell>
                       <TableCell className="font-mono text-xs">
                         {t.to_wallet_id.slice(0, 8)}...
                       </TableCell>
@@ -298,11 +266,9 @@ export default function BatchPage() {
                         {t.amount} {t.asset}
                       </TableCell>
                       <TableCell>{statusBadge(t.status)}</TableCell>
-                      <TableCell title={t.failure_reason || undefined}>
-                        {t.failure_message || t.failure_reason || "—"}
-                      </TableCell>
+                      <TableCell>{t.failure_message || t.failure_reason || '—'}</TableCell>
                       <TableCell className="font-mono text-xs">
-                        {t.tx_hash?.slice(0, 8) || "—"}
+                        {t.tx_hash?.slice(0, 8) || '—'}
                       </TableCell>
                     </TableRow>
                   ))}

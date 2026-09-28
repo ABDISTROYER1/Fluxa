@@ -14,18 +14,13 @@ const variants: Record<BadgeVariant, string> = {
   danger: 'bg-danger-subtle text-danger',
 };
 
-export function Badge({
-  children,
-  variant = 'default',
-  className,
-  ...props
-}: BadgeProps) {
+export function Badge({ children, variant = 'default', className, ...props }: BadgeProps) {
   return (
     <span
       className={cn(
         'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium uppercase tracking-wide',
         variants[variant],
-        className
+        className,
       )}
       {...props}
     >

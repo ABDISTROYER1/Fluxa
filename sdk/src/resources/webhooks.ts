@@ -1,10 +1,10 @@
-import { HttpClient } from "../http";
+import { HttpClient } from '../http';
 import {
   RegisterWebhookRequest,
   WebhookEndpointResponse,
   ListWebhooksResponse,
   ListDeliveriesResponse,
-} from "../types";
+} from '../types';
 
 export class WebhooksResource {
   constructor(private http: HttpClient) {}
@@ -14,8 +14,8 @@ export class WebhooksResource {
     options?: { signal?: AbortSignal },
   ): Promise<WebhookEndpointResponse> {
     const res = await this.http.request<WebhookEndpointResponse>({
-      method: "POST",
-      path: "/webhooks",
+      method: 'POST',
+      path: '/webhooks',
       body: request,
       signal: options?.signal,
     });
@@ -24,19 +24,16 @@ export class WebhooksResource {
 
   async list(options?: { signal?: AbortSignal }): Promise<ListWebhooksResponse> {
     const res = await this.http.request<ListWebhooksResponse>({
-      method: "GET",
-      path: "/webhooks",
+      method: 'GET',
+      path: '/webhooks',
       signal: options?.signal,
     });
     return res.data;
   }
 
-  async delete(
-    webhookId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void> {
+  async delete(webhookId: string, options?: { signal?: AbortSignal }): Promise<void> {
     await this.http.request<unknown>({
-      method: "DELETE",
+      method: 'DELETE',
       path: `/webhooks/${encodeURIComponent(webhookId)}`,
       signal: options?.signal,
     });
@@ -48,7 +45,7 @@ export class WebhooksResource {
     options?: { signal?: AbortSignal },
   ): Promise<ListDeliveriesResponse> {
     const res = await this.http.request<ListDeliveriesResponse>({
-      method: "GET",
+      method: 'GET',
       path: `/webhooks/${encodeURIComponent(webhookId)}/deliveries`,
       query,
       signal: options?.signal,

@@ -32,11 +32,13 @@ make run-worker
 ```
 
 Generate a `MASTER_ENCRYPTION_KEY`:
+
 ```bash
 openssl rand -hex 32
 ```
 
 Fund a testnet wallet:
+
 ```bash
 curl "https://friendbot.stellar.org?addr=<PUBLIC_KEY>"
 ```
@@ -123,6 +125,7 @@ and which struct satisfies it.
 **5. Review the diff line by line**
 
 Agents commonly:
+
 - Forget to wire up new packages in `cmd/api/main.go` or `cmd/worker/main.go`
 - Implement an interface method with the wrong signature
 - Import packages not in `go.mod`
@@ -149,6 +152,19 @@ make build          # compile both binaries
 
 All tests must pass before submitting a PR. Fix lint warnings — CI enforces it.
 
+For the web dashboard and TypeScript SDK, run their checks from the repository
+root with:
+
+```bash
+cd apps/web && npm ci && npm run typecheck && npm run lint && npm run format:check && npm run build
+cd sdk && npm ci --ignore-scripts && npm run typecheck && npm run format:check && npm run build
+```
+
+`npm run lint` and `npm run format:check` are non-mutating. Use `npm run lint:fix`
+or `npm run format` in `apps/web` to apply local fixes. `make typecheck`,
+`make format-check`, and `make clean` run the corresponding checks or cleanup
+across both TypeScript packages.
+
 ---
 
 ## Code Style
@@ -157,7 +173,7 @@ All tests must pass before submitting a PR. Fix lint warnings — CI enforces it
 - **Decimal arithmetic**: use `shopspring/decimal` for all monetary values — no `float64`
 - **Context propagation**: every function that touches the DB or network must accept `context.Context` as its first argument
 - **Interface-first**: define the interface in the package that owns the domain (`wallet.Service`, `wallet.Repository`); implementations live in `postgres/` or elsewhere
-- **Comments**: only if the *why* is genuinely non-obvious; don't describe what the code does
+- **Comments**: only if the _why_ is genuinely non-obvious; don't describe what the code does
 - **No extra files**: don't add docs, notes, or scripts the issue didn't require
 
 ---
@@ -167,6 +183,7 @@ All tests must pass before submitting a PR. Fix lint warnings — CI enforces it
 **Title**: `feat: <short description> (closes #<number>)`
 
 **Body should include**:
+
 - What you built
 - Any architectural decisions made that weren't obvious from the issue
 - How a reviewer can manually test the change (exact curl commands welcome)
@@ -174,6 +191,7 @@ All tests must pass before submitting a PR. Fix lint warnings — CI enforces it
 Always include `Closes #<issue-number>`.
 
 **Checklist before submitting**:
+
 - [ ] All acceptance criteria in the issue are satisfied
 - [ ] `go build ./...` compiles without errors
 - [ ] `make test` passes

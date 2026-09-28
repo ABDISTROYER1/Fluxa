@@ -18,8 +18,10 @@ function extractHeader(rawHeaders: string, name: string): string {
 
 const REASON_LABELS: Record<string, string> = {
   invalid_timestamp: 'The timestamp is not a valid Unix timestamp.',
-  stale_timestamp: 'The timestamp is more than 5 minutes old (or in the future) — rejected to prevent replay attacks.',
-  signature_mismatch: 'The computed signature does not match the provided signature. Check the secret, and that the body is the exact raw bytes that were signed.',
+  stale_timestamp:
+    'The timestamp is more than 5 minutes old (or in the future) — rejected to prevent replay attacks.',
+  signature_mismatch:
+    'The computed signature does not match the provided signature. Check the secret, and that the body is the exact raw bytes that were signed.',
 };
 
 export function VerifySignatureTool() {
@@ -66,9 +68,9 @@ export function VerifySignatureTool() {
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <p className="text-sm text-muted-foreground">
-          Paste a delivery&apos;s raw request headers and body to check whether it verifies
-          against your webhook secret — useful for debugging your own verification code
-          without waiting for a real event.
+          Paste a delivery&apos;s raw request headers and body to check whether it verifies against
+          your webhook secret — useful for debugging your own verification code without waiting for
+          a real event.
         </p>
 
         <form onSubmit={handleVerify} className="flex flex-col gap-4">
@@ -83,7 +85,9 @@ export function VerifySignatureTool() {
             />
             <div className="flex gap-4 text-xs text-muted-foreground">
               <span>Timestamp: {timestamp || <em>not found</em>}</span>
-              <span>Signature: {signature ? `${signature.slice(0, 20)}…` : <em>not found</em>}</span>
+              <span>
+                Signature: {signature ? `${signature.slice(0, 20)}…` : <em>not found</em>}
+              </span>
             </div>
           </div>
 
@@ -110,7 +114,11 @@ export function VerifySignatureTool() {
           </div>
 
           <div>
-            <Button type="submit" isLoading={verifying} disabled={!secret || !body || !timestamp || !signature}>
+            <Button
+              type="submit"
+              isLoading={verifying}
+              disabled={!secret || !body || !timestamp || !signature}
+            >
               Verify
             </Button>
           </div>

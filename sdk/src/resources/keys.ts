@@ -1,9 +1,5 @@
-import { HttpClient } from "../http";
-import {
-  CreateKeyRequest,
-  CreateKeyResponse,
-  APIKeyResponse,
-} from "../types";
+import { HttpClient } from '../http';
+import { CreateKeyRequest, CreateKeyResponse, APIKeyResponse } from '../types';
 
 export class KeysResource {
   constructor(private http: HttpClient) {}
@@ -13,8 +9,8 @@ export class KeysResource {
     options?: { signal?: AbortSignal },
   ): Promise<CreateKeyResponse> {
     const res = await this.http.request<CreateKeyResponse>({
-      method: "POST",
-      path: "/keys",
+      method: 'POST',
+      path: '/keys',
       body: request ?? {},
       signal: options?.signal,
     });
@@ -23,19 +19,16 @@ export class KeysResource {
 
   async list(options?: { signal?: AbortSignal }): Promise<APIKeyResponse[]> {
     const res = await this.http.request<APIKeyResponse[]>({
-      method: "GET",
-      path: "/keys",
+      method: 'GET',
+      path: '/keys',
       signal: options?.signal,
     });
     return res.data;
   }
 
-  async delete(
-    keyId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void> {
+  async delete(keyId: string, options?: { signal?: AbortSignal }): Promise<void> {
     await this.http.request<unknown>({
-      method: "DELETE",
+      method: 'DELETE',
       path: `/keys/${encodeURIComponent(keyId)}`,
       signal: options?.signal,
     });

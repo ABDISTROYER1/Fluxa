@@ -41,12 +41,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const addStoredWalletId = useCallback((id: string) => {
-    const existing = getStoredWalletIds();
-    if (!existing.includes(id)) {
-      localStorage.setItem(WALLET_IDS_KEY, JSON.stringify([...existing, id]));
-    }
-  }, [getStoredWalletIds]);
+  const addStoredWalletId = useCallback(
+    (id: string) => {
+      const existing = getStoredWalletIds();
+      if (!existing.includes(id)) {
+        localStorage.setItem(WALLET_IDS_KEY, JSON.stringify([...existing, id]));
+      }
+    },
+    [getStoredWalletIds],
+  );
 
   return (
     <AuthContext.Provider

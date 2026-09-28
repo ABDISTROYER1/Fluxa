@@ -161,13 +161,8 @@ export default function ApiKeysPage() {
               {keys.map((k) => {
                 const isRevoked = !!k.revoked_at;
                 return (
-                  <TableRow
-                    key={k.id}
-                    className={isRevoked ? 'opacity-60' : undefined}
-                  >
-                    <TableCell className="font-medium">
-                      {k.label || 'Unnamed Key'}
-                    </TableCell>
+                  <TableRow key={k.id} className={isRevoked ? 'opacity-60' : undefined}>
+                    <TableCell className="font-medium">{k.label || 'Unnamed Key'}</TableCell>
                     <TableCell>
                       <code className="rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs">
                         {k.prefix}••••••••••••
@@ -177,9 +172,7 @@ export default function ApiKeysPage() {
                       {new Date(k.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {k.last_used_at
-                        ? new Date(k.last_used_at).toLocaleDateString()
-                        : 'Never'}
+                      {k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : 'Never'}
                     </TableCell>
                     <TableCell>
                       {isRevoked ? (

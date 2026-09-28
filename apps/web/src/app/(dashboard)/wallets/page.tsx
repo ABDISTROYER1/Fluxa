@@ -45,7 +45,7 @@ export default function WalletsPage() {
             balances: [] as WalletBalance[],
           } as WalletWithBalance;
         }
-      })
+      }),
     );
     setWallets(results);
     setLoading(false);
@@ -119,10 +119,7 @@ export default function WalletsPage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <PageHeader
-        title="Wallets"
-        description="Manage your Stellar wallets and balances."
-      >
+      <PageHeader title="Wallets" description="Manage your Stellar wallets and balances.">
         <Button onClick={handleCreateWallet} isLoading={creating}>
           <Plus className="h-4 w-4" />
           Create Wallet

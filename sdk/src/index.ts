@@ -1,5 +1,5 @@
-export { FluxaClient } from "./client";
-export type { FluxaClientConfig } from "./client";
+export { FluxaClient } from './client';
+export type { FluxaClientConfig } from './client';
 
 export {
   FluxaError,
@@ -8,7 +8,7 @@ export {
   ValidationError,
   RateLimitError,
   ConflictError,
-} from "./errors";
+} from './errors';
 
 export type {
   // Wallet
@@ -67,14 +67,14 @@ export type {
   APIKeyResponse,
   // Health
   HealthResponse,
-} from "./types";
+} from './types';
 
 // Re-export resource classes for advanced usage
-export { WalletsResource } from "./resources/wallets";
-export { TransfersResource } from "./resources/transfers";
-export { FXResource } from "./resources/fx";
-export { SchedulesResource } from "./resources/schedules";
-export { WebhooksResource } from "./resources/webhooks";
-export { FeesResource } from "./resources/fees";
-export { KeysResource } from "./resources/keys";
-export { FiatResource } from "./resources/fiat";
+export { WalletsResource } from './resources/wallets';
+export { TransfersResource } from './resources/transfers';
+export { FXResource } from './resources/fx';
+export { SchedulesResource } from './resources/schedules';
+export { WebhooksResource } from './resources/webhooks';
+export { FeesResource } from './resources/fees';
+export { KeysResource } from './resources/keys';
+export { FiatResource } from './resources/fiat';

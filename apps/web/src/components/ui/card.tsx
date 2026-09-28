@@ -1,19 +1,8 @@
 import { cn } from '@/lib/utils';
 
-export function Card({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div
-      className={cn(
-        'bg-surface border border-border rounded-xl shadow-sm',
-        className
-      )}
-    >
+    <div className={cn('bg-surface border border-border rounded-xl shadow-sm', className)}>
       {children}
     </div>
   );
@@ -67,8 +56,6 @@ export function CardFooter({
   className?: string;
 }) {
   return (
-    <div className={cn('flex items-center justify-end gap-3 p-6 pt-0', className)}>
-      {children}
-    </div>
+    <div className={cn('flex items-center justify-end gap-3 p-6 pt-0', className)}>{children}</div>
   );
 }

@@ -20,13 +20,9 @@ export interface GetBalancesResponse {
 // ── Transaction / Transfer ──────────────────────────────────────────────────
 
 export type TransactionStatus =
-  | "pending"
-  | "submitted"
-  | "confirmed"
-  | "failed"
-  | "reconciliation_failed";
+  'pending' | 'submitted' | 'confirmed' | 'failed' | 'reconciliation_failed';
 
-export type TransactionType = "transfer" | "conversion" | "funding";
+export type TransactionType = 'transfer' | 'conversion' | 'funding';
 
 export interface CreateTransferRequest {
   from_wallet_id: string;
@@ -65,12 +61,7 @@ export interface ListTransactionsResponse {
 // ── Batch ───────────────────────────────────────────────────────────────────
 
 export type BatchStatus =
-  | "pending"
-  | "processing"
-  | "partial"
-  | "completed"
-  | "failed"
-  | "compliance_hold";
+  'pending' | 'processing' | 'partial' | 'completed' | 'failed' | 'compliance_hold';
 
 export interface BatchItemRequest {
   to_wallet_id: string;
@@ -225,13 +216,13 @@ export interface WithdrawResponse {
 // ── Webhook ─────────────────────────────────────────────────────────────────
 
 export type EventType =
-  | "transfer.initiated"
-  | "transfer.settled"
-  | "transfer.failed"
-  | "wallet.funded"
-  | "conversion.completed";
+  | 'transfer.initiated'
+  | 'transfer.settled'
+  | 'transfer.failed'
+  | 'wallet.funded'
+  | 'conversion.completed';
 
-export type DeliveryStatus = "pending" | "success" | "failed";
+export type DeliveryStatus = 'pending' | 'success' | 'failed';
 
 export interface RegisterWebhookRequest {
   url: string;
@@ -268,9 +259,9 @@ export interface ListDeliveriesResponse {
 
 // ── Schedule ────────────────────────────────────────────────────────────────
 
-export type ScheduleFrequency = "daily" | "weekly" | "monthly";
+export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
 
-export type ScheduleStatus = "active" | "paused" | "cancelled" | "completed";
+export type ScheduleStatus = 'active' | 'paused' | 'cancelled' | 'completed';
 
 export interface CreateScheduleRequest {
   from_wallet_id: string;
@@ -283,7 +274,7 @@ export interface CreateScheduleRequest {
 }
 
 export interface UpdateScheduleRequest {
-  status?: "active" | "paused";
+  status?: 'active' | 'paused';
   amount?: string;
   frequency?: ScheduleFrequency;
   end_date?: string;

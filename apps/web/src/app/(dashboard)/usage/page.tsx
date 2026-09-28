@@ -1,11 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import {
-  api,
-  type FeeSchedule,
-  type FeeCollectedSummary,
-} from '@/lib/api';
+import { api, type FeeSchedule, type FeeCollectedSummary } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { PageHeader } from '@/components/ui/page-header';
@@ -80,10 +76,7 @@ export default function UsagePage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <PageHeader
-        title="Usage & Billing"
-        description="Monitor your API usage and limits."
-      />
+      <PageHeader title="Usage & Billing" description="Monitor your API usage and limits." />
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <Card>
@@ -95,9 +88,7 @@ export default function UsagePage() {
             <CardTitle className="text-3xl">{totalTransactions}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Across {walletIds.length} wallet(s)
-            </p>
+            <p className="text-sm text-muted-foreground">Across {walletIds.length} wallet(s)</p>
           </CardContent>
         </Card>
 

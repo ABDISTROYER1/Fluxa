@@ -1,4 +1,4 @@
-.PHONY: run-api run-worker migrate migrate-down test lint build tidy generate openapi-check openapi-manifest deploy-primary deploy-secondary failover
+.PHONY: run-api run-worker migrate migrate-down test lint build tidy generate openapi-check openapi-manifest typecheck format-check clean deploy-primary deploy-secondary failover
 
 # Run the API server
 run-api:
@@ -53,6 +53,19 @@ openapi-check:
 openapi-manifest:
 	go run ./tools/openapicheck -spec docs/openapi.yaml -manifest docs/api-routes.yaml -write-manifest
 
+typecheck:
+	cd apps/web && npm run typecheck
+	cd sdk && npm run typecheck
+
+format-check:
+	cd apps/web && npm run format:check
+	cd sdk && npm run format:check
+
+clean:
+	cd apps/web && npm run clean
+	cd sdk && npm run clean
+	rm -rf bin
+
 # Multi-region deployment helpers. Override COMPOSE, PRIMARY_ENV, SECONDARY_ENV,
 # PROMOTE_REPLICA_CMD, and UPDATE_DNS_CMD in the deployment environment.
 deploy-primary:
@@ -93,5 +106,5 @@ docker-logs:
 
 # CI locally (mimics GitHub Actions)
 ci: lint test openapi-check
-	cd apps/web && npm ci && npm run lint && npm run build
-	cd sdk && npm install && npm run typecheck && npm run build
+	cd apps/web && npm ci && npm run typecheck && npm run lint && npm run format:check && npm run build
+	cd sdk && npm ci --ignore-scripts && npm run typecheck && npm run format:check && npm run build

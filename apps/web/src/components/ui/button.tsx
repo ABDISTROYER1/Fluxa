@@ -13,12 +13,9 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants: Record<ButtonVariant, string> = {
-  primary:
-    'bg-primary text-primary-foreground hover:bg-primary-hover shadow-sm',
-  secondary:
-    'bg-secondary text-secondary-foreground hover:bg-secondary-hover border border-border',
-  ghost:
-    'bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
+  primary: 'bg-primary text-primary-foreground hover:bg-primary-hover shadow-sm',
+  secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary-hover border border-border',
+  ghost: 'bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
   danger: 'bg-danger text-white hover:bg-red-600 shadow-sm',
 };
 
@@ -43,7 +40,7 @@ export function Button({
         'inline-flex items-center justify-center gap-2 font-medium transition-colors focus-visible:ring-4 focus-visible:ring-primary/20 focus-visible:outline-none disabled:opacity-60 disabled:cursor-not-allowed',
         variants[variant],
         sizes[size],
-        className
+        className,
       )}
       disabled={disabled || isLoading}
       {...props}

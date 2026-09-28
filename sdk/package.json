@@ -22,9 +22,12 @@
     "build:types": "tsc -p tsconfig.types.json",
     "build": "npm run build:cjs && npm run build:esm && npm run build:types",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "format": "prettier --write \"src/**/*.ts\" \"*.json\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"*.json\"",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\""
   },
   "devDependencies": {
+    "prettier": "^3.9.9",
     "typescript": "^5.4.0"
   },
   "engines": {

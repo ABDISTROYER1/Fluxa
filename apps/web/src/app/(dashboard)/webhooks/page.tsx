@@ -1,25 +1,16 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { api, type WebhookEndpoint, type WebhookDelivery } from '@/lib/api';
+import { api, type WebhookEndpoint } from '@/lib/api';
 import { useToast } from '@/lib/toast-context';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { VerifySignatureTool } from '@/components/webhooks/verify-signature-tool';
-import { Webhook, Plus, X, Trash2, Key, RefreshCw } from 'lucide-react';
+import { Plus, X, Trash2, Key, RefreshCw } from 'lucide-react';
 
 const eventOptions = [
   'transfer.initiated',
@@ -29,15 +20,9 @@ const eventOptions = [
   'conversion.completed',
 ];
 
-function deliveryStatusBadge(status: string) {
-  if (status === 'success') return <Badge variant="success">{status}</Badge>;
-  return <Badge variant="danger">{status}</Badge>;
-}
-
 export default function WebhooksPage() {
   const { toast } = useToast();
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[]>([]);
-  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState('');
   const [selectedEvents, setSelectedEvents] = useState<string[]>([
@@ -109,7 +94,12 @@ export default function WebhooksPage() {
   };
 
   const handleRotateSecret = async () => {
-    if (!confirm('Rotating the signing secret will invalidate all current webhook signatures. Continue?')) return;
+    if (
+      !confirm(
+        'Rotating the signing secret will invalidate all current webhook signatures. Continue?',
+      )
+    )
+      return;
     setRotating(true);
     try {
       const res = await api.rotateWebhookSecret();
@@ -125,7 +115,7 @@ export default function WebhooksPage() {
 
   const toggleEvent = (event: string) => {
     setSelectedEvents((prev) =>
-      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]
+      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event],
     );
   };
 
@@ -147,10 +137,7 @@ export default function WebhooksPage() {
         title="Webhooks"
         description="Configure webhooks to receive real-time event notifications."
       >
-        <Button
-          variant={showForm ? 'secondary' : 'primary'}
-          onClick={() => setShowForm(!showForm)}
-        >
+        <Button variant={showForm ? 'secondary' : 'primary'} onClick={() => setShowForm(!showForm)}>
           {showForm ? (
             <>
               <X className="h-4 w-4" /> Cancel
@@ -170,14 +157,11 @@ export default function WebhooksPage() {
               <CardTitle className="flex items-center gap-2">
                 <Key className="h-5 w-5" /> Signing Secret
               </CardTitle>
-              <CardDescription>Used to sign all outbound webhooks with HMAC-SHA256.</CardDescription>
+              <CardDescription>
+                Used to sign all outbound webhooks with HMAC-SHA256.
+              </CardDescription>
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              isLoading={rotating}
-              onClick={handleRotateSecret}
-            >
+            <Button variant="secondary" size="sm" isLoading={rotating} onClick={handleRotateSecret}>
               <RefreshCw className="h-4 w-4" /> Rotate Secret
             </Button>
           </div>
@@ -190,11 +174,7 @@ export default function WebhooksPage() {
               readOnly
               className="font-mono max-w-md"
             />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowSecret(!showSecret)}
-            >
+            <Button variant="secondary" size="sm" onClick={() => setShowSecret(!showSecret)}>
               {showSecret ? 'Hide' : 'Reveal'}
             </Button>
           </div>
@@ -259,23 +239,16 @@ export default function WebhooksPage() {
               <Card key={ep.id}>
                 <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex flex-col gap-1 min-w-0">
-                    <code className="truncate font-mono text-sm text-foreground">
-                      {ep.url}
-                    </code>
+                    <code className="truncate font-mono text-sm text-foreground">{ep.url}</code>
                     <span className="text-xs text-muted-foreground">
-                      Events:{' '}
-                      {ep.events.length > 0 ? ep.events.join(', ') : 'All'}
+                      Events: {ep.events.length > 0 ? ep.events.join(', ') : 'All'}
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
                     <Badge variant={ep.active ? 'success' : 'default'}>
                       {ep.active ? 'Active' : 'Inactive'}
                     </Badge>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => handleDelete(ep.id)}
-                    >
+                    <Button variant="danger" size="sm" onClick={() => handleDelete(ep.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>

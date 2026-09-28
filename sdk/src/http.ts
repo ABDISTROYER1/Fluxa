@@ -1,4 +1,4 @@
-import { classifyError, FluxaError, RateLimitError } from "./errors";
+import { classifyError, FluxaError, RateLimitError } from './errors';
 
 export interface HttpClientConfig {
   baseUrl: string;
@@ -25,13 +25,12 @@ export interface HttpResponse<T> {
 }
 
 function buildQueryString(
-  params?: Record<string, string | number | undefined> | { [key: string]: string | number | undefined },
+  params?:
+    Record<string, string | number | undefined> | { [key: string]: string | number | undefined },
 ): string {
-  if (!params) return "";
-  const entries = Object.entries(params).filter(
-    ([, v]) => v !== undefined && v !== null,
-  );
-  if (entries.length === 0) return "";
+  if (!params) return '';
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
+  if (entries.length === 0) return '';
   const qs = new URLSearchParams();
   for (const [k, v] of entries) {
     qs.set(k, String(v));
@@ -55,12 +54,11 @@ export class HttpClient {
   }
 
   async request<T>(options: RequestOptions): Promise<HttpResponse<T>> {
-    const { method, path, body, query, headers: extraHeaders, signal } =
-      options;
+    const { method, path, body, query, headers: extraHeaders, signal } = options;
     const url = `${this.config.baseUrl}/v1${path}${buildQueryString(query)}`;
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${this.config.apiKey}`,
       ...extraHeaders,
     };
@@ -74,17 +72,14 @@ export class HttpClient {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(
-        () => controller.abort(),
-        this.config.timeout,
-      );
+      const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
       // Combine external signal with timeout signal
       if (signal) {
         if (signal.aborted) {
           controller.abort();
         } else {
-          signal.addEventListener("abort", () => controller.abort(), {
+          signal.addEventListener('abort', () => controller.abort(), {
             once: true,
           });
         }
@@ -105,12 +100,12 @@ export class HttpClient {
           return { data: undefined as unknown as T, status: res.status, headers: res.headers };
         }
 
-        const contentType = res.headers.get("content-type") ?? "";
+        const contentType = res.headers.get('content-type') ?? '';
         let responseData: unknown;
 
-        if (contentType.includes("application/json")) {
+        if (contentType.includes('application/json')) {
           responseData = await res.json();
-        } else if (contentType.includes("text/csv")) {
+        } else if (contentType.includes('text/csv')) {
           responseData = await res.text();
         } else {
           responseData = await res.text();
@@ -120,7 +115,7 @@ export class HttpClient {
           const error = classifyError(res.status, responseData);
 
           if (error instanceof RateLimitError) {
-            const retryHeader = res.headers.get("retry-after");
+            const retryHeader = res.headers.get('retry-after');
             if (retryHeader) {
               error.retryAfter = parseInt(retryHeader, 10);
             }
@@ -155,23 +150,20 @@ export class HttpClient {
           continue;
         }
 
-        if (err instanceof DOMException && err.name === "AbortError") {
+        if (err instanceof DOMException && err.name === 'AbortError') {
           throw new FluxaError(408, {
-            code: "TIMEOUT",
+            code: 'TIMEOUT',
             message: `Request timed out after ${this.config.timeout}ms`,
           });
         }
 
         throw new FluxaError(0, {
-          code: "NETWORK_ERROR",
-          message: lastError?.message ?? "Network request failed",
+          code: 'NETWORK_ERROR',
+          message: lastError?.message ?? 'Network request failed',
         });
       }
     }
 
-    throw (
-      lastError ??
-      new FluxaError(0, { code: "UNKNOWN", message: "Request failed" })
-    );
+    throw lastError ?? new FluxaError(0, { code: 'UNKNOWN', message: 'Request failed' });
   }
 }

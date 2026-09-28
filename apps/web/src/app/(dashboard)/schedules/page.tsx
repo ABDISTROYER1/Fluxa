@@ -10,7 +10,14 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Calendar, Plus, Pause, Play, Trash2 } from 'lucide-react';
@@ -116,9 +123,18 @@ export default function SchedulesPage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <PageHeader title="Scheduled Payouts" description="Recurring transfers — daily, weekly, monthly. Worker checks every minute.">
+      <PageHeader
+        title="Scheduled Payouts"
+        description="Recurring transfers — daily, weekly, monthly. Worker checks every minute."
+      >
         <Button onClick={() => setShowForm(!showForm)} variant={showForm ? 'secondary' : 'primary'}>
-          {showForm ? 'Cancel' : <><Plus className="h-4 w-4" /> New Schedule</>}
+          {showForm ? (
+            'Cancel'
+          ) : (
+            <>
+              <Plus className="h-4 w-4" /> New Schedule
+            </>
+          )}
         </Button>
       </PageHeader>
 
@@ -133,7 +149,11 @@ export default function SchedulesPage() {
               <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">From Wallet</label>
-                  <Select value={form.from_wallet_id} onChange={(e) => setForm({ ...form, from_wallet_id: e.target.value })} required>
+                  <Select
+                    value={form.from_wallet_id}
+                    onChange={(e) => setForm({ ...form, from_wallet_id: e.target.value })}
+                    required
+                  >
                     <option value="">Select wallet</option>
                     {walletIds.map((id) => (
                       <option key={id} value={id}>
@@ -144,7 +164,11 @@ export default function SchedulesPage() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">To Wallet</label>
-                  <Select value={form.to_wallet_id} onChange={(e) => setForm({ ...form, to_wallet_id: e.target.value })} required>
+                  <Select
+                    value={form.to_wallet_id}
+                    onChange={(e) => setForm({ ...form, to_wallet_id: e.target.value })}
+                    required
+                  >
                     <option value="">Select wallet</option>
                     {walletIds.map((id) => (
                       <option key={id} value={id}>
@@ -157,17 +181,34 @@ export default function SchedulesPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">Asset</label>
-                  <Input value={form.asset} onChange={(e) => setForm({ ...form, asset: e.target.value })} required />
+                  <Input
+                    value={form.asset}
+                    onChange={(e) => setForm({ ...form, asset: e.target.value })}
+                    required
+                  />
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">Amount</label>
-                  <Input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required className="font-mono" />
+                  <Input
+                    value={form.amount}
+                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                    required
+                    className="font-mono"
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">Frequency</label>
-                  <Select value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value as 'daily' | 'weekly' | 'monthly' })}>
+                  <Select
+                    value={form.frequency}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        frequency: e.target.value as 'daily' | 'weekly' | 'monthly',
+                      })
+                    }
+                  >
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                     <option value="monthly">Monthly</option>
@@ -175,11 +216,20 @@ export default function SchedulesPage() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">Start Date</label>
-                  <Input type="datetime-local" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} required />
+                  <Input
+                    type="datetime-local"
+                    value={form.start_date}
+                    onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+                    required
+                  />
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">End Date (optional)</label>
-                  <Input type="datetime-local" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+                  <Input
+                    type="datetime-local"
+                    value={form.end_date}
+                    onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                  />
                 </div>
               </div>
               <div className="flex justify-end">
@@ -194,7 +244,11 @@ export default function SchedulesPage() {
 
       <Card>
         {schedules.length === 0 ? (
-          <EmptyState icon={Calendar} title="No schedules" description="Create a recurring payout to automate transfers." />
+          <EmptyState
+            icon={Calendar}
+            title="No schedules"
+            description="Create a recurring payout to automate transfers."
+          />
         ) : (
           <Table>
             <TableHead>
@@ -219,7 +273,9 @@ export default function SchedulesPage() {
                     {s.amount} {s.asset}
                   </TableCell>
                   <TableCell>{s.frequency}</TableCell>
-                  <TableCell className="text-muted-foreground text-xs">{new Date(s.next_run_at).toLocaleString()}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {new Date(s.next_run_at).toLocaleString()}
+                  </TableCell>
                   <TableCell>
                     {s.status === 'active' ? (
                       <Badge variant="success">active</Badge>
@@ -232,11 +288,20 @@ export default function SchedulesPage() {
                   <TableCell className="text-right flex justify-end gap-2">
                     {(s.status === 'active' || s.status === 'paused') && (
                       <Button variant="ghost" size="sm" onClick={() => handleToggle(s)}>
-                        {s.status === 'active' ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                        {s.status === 'active' ? (
+                          <Pause className="h-3.5 w-3.5" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5" />
+                        )}
                         {s.status === 'active' ? 'Pause' : 'Resume'}
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" className="text-danger hover:text-danger" onClick={() => handleCancel(s.id)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-danger hover:text-danger"
+                      onClick={() => handleCancel(s.id)}
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                       Cancel
                     </Button>

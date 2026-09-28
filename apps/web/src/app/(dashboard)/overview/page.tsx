@@ -70,7 +70,7 @@ export default function OverviewPage() {
           } catch {
             return { id, balances: [] as WalletBalance[] };
           }
-        })
+        }),
       );
       setWallets(walletResults);
 
@@ -131,8 +131,8 @@ export default function OverviewPage() {
           health?.status === 'ok'
             ? 'All systems operational.'
             : health
-            ? `System status: ${health.status}`
-            : 'Could not reach API'
+              ? `System status: ${health.status}`
+              : 'Could not reach API'
         }
       />
 
@@ -183,10 +183,7 @@ export default function OverviewPage() {
             <div className="flex flex-wrap gap-2">
               {health?.services &&
                 Object.entries(health.services).map(([name, status]) => (
-                  <Badge
-                    key={name}
-                    variant={status === 'up' ? 'success' : 'danger'}
-                  >
+                  <Badge key={name} variant={status === 'up' ? 'success' : 'danger'}>
                     {name}: {status}
                   </Badge>
                 ))}

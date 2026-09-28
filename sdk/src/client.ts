@@ -1,12 +1,12 @@
-import { HttpClient, HttpClientConfig } from "./http";
-import { WalletsResource } from "./resources/wallets";
-import { TransfersResource } from "./resources/transfers";
-import { FXResource } from "./resources/fx";
-import { SchedulesResource } from "./resources/schedules";
-import { WebhooksResource } from "./resources/webhooks";
-import { FeesResource } from "./resources/fees";
-import { KeysResource } from "./resources/keys";
-import { FiatResource } from "./resources/fiat";
+import { HttpClient, HttpClientConfig } from './http';
+import { WalletsResource } from './resources/wallets';
+import { TransfersResource } from './resources/transfers';
+import { FXResource } from './resources/fx';
+import { SchedulesResource } from './resources/schedules';
+import { WebhooksResource } from './resources/webhooks';
+import { FeesResource } from './resources/fees';
+import { KeysResource } from './resources/keys';
+import { FiatResource } from './resources/fiat';
 
 export interface FluxaClientConfig {
   apiKey: string;
@@ -16,7 +16,7 @@ export interface FluxaClientConfig {
   retryDelay?: number;
 }
 
-const DEFAULT_BASE_URL = "https://api.fluxa.io";
+const DEFAULT_BASE_URL = 'https://api.fluxa.io';
 const DEFAULT_TIMEOUT = 30_000;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY = 500;
@@ -35,7 +35,7 @@ export class FluxaClient {
 
   constructor(config: FluxaClientConfig) {
     if (!config.apiKey) {
-      throw new Error("apiKey is required");
+      throw new Error('apiKey is required');
     }
 
     const httpConfig: HttpClientConfig = {
@@ -65,8 +65,8 @@ export class FluxaClient {
       status: string;
       services?: Record<string, string>;
     }>({
-      method: "GET",
-      path: "/../health",
+      method: 'GET',
+      path: '/../health',
       signal: options?.signal,
     });
     return res.data;

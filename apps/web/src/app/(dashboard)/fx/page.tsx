@@ -73,7 +73,10 @@ export default function FXPage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <PageHeader title="FX & Conversion" description="Quote and execute cross-asset swaps via Stellar path payments." />
+      <PageHeader
+        title="FX & Conversion"
+        description="Quote and execute cross-asset swaps via Stellar path payments."
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -88,11 +91,19 @@ export default function FXPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">From</label>
-                <Input value={rateFrom} onChange={(e) => setRateFrom(e.target.value)} placeholder="USDC" />
+                <Input
+                  value={rateFrom}
+                  onChange={(e) => setRateFrom(e.target.value)}
+                  placeholder="USDC"
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">To</label>
-                <Input value={rateTo} onChange={(e) => setRateTo(e.target.value)} placeholder="XLM" />
+                <Input
+                  value={rateTo}
+                  onChange={(e) => setRateTo(e.target.value)}
+                  placeholder="XLM"
+                />
               </div>
             </div>
             <Button onClick={handleGetRate} isLoading={rateLoading}>
@@ -128,7 +139,9 @@ export default function FXPage() {
               <ArrowRightLeft className="h-5 w-5" />
               Quote & Convert
             </CardTitle>
-            <CardDescription>Quotes live for 30s — convert with a wallet and quote ID.</CardDescription>
+            <CardDescription>
+              Quotes live for 30s — convert with a wallet and quote ID.
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <form onSubmit={handleGetQuote} className="flex flex-col gap-4">
@@ -171,11 +184,15 @@ export default function FXPage() {
                   {quote.from_amount} {quote.from_asset} → {quote.to_amount} {quote.to_asset}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Rate {quote.rate} · Fee {quote.fee} · Expires {new Date(quote.expires_at).toLocaleString()}
+                  Rate {quote.rate} · Fee {quote.fee} · Expires{' '}
+                  {new Date(quote.expires_at).toLocaleString()}
                 </p>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">Wallet for conversion</label>
-                  <Select value={convertWalletId} onChange={(e) => setConvertWalletId(e.target.value)}>
+                  <Select
+                    value={convertWalletId}
+                    onChange={(e) => setConvertWalletId(e.target.value)}
+                  >
                     <option value="">Select wallet</option>
                     {walletIds.map((id) => (
                       <option key={id} value={id}>
@@ -184,7 +201,11 @@ export default function FXPage() {
                     ))}
                   </Select>
                 </div>
-                <Button onClick={handleConvert} isLoading={convertLoading} disabled={!convertWalletId}>
+                <Button
+                  onClick={handleConvert}
+                  isLoading={convertLoading}
+                  disabled={!convertWalletId}
+                >
                   Execute Conversion
                 </Button>
               </div>

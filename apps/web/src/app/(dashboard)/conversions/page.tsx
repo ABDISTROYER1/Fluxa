@@ -33,7 +33,10 @@ export default function ConversionsPage() {
     try {
       const q = await api.getQuote({ from_asset: fromAsset, to_asset: toAsset, amount });
       setQuote(q);
-      toast(`Quote ${q.id.slice(0, 8)} — expires ${new Date(q.expires_at).toLocaleTimeString()}`, 'success');
+      toast(
+        `Quote ${q.id.slice(0, 8)} — expires ${new Date(q.expires_at).toLocaleTimeString()}`,
+        'success',
+      );
       // also fetch rate for display
       try {
         const r = await api.getRates(fromAsset, toAsset);
@@ -51,7 +54,10 @@ export default function ConversionsPage() {
     setIsConverting(true);
     try {
       const conv = await api.convert({ wallet_id: walletId, quote_id: quote.id });
-      toast(`Converted ${conv.source_amount} ${conv.source_asset} → ${conv.dest_amount} ${conv.dest_asset}`, 'success');
+      toast(
+        `Converted ${conv.source_amount} ${conv.source_asset} → ${conv.dest_amount} ${conv.dest_asset}`,
+        'success',
+      );
       setQuote(null);
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Conversion failed', 'error');
@@ -62,7 +68,10 @@ export default function ConversionsPage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <PageHeader title="Conversions" description="Convert between assets with real-time FX rates (alias of FX)." />
+      <PageHeader
+        title="Conversions"
+        description="Convert between assets with real-time FX rates (alias of FX)."
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -71,7 +80,9 @@ export default function ConversionsPage() {
               <ArrowRightLeft className="h-5 w-5" />
               New Conversion
             </CardTitle>
-            <CardDescription>Quotes live for 30s — convert with a wallet and quote ID.</CardDescription>
+            <CardDescription>
+              Quotes live for 30s — convert with a wallet and quote ID.
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <form onSubmit={handleGetQuote} className="flex flex-col gap-4">
@@ -95,7 +106,13 @@ export default function ConversionsPage() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">Amount</label>
-                <Input value={amount} onChange={(e) => setAmount(e.target.value)} required placeholder="100.00" className="font-mono" />
+                <Input
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  required
+                  placeholder="100.00"
+                  className="font-mono"
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">Wallet ID</label>
@@ -131,12 +148,16 @@ export default function ConversionsPage() {
                   <div className="text-muted-foreground">Fee</div>
                   <div className="font-mono text-right">{quote.fee}</div>
                   <div className="text-muted-foreground">Expires</div>
-                  <div className="text-right text-xs">{new Date(quote.expires_at).toLocaleString()}</div>
+                  <div className="text-right text-xs">
+                    {new Date(quote.expires_at).toLocaleString()}
+                  </div>
                 </div>
                 {rate && (
                   <div className="rounded-lg border border-border bg-muted p-3 text-xs flex items-center justify-between">
                     <span>Provider {rate.provider}</span>
-                    <Badge variant={rate.stale ? 'warning' : 'success'}>{rate.spread_bps} bps</Badge>
+                    <Badge variant={rate.stale ? 'warning' : 'success'}>
+                      {rate.spread_bps} bps
+                    </Badge>
                   </div>
                 )}
                 <Button onClick={handleConvert} isLoading={isConverting} disabled={!walletId}>
@@ -155,7 +176,10 @@ export default function ConversionsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">Use FX page for live rates. Conversions are also available at <span className="font-mono">/fx</span>.</p>
+                <p className="text-sm text-muted-foreground">
+                  Use FX page for live rates. Conversions are also available at{' '}
+                  <span className="font-mono">/fx</span>.
+                </p>
               </CardContent>
             </Card>
           )}

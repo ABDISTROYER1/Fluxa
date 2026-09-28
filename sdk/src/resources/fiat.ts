@@ -1,10 +1,5 @@
-import { HttpClient } from "../http";
-import {
-  DepositRequest,
-  DepositResponse,
-  WithdrawRequest,
-  WithdrawResponse,
-} from "../types";
+import { HttpClient } from '../http';
+import { DepositRequest, DepositResponse, WithdrawRequest, WithdrawResponse } from '../types';
 
 export class FiatResource {
   constructor(private http: HttpClient) {}
@@ -15,7 +10,7 @@ export class FiatResource {
     options?: { signal?: AbortSignal },
   ): Promise<DepositResponse> {
     const res = await this.http.request<DepositResponse>({
-      method: "POST",
+      method: 'POST',
       path: `/wallets/${encodeURIComponent(walletId)}/deposit/fiat`,
       body: request,
       signal: options?.signal,
@@ -29,7 +24,7 @@ export class FiatResource {
     options?: { signal?: AbortSignal },
   ): Promise<WithdrawResponse> {
     const res = await this.http.request<WithdrawResponse>({
-      method: "POST",
+      method: 'POST',
       path: `/wallets/${encodeURIComponent(walletId)}/withdraw/fiat`,
       body: request,
       signal: options?.signal,

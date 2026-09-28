@@ -63,9 +63,7 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <p className="rounded-lg bg-danger-subtle px-3 py-2 text-sm text-danger">
-                {error}
-              </p>
+              <p className="rounded-lg bg-danger-subtle px-3 py-2 text-sm text-danger">{error}</p>
             )}
 
             <Button

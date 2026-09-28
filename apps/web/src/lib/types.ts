@@ -5,14 +5,23 @@ export interface Wallet {
 }
 
 export interface Balance {
-  asset: string;
+  asset_code: string;
+  issuer: string;
   balance: string;
-  limit?: string;
+  usd_equivalent?: string;
 }
 
 export interface WalletBalances {
   wallet_id: string;
   balances: Balance[];
+}
+
+export interface CreateWalletResponse {
+  id: string;
+  public_key: string;
+  custody_type: string;
+  contract_id?: string;
+  created_at: string;
 }
 
 export interface Transaction {
@@ -64,17 +73,16 @@ export interface FxQuoteRequest {
 }
 
 export interface FxQuoteResponse {
+  id: string;
+  org_id: string;
+  from_asset: string;
+  to_asset: string;
+  from_amount: string;
+  to_amount: string;
   rate: string;
-  mid_market_rate: string;
-  spread_bps: number;
-  provider: string;
-  cached_at: string;
-  stale: boolean;
-  source_amount: string;
-  dest_amount: string;
-  fee_amount: string;
-  net_amount: string;
-  fee_bps: number;
+  fee: string;
+  expires_at: string;
+  used: boolean;
 }
 
 export interface FxConvertRequest {
@@ -204,9 +212,11 @@ export interface ScheduleTransferRequest {
   to_wallet_id: string;
   asset: string;
   amount: string;
-  frequency: "daily" | "weekly" | "monthly";
+  frequency: 'daily' | 'weekly' | 'monthly';
   start_date: string;
   end_date?: string;
+  timezone?: string;
+  missed_run_policy?: 'skip' | 'run_once';
 }
 
 export interface ScheduleTransferResponse {
@@ -216,6 +226,8 @@ export interface ScheduleTransferResponse {
   asset: string;
   amount: string;
   frequency: string;
+  timezone?: string;
+  missed_run_policy?: string;
   next_run_at: string;
   end_at?: string;
   status: string;

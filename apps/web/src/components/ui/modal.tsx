@@ -14,14 +14,7 @@ interface ModalProps {
   className?: string;
 }
 
-export function Modal({
-  open,
-  onClose,
-  title,
-  description,
-  children,
-  className,
-}: ModalProps) {
+export function Modal({ open, onClose, title, description, children, className }: ModalProps) {
   if (!open) return null;
 
   return (
@@ -30,22 +23,17 @@ export function Modal({
       role="dialog"
       aria-modal="true"
     >
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <Card
         className={cn(
           'relative z-10 w-full max-w-lg shadow-xl animate-in zoom-in-95 duration-200',
-          className
+          className,
         )}
       >
         <div className="flex items-start justify-between gap-4 p-6 pb-0">
           <div className="flex flex-col gap-1">
             <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-            {description && (
-              <p className="text-sm text-muted-foreground">{description}</p>
-            )}
+            {description && <p className="text-sm text-muted-foreground">{description}</p>}
           </div>
           <Button
             variant="ghost"

@@ -1,10 +1,10 @@
-import { HttpClient } from "../http";
+import { HttpClient } from '../http';
 import {
   CreateScheduleRequest,
   UpdateScheduleRequest,
   ScheduleResponse,
   ListSchedulesResponse,
-} from "../types";
+} from '../types';
 
 export class SchedulesResource {
   constructor(private http: HttpClient) {}
@@ -14,8 +14,8 @@ export class SchedulesResource {
     options?: { signal?: AbortSignal },
   ): Promise<ScheduleResponse> {
     const res = await this.http.request<ScheduleResponse>({
-      method: "POST",
-      path: "/schedules",
+      method: 'POST',
+      path: '/schedules',
       body: request,
       signal: options?.signal,
     });
@@ -24,8 +24,8 @@ export class SchedulesResource {
 
   async list(options?: { signal?: AbortSignal }): Promise<ListSchedulesResponse> {
     const res = await this.http.request<ListSchedulesResponse>({
-      method: "GET",
-      path: "/schedules",
+      method: 'GET',
+      path: '/schedules',
       signal: options?.signal,
     });
     return res.data;
@@ -37,7 +37,7 @@ export class SchedulesResource {
     options?: { signal?: AbortSignal },
   ): Promise<ScheduleResponse> {
     const res = await this.http.request<ScheduleResponse>({
-      method: "PATCH",
+      method: 'PATCH',
       path: `/schedules/${encodeURIComponent(scheduleId)}`,
       body: request,
       signal: options?.signal,
@@ -45,12 +45,9 @@ export class SchedulesResource {
     return res.data;
   }
 
-  async delete(
-    scheduleId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void> {
+  async delete(scheduleId: string, options?: { signal?: AbortSignal }): Promise<void> {
     await this.http.request<unknown>({
-      method: "DELETE",
+      method: 'DELETE',
       path: `/schedules/${encodeURIComponent(scheduleId)}`,
       signal: options?.signal,
     });
