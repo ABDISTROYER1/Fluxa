@@ -112,13 +112,6 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 		        batch_id, COALESCE(reference,''), idempotency_record_id
 		 FROM transactions WHERE id = $1 AND mode = $2`
 	args := []interface{}{id, mode}
-		        batch_id, COALESCE(reference,''), COALESCE(failure_reason,''), COALESCE(failure_message,'')
-		 FROM transactions WHERE id = $1`
-	args := []interface{}{id}
-	if tID != "" {
-		query += ` AND tenant_id = $3`
-		args = append(args, tID)
-	}
 
 	err := r.readDB().QueryRow(ctx, query, args...).Scan(&tx.ID, &tx.TxHash, &tx.Type, &tx.Status,
 		&tx.FromWallet, &tx.ToWallet,
