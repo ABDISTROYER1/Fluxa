@@ -14,77 +14,64 @@ import (
 )
 
 type Config struct {
-	Port                            string
-	CORSAllowedOrigins              []string
-	Env                             string
-	LogLevel                        string
-	DatabaseURL                     string
-	ReplicaDatabaseURL              string
-	RedisURL                        string
-	RedisSentinelMasterName         string
-	RedisSentinelAddrs              []string
-	RedisSentinelPassword           string
-	StellarNetwork                  string
-	StellarHorizonURL               string
-	StellarHorizonTimeout           time.Duration
-	StellarUSDCIssuer               string
-	StellarEURCIssuer               string
-	MasterEncryptionKey             []byte
-	TreasurySecretKey               string
-	PlatformFeeWalletPublicKey      string
-	ColdStorageAddress              string
-	MigrationsPath                  string
-	AlertWebhookURL                 string
-	PlatformWalletID                string
-	TreasuryBaseReserve             string
-	TreasuryReserveCacheTTLSec      int
-	TreasuryReserveConcurrency      int
-	FlutterwaveSecretKey            string
-	FlutterwaveWebhookHash          string
-	BalanceDiscrepancyThreshold     string
-	ReconciliationDriftThresholdUSD string
-	JWTSecret                       string
-	OTELEnabled                     bool
-	OTELExporterEndpoint            string
-	OTELServiceName                 string
-	FXSpreadBps                     int
-	SorobanRPCURL                   string
-	ContractWalletWasmHash          string
-	ContractWalletSpendingLimit     string
-	ContractWalletWindowSeconds     int
-	ContractWalletRecoveryQuota     int
-	YellowCardAPIKey                string
-	YellowCardWebhookKey            string
-	YellowCardSandbox               bool
-	ComplianceEnabled               bool
-	OFACSDNURL                      string
-	ComplianceStructuringUnit       string
-	ComplianceVelocityMax           int
-	ComplianceVelocityWindowMin     int
-	ComplianceRoundTripMin          int
-	ComplianceFuzzyThreshold        int
-	ComplianceReloadMinutes         int
-	WorkerEnabled                   bool
-	WebhookAllowPrivateNetworks     bool
-	// ClaimableBalanceSourceWalletID funds claimable balances whose request did
-	// not name a source wallet.
-	ClaimableBalanceSourceWalletID string
-
-	// Indexer configuration
-	IndexerPaymentsPageLimit int
-	IndexerStreamMinBackoff  string
-	IndexerStreamMaxBackoff  string
-	IndexerSyncPageSize      int
-
-	// IdempotencyTTLHours is the number of hours an idempotency record is
-	// retained after creation. The middleware uses this value when computing
-	// expires_at. The background cleanup job uses it as a cross-check but
-	// relies on the stored expires_at column — so changing this only affects
-	// new records, not ones already in the database.
-	// Default: 24 hours. Minimum enforced: 1 hour.
-	IdempotencyTTLHours int
-	// CORSAllowedOriginsConfiguredExplicitly is true when the operator set
-	// CORS_ALLOWED_ORIGINS rather than relying on the development default.
+	Port                                   string
+	CORSAllowedOrigins                     []string
+	Env                                    string
+	LogLevel                               string
+	DatabaseURL                            string
+	ReplicaDatabaseURL                     string
+	RedisURL                               string
+	RedisSentinelMasterName                string
+	RedisSentinelAddrs                     []string
+	RedisSentinelPassword                  string
+	StellarNetwork                         string
+	StellarHorizonURL                      string
+	StellarHorizonTimeout                  time.Duration
+	StellarUSDCIssuer                      string
+	StellarEURCIssuer                      string
+	MasterEncryptionKey                    []byte
+	TreasurySecretKey                      string
+	PlatformFeeWalletPublicKey             string
+	ColdStorageAddress                     string
+	MigrationsPath                         string
+	AlertWebhookURL                        string
+	PlatformWalletID                       string
+	TreasuryBaseReserve                    string
+	TreasuryReserveCacheTTLSec             int
+	TreasuryReserveConcurrency             int
+	FlutterwaveSecretKey                   string
+	FlutterwaveWebhookHash                 string
+	BalanceDiscrepancyThreshold            string
+	ReconciliationDriftThresholdUSD        string
+	JWTSecret                              string
+	OTELEnabled                            bool
+	OTELExporterEndpoint                   string
+	OTELServiceName                        string
+	FXSpreadBps                            int
+	SorobanRPCURL                          string
+	ContractWalletWasmHash                 string
+	ContractWalletSpendingLimit            string
+	ContractWalletWindowSeconds            int
+	ContractWalletRecoveryQuota            int
+	YellowCardAPIKey                       string
+	YellowCardWebhookKey                   string
+	YellowCardSandbox                      bool
+	ComplianceEnabled                      bool
+	OFACSDNURL                             string
+	ComplianceStructuringUnit              string
+	ComplianceVelocityMax                  int
+	ComplianceVelocityWindowMin            int
+	ComplianceRoundTripMin                 int
+	ComplianceFuzzyThreshold               int
+	ComplianceReloadMinutes                int
+	WorkerEnabled                          bool
+	WebhookAllowPrivateNetworks            bool
+	IndexerPaymentsPageLimit               int
+	IndexerStreamMinBackoff                string
+	IndexerStreamMaxBackoff                string
+	IndexerSyncPageSize                    int
+	ClaimableBalanceSourceWalletID         string
+	IdempotencyTTLHours                    int
 	CORSAllowedOriginsConfiguredExplicitly bool
 
 	// Indexer configuration
@@ -122,6 +109,30 @@ var wellKnownTestnetAddresses = map[string]struct{}{
 	"GC2BKLYOOYPDEFJKLKY6FNNRQMGFLVHJKQRGNSSRRGSMPGF32LHCQVGF": {},
 	// Stellar testnet root account public key from the developer docs.
 	"GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H": {},
+}
+
+// wellKnownJWTSecrets are public or trivially guessable strings that have
+// appeared in documentation, README examples, or this repository's own source
+// history. Any of these must never be used as a signing key in any
+// environment.
+var wellKnownJWTSecrets = map[string]struct{}{
+	// Was the hardcoded viper default in this repo (removed in this commit).
+	"fluxa-default-jwt-secret-key-change-in-production": {},
+	// Common tutorial / StackOverflow examples.
+	"secret":                    {},
+	"your-256-bit-secret":       {},
+	"your-secret-key":           {},
+	"changeme":                  {},
+	"supersecret":               {},
+	"jwt_secret":                {},
+	"mysecretkey":               {},
+	"my_secret_key":             {},
+	"dev_jwt_secret":            {},
+	"development_jwt_secret":    {},
+	"test_jwt_secret":           {},
+	"jwt-secret":                {},
+	"jwt-secret-key":            {},
+	"keyboard cat":              {},
 }
 
 func validateStellarAddress(name, value string, required bool) error {
@@ -183,7 +194,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Env != "development" && c.CORSAllowedOriginsConfiguredExplicitly == false && containsLocalhostWildcard(c.CORSAllowedOrigins) {
+	if !c.CORSAllowedOriginsConfiguredExplicitly && c.Env != "development" && containsLocalhostWildcard(c.CORSAllowedOrigins) {
 		fmt.Fprintf(os.Stderr, "WARNING: CORS_ALLOWED_ORIGINS is still the development default (localhost:*); set it explicitly for the %q environment\n", c.Env)
 	}
 
@@ -192,7 +203,9 @@ func (c *Config) Validate() error {
 
 func containsLocalhostWildcard(origins []string) bool {
 	for _, origin := range origins {
-		if origin == "localhost:*" || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "https://localhost") {
+		if origin == "localhost:*" ||
+			strings.HasPrefix(origin, "http://localhost") ||
+			strings.HasPrefix(origin, "https://localhost") {
 			return true
 		}
 	}
@@ -213,7 +226,7 @@ func Load() (*Config, error) {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("PORT", "3000")
-	viper.SetDefault("CORS_ALLOWED_ORIGINS", "localhost:*")
+	viper.SetDefault("CORS_ALLOWED_ORIGINS", defaultCORSOrigins)
 	viper.SetDefault("ENV", "development")
 	viper.SetDefault("LOG_LEVEL", "info")
 	viper.SetDefault("STELLAR_NETWORK", "testnet")
@@ -225,7 +238,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("OTEL_EXPORTER_ENDPOINT", "http://localhost:4318")
 	viper.SetDefault("OTEL_SERVICE_NAME", "fluxa")
 	viper.SetDefault("FX_SPREAD_BPS", "50")
-	viper.SetDefault("JWT_SECRET", "fluxa-default-jwt-secret-key-change-in-production")
+	// JWT_SECRET has no default — a missing value fails at boot in all environments.
+	// Generate with: openssl rand -hex 32
 	viper.SetDefault("SOROBAN_RPC_URL", "https://soroban-testnet.stellar.org")
 	viper.SetDefault("CONTRACT_WALLET_SPENDING_LIMIT", "1000")
 	viper.SetDefault("CONTRACT_WALLET_WINDOW_SECONDS", "86400")
@@ -245,7 +259,6 @@ func Load() (*Config, error) {
 	viper.SetDefault("TREASURY_RESERVE_CONCURRENCY", "16")
 	viper.SetDefault("WEBHOOK_ALLOW_PRIVATE_NETWORKS", "false")
 	viper.SetDefault("IDEMPOTENCY_TTL_HOURS", "24")
-	viper.SetDefault("CORS_ALLOWED_ORIGINS", "localhost:*")
 	viper.SetDefault("INDEXER_PAYMENTS_PAGE_LIMIT", "50")
 	viper.SetDefault("INDEXER_STREAM_MIN_BACKOFF", "1s")
 	viper.SetDefault("INDEXER_STREAM_MAX_BACKOFF", "30s")
@@ -278,12 +291,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("MASTER_ENCRYPTION_KEY entropy check failed: %w", err)
 	}
 
-	env := viper.GetString("ENV")
+	// JWT_SECRET is required in every environment — no default is provided.
+	// A missing, too-short, or well-known secret fails at boot so that staging,
+	// preview, and developer environments are subject to the same bar as
+	// production.
 	jwtSecret := viper.GetString("JWT_SECRET")
-	if env == "production" {
-		if jwtSecret == "fluxa-default-jwt-secret-key-change-in-production" || len(jwtSecret) < 32 {
-			return nil, fmt.Errorf("a secure, high-entropy JWT_SECRET (min 32 bytes) must be explicitly configured in production")
-		}
+	if jwtSecret == "" {
+		return nil, fmt.Errorf("JWT_SECRET is not set; generate one with: openssl rand -hex 32")
+	}
+	if len(jwtSecret) < 32 {
+		return nil, fmt.Errorf("JWT_SECRET is too short (%d bytes); minimum is 32 bytes", len(jwtSecret))
+	}
+	if _, known := wellKnownJWTSecrets[jwtSecret]; known {
+		return nil, fmt.Errorf("JWT_SECRET is a well-known public string; use a randomly generated secret")
 	}
 
 	ycSandbox, _ := strconv.ParseBool(viper.GetString("YELLOW_CARD_SANDBOX"))
@@ -291,10 +311,7 @@ func Load() (*Config, error) {
 	workerEnabled, _ := strconv.ParseBool(viper.GetString("WORKER_ENABLED"))
 	webhookAllowPrivateNetworks, _ := strconv.ParseBool(viper.GetString("WEBHOOK_ALLOW_PRIVATE_NETWORKS"))
 
-	indexerPaymentsPageLimit := viper.GetInt("INDEXER_PAYMENTS_PAGE_LIMIT")
-	indexerStreamMinBackoff := viper.GetString("INDEXER_STREAM_MIN_BACKOFF")
-	indexerStreamMaxBackoff := viper.GetString("INDEXER_STREAM_MAX_BACKOFF")
-	indexerSyncPageSize := viper.GetInt("INDEXER_SYNC_PAGE_SIZE")
+	env := viper.GetString("ENV")
 
 	authRateLimitIPRPS := viper.GetFloat64("AUTH_RATE_LIMIT_IP_RPS")
 	if authRateLimitIPRPS <= 0 {
@@ -347,7 +364,7 @@ func Load() (*Config, error) {
 		FlutterwaveWebhookHash:          viper.GetString("FLUTTERWAVE_WEBHOOK_HASH"),
 		BalanceDiscrepancyThreshold:     viper.GetString("BALANCE_DISCREPANCY_THRESHOLD"),
 		ReconciliationDriftThresholdUSD: viper.GetString("RECONCILIATION_DRIFT_THRESHOLD_USD"),
-		JWTSecret:                       viper.GetString("JWT_SECRET"),
+		JWTSecret:                       jwtSecret,
 		OTELEnabled:                     viper.GetBool("OTEL_ENABLED"),
 		OTELExporterEndpoint:            viper.GetString("OTEL_EXPORTER_ENDPOINT"),
 		OTELServiceName:                 viper.GetString("OTEL_SERVICE_NAME"),
@@ -370,14 +387,11 @@ func Load() (*Config, error) {
 		ComplianceReloadMinutes:         viper.GetInt("COMPLIANCE_RELOAD_MINUTES"),
 		WorkerEnabled:                   workerEnabled,
 		WebhookAllowPrivateNetworks:     webhookAllowPrivateNetworks,
-
-		ClaimableBalanceSourceWalletID: viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
-
-		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
-		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
-		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
-		IndexerSyncPageSize:      indexerSyncPageSize,
-
+		IndexerPaymentsPageLimit:        viper.GetInt("INDEXER_PAYMENTS_PAGE_LIMIT"),
+		IndexerStreamMinBackoff:         viper.GetString("INDEXER_STREAM_MIN_BACKOFF"),
+		IndexerStreamMaxBackoff:         viper.GetString("INDEXER_STREAM_MAX_BACKOFF"),
+		IndexerSyncPageSize:             viper.GetInt("INDEXER_SYNC_PAGE_SIZE"),
+		ClaimableBalanceSourceWalletID:  viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
 		IdempotencyTTLHours: func() int {
 			h := viper.GetInt("IDEMPOTENCY_TTL_HOURS")
 			if h < 1 {
@@ -412,7 +426,7 @@ func validateKeyEntropy(key []byte) error {
 		return fmt.Errorf("key is empty")
 	}
 
-	// Check for all zeros
+	// Check for all zeros.
 	allZero := true
 	for _, b := range key {
 		if b != 0 {
@@ -424,7 +438,7 @@ func validateKeyEntropy(key []byte) error {
 		return fmt.Errorf("key cannot be all zeros")
 	}
 
-	// Check for all same byte
+	// Check for all same byte.
 	allSame := true
 	first := key[0]
 	for _, b := range key {
@@ -437,8 +451,8 @@ func validateKeyEntropy(key []byte) error {
 		return fmt.Errorf("key cannot be all identical bytes")
 	}
 
-	// Calculate Shannon entropy (bits per byte)
-	// For a 32-byte key, we expect entropy close to 8 bits/byte
+	// Calculate Shannon entropy (bits per byte).
+	// For a 32-byte key, we expect entropy close to 8 bits/byte.
 	freq := make(map[byte]int)
 	for _, b := range key {
 		freq[b]++
@@ -447,18 +461,14 @@ func validateKeyEntropy(key []byte) error {
 	entropy := 0.0
 	for _, count := range freq {
 		p := float64(count) / float64(len(key))
-		entropy -= p * log2(p)
+		entropy -= p * math.Log2(p)
 	}
 
-	// Require at least 4.0 bits entropy (out of 5.0 max for a 32-byte sample).
-	// This catches keys with obvious patterns while allowing natural randomness.
-	if entropy < 4.0 {
-		return fmt.Errorf("key entropy too low: %.2f bits (minimum 4.0)", entropy)
+	// Require at least 7.5 bits/byte (out of 8 max). This catches keys with
+	// obvious patterns while allowing natural randomness.
+	if entropy < 7.5 {
+		return fmt.Errorf("key entropy too low: %.2f bits/byte (minimum 7.5)", entropy)
 	}
 
 	return nil
-}
-
-func log2(x float64) float64 {
-	return math.Log2(x)
 }
