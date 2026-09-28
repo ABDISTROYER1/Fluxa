@@ -27,6 +27,8 @@ export interface Transaction {
   fee_amount: string;
   net_amount: string;
   fee_bps: number;
+  failure_reason?: string;
+  failure_message?: string;
   created_at: string;
 }
 
@@ -180,6 +182,7 @@ export interface BatchTransferResponse {
   total_count: number;
   success_count: number;
   failed_count: number;
+  held_count: number;
   created_at: string;
   transfers: {
     id: string;
@@ -189,15 +192,19 @@ export interface BatchTransferResponse {
     reference?: string;
     status: string;
     tx_hash?: string;
+    failure_reason?: string;
+    failure_message?: string;
   }[];
 }
+
+export type BatchResponse = BatchTransferResponse;
 
 export interface ScheduleTransferRequest {
   from_wallet_id: string;
   to_wallet_id: string;
   asset: string;
   amount: string;
-  frequency: 'daily' | 'weekly' | 'monthly';
+  frequency: "daily" | "weekly" | "monthly";
   start_date: string;
   end_date?: string;
 }

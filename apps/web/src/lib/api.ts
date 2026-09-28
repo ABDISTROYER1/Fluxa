@@ -1,3 +1,6 @@
+import type { BatchResponse, BatchTransferRequest } from "./types";
+export type { BatchResponse } from "./types";
+
 export interface Wallet {
   id: string;
   public_key: string;
@@ -37,14 +40,16 @@ export interface Transaction {
   created_at: string;
   currency?: string;
   batch_id?: string;
+  failure_reason?: string;
+  failure_message?: string;
 }
 
 export interface TransferListParams {
   before?: string;
   after?: string;
   limit?: number;
-  sort?: 'created_at' | 'amount' | 'status';
-  order?: 'asc' | 'desc';
+  sort?: "created_at" | "amount" | "status";
+  order?: "asc" | "desc";
   status?: string;
   date_from?: string;
   date_to?: string;
@@ -57,16 +62,17 @@ export interface WalletBalance {
   balance: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('fluxa_token') : null;
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("fluxa_token") : null;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
     ...(options?.headers as Record<string, string>),
   };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -87,28 +93,74 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getHealth: () => request<HealthResponse>('/health'),
-  getFeeSchedule: () => request<FeeSchedule>('/v1/fees'),
-  listWallets: () => request<{ wallets: Wallet[] }>('/v1/wallets'),
-  getWalletBalances: (id: string) => request<{ balances: WalletBalance[] }>(`/v1/wallets/${id}/balances`),
-  listTransactions: (walletId: string, params: number | TransferListParams = 10) => {
-    const query = typeof params === 'number' ? { limit: params } : params;
-    const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
-    return request<{ transactions: Transaction[]; next_cursor?: string; has_more?: boolean }>(`/v1/wallets/${walletId}/transactions?${search}`);
+  getHealth: () => request<HealthResponse>("/health"),
+  getFeeSchedule: () => request<FeeSchedule>("/v1/fees"),
+  listWallets: () => request<{ wallets: Wallet[] }>("/v1/wallets"),
+  getWalletBalances: (id: string) =>
+    request<{ balances: WalletBalance[] }>(`/v1/wallets/${id}/balances`),
+  listTransactions: (
+    walletId: string,
+    params: number | TransferListParams = 10,
+  ) => {
+    const query = typeof params === "number" ? { limit: params } : params;
+    const search = new URLSearchParams(
+      Object.entries(query)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    return request<{
+      transactions: Transaction[];
+      next_cursor?: string;
+      has_more?: boolean;
+    }>(`/v1/wallets/${walletId}/transactions?${search}`);
   },
-  listWebhooks: () => request<{ endpoints: WebhookEndpoint[] }>('/v1/webhooks'),
-  registerWebhook: (url: string, events: string[]) => request<WebhookEndpoint>('/v1/webhooks', {
-    method: 'POST',
-    body: JSON.stringify({ url, events }),
-  }),
-  deleteWebhook: (id: string) => request<void>(`/v1/webhooks/${id}`, { method: 'DELETE' }),
-  listDeliveries: (endpointId: string, limit = 10) => request<{ deliveries: WebhookDelivery[] }>(`/v1/webhooks/${endpointId}/deliveries?limit=${limit}`),
-  getWebhookSecret: () => request<{ signing_secret: string }>('/v1/webhooks/secret'),
-  rotateWebhookSecret: () => request<{ signing_secret: string }>('/v1/webhooks/secret/rotate', { method: 'POST' }),
-  verifyWebhookSignature: (payload: { secret: string; timestamp: string; body: string; signature: string }) => request<{ valid: boolean; reason: string | null }>('/v1/webhooks/verify', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }),
+  listWebhooks: () => request<{ endpoints: WebhookEndpoint[] }>("/v1/webhooks"),
+  registerWebhook: (url: string, events: string[]) =>
+    request<WebhookEndpoint>("/v1/webhooks", {
+      method: "POST",
+      body: JSON.stringify({ url, events }),
+    }),
+  deleteWebhook: (id: string) =>
+    request<void>(`/v1/webhooks/${id}`, { method: "DELETE" }),
+  listDeliveries: (endpointId: string, limit = 10) =>
+    request<{ deliveries: WebhookDelivery[] }>(
+      `/v1/webhooks/${endpointId}/deliveries?limit=${limit}`,
+    ),
+  getWebhookSecret: () =>
+    request<{ signing_secret: string }>("/v1/webhooks/secret"),
+  rotateWebhookSecret: () =>
+    request<{ signing_secret: string }>("/v1/webhooks/secret/rotate", {
+      method: "POST",
+    }),
+  verifyWebhookSignature: (payload: {
+    secret: string;
+    timestamp: string;
+    body: string;
+    signature: string;
+  }) =>
+    request<{ valid: boolean; reason: string | null }>("/v1/webhooks/verify", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  createBatch: (body: BatchTransferRequest) =>
+    request<BatchResponse>("/v1/transfers/batch", {
+      method: "POST",
+      headers: { "Idempotency-Key": globalThis.crypto.randomUUID() },
+      body: JSON.stringify(body),
+    }),
+  getBatch: (id: string) => request<BatchResponse>(`/v1/transfers/batch/${id}`),
+  exportBatchCsv: async (id: string) => {
+    const token =
+      typeof window !== "undefined"
+        ? localStorage.getItem("fluxa_token")
+        : null;
+    const res = await fetch(`${API_BASE}/v1/transfers/batch/${id}/export`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok)
+      throw new Error((await res.text()) || `API error: ${res.status}`);
+    return res.text();
+  },
 };
 // Add status types and API methods to api.ts
 export interface Incident {

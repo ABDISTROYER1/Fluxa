@@ -42,6 +42,8 @@ type Transaction struct {
 	TenantID       *string
 	BatchID        *string
 	Reference      string
+	FailureReason  string
+	FailureMessage string
 	CreatedAt      time.Time
 	ReconciledAt   *time.Time
 	RequeueCount   int

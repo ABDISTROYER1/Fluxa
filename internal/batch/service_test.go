@@ -10,6 +10,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/stellar"
+	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -46,7 +47,10 @@ func newFakeTxRepo() *fakeTxRepo {
 	return &fakeTxRepo{byBatch: make(map[string][]*domain.Transaction)}
 }
 
-func (f *fakeTxRepo) Create(_ context.Context, tx *domain.Transaction) error {
+func (f *fakeTxRepo) Create(ctx context.Context, tx *domain.Transaction) error {
+	if tenantID := tenant.IDFromContext(ctx); tenantID != "" {
+		tx.TenantID = &tenantID
+	}
 	if tx.BatchID != nil {
 		f.byBatch[*tx.BatchID] = append(f.byBatch[*tx.BatchID], tx)
 	}
@@ -81,8 +85,15 @@ func (f *fakeTxRepo) ListByWallet(_ context.Context, walletID string, limit, off
 	return nil, nil
 }
 
-func (f *fakeTxRepo) ListByBatch(_ context.Context, batchID string) ([]*domain.Transaction, error) {
-	return f.byBatch[batchID], nil
+func (f *fakeTxRepo) ListByBatch(ctx context.Context, batchID string) ([]*domain.Transaction, error) {
+	tenantID := tenant.IDFromContext(ctx)
+	var txs []*domain.Transaction
+	for _, tx := range f.byBatch[batchID] {
+		if tenantID == "" || (tx.TenantID != nil && *tx.TenantID == tenantID) {
+			txs = append(txs, tx)
+		}
+	}
+	return txs, nil
 }
 
 func (f *fakeTxRepo) ExistsByTxHash(_ context.Context, txHash string) (bool, error) {
@@ -226,6 +237,37 @@ func TestCreateBatch_OneOfFiveFails_BatchIsPartialAndOthersSucceed(t *testing.T)
 	}
 	if failed != 1 {
 		t.Fatalf("failed = %d, want 1", failed)
+	}
+}
+
+func TestCreateBatch_FailedItemIsVisibleToSubmittingTenant(t *testing.T) {
+	const tenantID = "tenant-1"
+	txRepo := newFakeTxRepo()
+	items, failOn := makeItems(1, 0)
+	transferSvc := &fakeTransferSvc{txRepo: txRepo, failOn: failOn}
+	svc := NewService(newFakeBatchRepo(), txRepo, transferSvc)
+	ctx := tenant.WithID(context.Background(), tenantID)
+
+	created, err := svc.CreateBatch(ctx, "source-wallet", items)
+	if err != nil {
+		t.Fatalf("CreateBatch() error: %v", err)
+	}
+	result, err := svc.GetBatch(ctx, created.Batch.ID)
+	if err != nil {
+		t.Fatalf("GetBatch() error: %v", err)
+	}
+	if len(result.Transactions) != 1 {
+		t.Fatalf("tenant sees %d batch items, want 1", len(result.Transactions))
+	}
+	failed := result.Transactions[0]
+	if failed.TenantID == nil || *failed.TenantID != tenantID {
+		t.Fatalf("failed item tenant = %v, want %q", failed.TenantID, tenantID)
+	}
+	if failed.FailureReason != "transfer_initiation_failed" {
+		t.Fatalf("failure reason = %q, want transfer_initiation_failed", failed.FailureReason)
+	}
+	if failed.FailureMessage != "destination account does not exist" {
+		t.Fatalf("failure message = %q, want underlying transfer error", failed.FailureMessage)
 	}
 }
 
