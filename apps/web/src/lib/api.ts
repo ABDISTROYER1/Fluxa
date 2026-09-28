@@ -117,6 +117,14 @@ export interface TransferListParams {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
+/** Sandbox ('test') vs live environment, as selected by the auth context. */
+export type EnvironmentMode = 'live' | 'test';
+
+function currentMode(): EnvironmentMode {
+  if (typeof window === 'undefined') return 'live';
+  return localStorage.getItem('fluxa_mode') === 'test' ? 'test' : 'live';
+}
+
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('fluxa_token') : null;
   const headers: Record<string, string> = {
@@ -180,10 +188,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
   listAPIKeys: () => request<APIKey[]>('/v1/keys'),
-  createAPIKey: (label?: string) =>
+  createAPIKey: (label?: string, mode: EnvironmentMode = currentMode()) =>
     request<CreateAPIKeyResponse>('/v1/keys', {
       method: 'POST',
-      body: JSON.stringify({ label }),
+      body: JSON.stringify({ label, mode }),
     }),
   revokeAPIKey: (id: string) => request<void>(`/v1/keys/${id}`, { method: 'DELETE' }),
   getQuote: (body: FxQuoteRequest) =>

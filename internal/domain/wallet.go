@@ -18,6 +18,7 @@ type Wallet struct {
 	ID              string      `json:"id"`
 	TenantID        *string     `json:"tenant_id,omitempty"`
 	PublicKey       string      `json:"public_key"`
+	Mode            Mode        `json:"mode"`
 	EncryptedSecret string      `json:"-"`
 	SyncCursor      string      `json:"-"`
 	CustodyType     CustodyType `json:"custody_type"`

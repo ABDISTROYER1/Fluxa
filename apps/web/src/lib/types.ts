@@ -103,6 +103,7 @@ export interface APIKey {
   id: string;
   prefix: string;
   label?: string;
+  mode?: 'live' | 'test';
   last_used_at?: string;
   revoked_at?: string;
   created_at: string;

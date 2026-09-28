@@ -7,6 +7,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/queue"
+	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/fluxa/fluxa/internal/tracing"
 	"github.com/hibiken/asynq"
 )
@@ -39,6 +40,10 @@ func (w *Worker) HandleProcessTransfer(ctx context.Context, task *asynq.Task) er
 		logger.Error().Err(err).Str("tx_id", payload.TransactionID).Msg("failed to fetch transaction for settlement check")
 		return err
 	}
+	if tx.TenantID != nil {
+		ctx = tenant.WithID(ctx, *tx.TenantID)
+	}
+	ctx = tenant.WithMode(ctx, tx.Mode)
 
 	if tx.Status == domain.StatusFailed || tx.Status == domain.StatusReconciliationFailed {
 		logger.Warn().Str("tx_id", payload.TransactionID).Str("status", string(tx.Status)).Msg("skipping already-failed transaction")

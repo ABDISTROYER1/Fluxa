@@ -18,11 +18,14 @@ func NewAPIKeyRepo(db DB) *APIKeyRepo {
 }
 
 func (r *APIKeyRepo) Create(ctx context.Context, key *domain.APIKey) error {
+	if !key.Mode.Valid() {
+		return errors.New("api key mode must be live or test")
+	}
 	db := TxFromContext(ctx, r.db)
 	_, err := db.Exec(ctx,
-		`INSERT INTO api_keys (id, tenant_id, key_hash, prefix, label, role, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		key.ID, key.TenantID, key.KeyHash, key.Prefix, key.Label, key.Role, key.CreatedAt,
+		`INSERT INTO api_keys (id, tenant_id, key_hash, prefix, mode, label, role, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		key.ID, key.TenantID, key.KeyHash, key.Prefix, key.Mode, key.Label, key.Role, key.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
@@ -33,9 +36,9 @@ func (r *APIKeyRepo) Create(ctx context.Context, key *domain.APIKey) error {
 func (r *APIKeyRepo) GetByHash(ctx context.Context, hash string) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
 	err := r.db.QueryRow(ctx,
-		`SELECT id, tenant_id, key_hash, prefix, label, role, last_used_at, revoked_at, created_at FROM api_keys WHERE key_hash = $1`,
+		`SELECT id, tenant_id, key_hash, prefix, mode, label, role, last_used_at, revoked_at, created_at FROM api_keys WHERE key_hash = $1`,
 		hash,
-	).Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
+	).Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Mode, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("api key not found")
@@ -45,10 +48,14 @@ func (r *APIKeyRepo) GetByHash(ctx context.Context, hash string) (*domain.APIKey
 	return k, nil
 }
 
-func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]*domain.APIKey, error) {
+// ListByTenant returns the keys for one environment. Keys are environment
+// scoped: a live key must never be listed as if it could authenticate against
+// testnet.
+func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string, mode domain.Mode) ([]*domain.APIKey, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, tenant_id, key_hash, prefix, label, role, last_used_at, revoked_at, created_at FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC`,
-		tenantID,
+		`SELECT id, tenant_id, key_hash, prefix, mode, label, role, last_used_at, revoked_at, created_at
+		 FROM api_keys WHERE tenant_id = $1 AND mode = $2 ORDER BY created_at DESC`,
+		tenantID, mode,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list api_keys: %w", err)
@@ -58,7 +65,7 @@ func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]*doma
 	var keys []*domain.APIKey
 	for rows.Next() {
 		k := &domain.APIKey{}
-		if err := rows.Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Mode, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)
@@ -66,10 +73,10 @@ func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]*doma
 	return keys, rows.Err()
 }
 
-func (r *APIKeyRepo) Revoke(ctx context.Context, id string, tenantID string) error {
+func (r *APIKeyRepo) Revoke(ctx context.Context, id string, tenantID string, mode domain.Mode) error {
 	res, err := r.db.Exec(ctx,
-		`UPDATE api_keys SET revoked_at = NOW() WHERE id = $1 AND tenant_id = $2`,
-		id, tenantID,
+		`UPDATE api_keys SET revoked_at = NOW() WHERE id = $1 AND tenant_id = $2 AND mode = $3`,
+		id, tenantID, mode,
 	)
 	if err != nil {
 		return fmt.Errorf("revoke api_key: %w", err)

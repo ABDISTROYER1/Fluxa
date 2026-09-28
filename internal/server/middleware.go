@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/apikey"
 	"github.com/fluxa/fluxa/internal/auth"
 	"github.com/fluxa/fluxa/internal/domain"
@@ -86,7 +87,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 			}
 
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID, X-Fluxa-Mode")
 			w.Header().Set("Access-Control-Max-Age", "86400")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -115,7 +116,9 @@ type MembershipValidator interface {
 // AuthMiddleware validates the JWT or API key and, for JWT auth, revalidates
 // the user's membership and role against the database so that demotions,
 // removals, and role changes take effect immediately rather than at token
-// expiry.
+// expiry. It also pins the request to exactly one environment: an API key
+// carries its environment in the credential itself, while a user JWT selects
+// one explicitly.
 func AuthMiddleware(repo *postgres.APIKeyRepo, jwtSecret []byte, validator MembershipValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +145,17 @@ func AuthMiddleware(repo *postgres.APIKeyRepo, jwtSecret []byte, validator Membe
 						// Use the current role from the database, not the stale JWT claim.
 						claims.Role = member.Role
 					}
+					mode := domain.ModeLive
+					if requested := r.Header.Get("X-Fluxa-Mode"); requested != "" {
+						parsed, parseErr := domain.ParseMode(requested)
+						if parseErr != nil {
+							api.Error(w, http.StatusBadRequest, "INVALID_ENVIRONMENT_MODE", parseErr.Error())
+							return
+						}
+						mode = parsed
+					}
 					ctx := tenant.WithID(r.Context(), claims.TenantID)
+					ctx = tenant.WithMode(ctx, mode)
 					ctx = tenant.WithUser(ctx, claims.Sub, claims.Role)
 					requestLogger := zerolog.Ctx(ctx).With().
 						Str("tenant_id", claims.TenantID).
@@ -164,13 +177,23 @@ func AuthMiddleware(repo *postgres.APIKeyRepo, jwtSecret []byte, validator Membe
 				http.Error(w, "revoked api key", http.StatusUnauthorized)
 				return
 			}
+			// The environment is a property of the credential, not of the
+			// request, so a key minted for one environment can never reach the
+			// other even if the raw key collides with a persisted record.
+			rawMode, modeErr := apikey.ModeFromRaw(rawToken)
+			if modeErr != nil || rawMode != key.Mode {
+				http.Error(w, "api key mode does not match persisted authorization", http.StatusUnauthorized)
+				return
+			}
 
 			_ = repo.UpdateLastUsed(r.Context(), key.ID)
 
 			ctx := tenant.WithID(r.Context(), key.TenantID)
+			ctx = tenant.WithMode(ctx, key.Mode)
 			ctx = tenant.WithUser(ctx, "", key.Role)
 			requestLogger := zerolog.Ctx(ctx).With().
 				Str("tenant_id", key.TenantID).
+				Str("mode", string(key.Mode)).
 				Logger()
 			ctx = requestLogger.WithContext(ctx)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -197,6 +220,23 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 			http.Error(w, "insufficient permissions", http.StatusForbidden)
 		})
 	}
+}
+
+// RequireTestMode protects sandbox-only routes. API-key requests always carry
+// the persisted key mode, so a client-supplied header cannot bypass it.
+func RequireTestMode(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mode, ok := tenant.ModeFromContext(r.Context())
+		if !ok {
+			api.Error(w, http.StatusUnauthorized, "ENVIRONMENT_REQUIRED", "an authenticated environment is required")
+			return
+		}
+		if mode != domain.ModeTest {
+			api.Error(w, http.StatusForbidden, "TEST_MODE_REQUIRED", "this endpoint requires an sk_test_ API key")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func RequireNotViewer(next http.Handler) http.Handler {

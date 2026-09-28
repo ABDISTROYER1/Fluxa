@@ -8,7 +8,10 @@ import (
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/fees"
+	"github.com/fluxa/fluxa/internal/server/idempotency"
+	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/fluxa/fluxa/internal/transfer"
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
 
@@ -144,6 +147,79 @@ func TestInitiateTransfer_SelfTransfer(t *testing.T) {
 	_, err := svc.InitiateTransfer(context.Background(), "w1", "w1", "XLM", decimal.NewFromInt(10))
 	if !errors.Is(err, domain.ErrSelfTransfer) {
 		t.Errorf("expected ErrSelfTransfer, got %v", err)
+	}
+}
+
+// recordMockTxRepo additionally implements transfer.IdempotencyRecordRepository
+// so the service can reconcile a retried request against the transfer created
+// by the original (now dead) process.
+type recordMockTxRepo struct {
+	basicMockTxRepo
+	byRecord map[string]*domain.Transaction
+	creates  int
+}
+
+func (m *recordMockTxRepo) Create(ctx context.Context, tx *domain.Transaction) error {
+	m.creates++
+	return m.basicMockTxRepo.Create(ctx, tx)
+}
+
+func (m *recordMockTxRepo) GetByIdempotencyRecordID(_ context.Context, recordID string) (*domain.Transaction, error) {
+	if tx, ok := m.byRecord[recordID]; ok {
+		return tx, nil
+	}
+	return nil, domain.ErrTransactionNotFound
+}
+
+// recordingQueue counts the settlement tasks enqueued for a transaction.
+type recordingQueue struct {
+	enqueued []string
+}
+
+func (q *recordingQueue) EnqueueTransfer(_ context.Context, transactionID string) error {
+	q.enqueued = append(q.enqueued, transactionID)
+	return nil
+}
+
+// TestInitiateTransferIdempotent_RecoversOriginalAfterCrash simulates a process
+// that persisted the original transfer and linked it to an idempotency record,
+// then crashed before the HTTP response was recorded. The retry must return the
+// original transfer without persisting or enqueueing a second one.
+func TestInitiateTransferIdempotent_RecoversOriginalAfterCrash(t *testing.T) {
+	original := &domain.Transaction{
+		ID:         "tx-original",
+		FromWallet: "w1",
+		ToWallet:   "w2",
+		Asset:      "XLM",
+		Amount:     decimal.NewFromInt(10),
+		Status:     domain.StatusPending,
+	}
+	repo := &recordMockTxRepo{byRecord: map[string]*domain.Transaction{"record-1": original}}
+	wr := &basicMockWalletRepo{
+		wallets: map[string]*domain.Wallet{
+			"w1": {ID: "w1", PublicKey: "G1"},
+			"w2": {ID: "w2", PublicKey: "G2"},
+		},
+	}
+	q := &recordingQueue{}
+	svc := transfer.NewService(repo, wr, &basicMockFeeSvc{}, q)
+
+	ctx := tenant.WithID(context.Background(), "org-1")
+	ctx = tenant.WithMode(ctx, domain.ModeLive)
+	ctx = idempotency.WithRecordID(ctx, "record-1")
+
+	tx, err := svc.InitiateTransferIdempotent(ctx, "w1", "w2", "XLM", decimal.NewFromInt(10), uuid.NewString())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tx == nil || tx.ID != original.ID {
+		t.Fatalf("expected the original transfer %q, got %+v", original.ID, tx)
+	}
+	if repo.creates != 0 {
+		t.Errorf("recovery must not create another transfer, got %d creates", repo.creates)
+	}
+	if len(q.enqueued) != 0 {
+		t.Errorf("recovery must not enqueue another settlement, got %v", q.enqueued)
 	}
 }
 

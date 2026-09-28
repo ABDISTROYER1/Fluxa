@@ -19,6 +19,18 @@ type fakeContractService struct{}
 func (f *fakeContractService) CreateWallet(ctx context.Context, ownerPublicKey ...string) (*domain.Wallet, error) {
 	return &domain.Wallet{ID: "w-1"}, nil
 }
+func (f *fakeContractService) ListWallets(ctx context.Context, limit, offset int) ([]*domain.Wallet, error) {
+	return nil, nil
+}
+func (f *fakeContractService) WithClientResolver(resolver stellar.ClientResolver) wallet.Service {
+	return f
+}
+func (f *fakeContractService) WithSignerResolver(resolver stellar.SignerResolver) wallet.Service {
+	return f
+}
+func (f *fakeContractService) WithTestnetProvisioner(provisioner wallet.TestnetProvisioner) wallet.Service {
+	return f
+}
 func (f *fakeContractService) GetWalletForHandler(ctx context.Context, walletID string) (*domain.Wallet, error) {
 	return &domain.Wallet{ID: walletID}, nil
 }

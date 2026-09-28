@@ -6,6 +6,7 @@ import { useToast } from '@/lib/toast-context';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
@@ -28,6 +29,11 @@ export default function ApiKeysPage() {
   const [creating, setCreating] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [label, setLabel] = useState('');
+  const [mode, setMode] = useState<'live' | 'test'>(() =>
+    typeof window !== 'undefined' && window.localStorage.getItem('fluxa_mode') === 'test'
+      ? 'test'
+      : 'live',
+  );
 
   const fetchKeys = useCallback(async () => {
     setLoading(true);
@@ -56,7 +62,7 @@ export default function ApiKeysPage() {
   const handleCreateKey = async () => {
     setCreating(true);
     try {
-      const res = await api.createAPIKey(label || undefined);
+      const res = await api.createAPIKey(label || undefined, mode);
       setNewKey(res.key);
       setLabel('');
       toast('API key created', 'success');
@@ -111,6 +117,15 @@ export default function ApiKeysPage() {
             placeholder="Key label (optional)"
             className="w-48"
           />
+          <Select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as 'live' | 'test')}
+            className="w-36"
+            aria-label="API key environment"
+          >
+            <option value="live">Live · mainnet</option>
+            <option value="test">Test · testnet</option>
+          </Select>
           <Button onClick={handleCreateKey} isLoading={creating}>
             <Plus className="h-4 w-4" />
             Create Secret Key
@@ -150,6 +165,7 @@ export default function ApiKeysPage() {
             <TableHead>
               <TableRow>
                 <TableHeader>Name</TableHeader>
+                <TableHeader>Environment</TableHeader>
                 <TableHeader>Token</TableHeader>
                 <TableHeader>Created</TableHeader>
                 <TableHeader>Last Used</TableHeader>
@@ -163,6 +179,9 @@ export default function ApiKeysPage() {
                 return (
                   <TableRow key={k.id} className={isRevoked ? 'opacity-60' : undefined}>
                     <TableCell className="font-medium">{k.label || 'Unnamed Key'}</TableCell>
+                    <TableCell>
+                      <Badge variant={k.mode === 'test' ? 'warning' : 'default'}>{k.mode}</Badge>
+                    </TableCell>
                     <TableCell>
                       <code className="rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs">
                         {k.prefix}••••••••••••

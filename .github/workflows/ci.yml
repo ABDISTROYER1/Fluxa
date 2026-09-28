@@ -26,6 +26,15 @@ jobs:
       - name: Download modules
         run: go mod download
 
+      - name: Check Go formatting (gofmt)
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Run go vet
         run: go vet ./...
 
@@ -173,13 +182,16 @@ jobs:
           cache-dependency-path: sdk/package-lock.json
 
       - name: Install deps
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts || npm install
 
       - name: Typecheck
         run: npm run typecheck
 
       - name: Check formatting
         run: npm run format:check
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build

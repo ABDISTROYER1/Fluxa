@@ -32,6 +32,7 @@ import (
 	"github.com/fluxa/fluxa/internal/server"
 	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/settlement"
+	"github.com/fluxa/fluxa/internal/status"
 	"github.com/fluxa/fluxa/internal/stellar"
 	"github.com/fluxa/fluxa/internal/tracing"
 	"github.com/fluxa/fluxa/internal/transfer"
@@ -114,7 +115,7 @@ func main() {
 	orgRepo := postgres.NewOrgRepo(repoDB)
 
 	walletRepo := postgres.NewWalletRepo(repoDB)
-	txRepo := postgres.NewTransactionRepo(repoDB)
+	txRepo := postgres.NewTransactionRepo(repoDB).WithPrimary(db)
 
 	convRepo := postgres.NewConversionRepo(repoDB)
 	feeRepo := postgres.NewFeeRepo(repoDB)
@@ -127,18 +128,31 @@ func main() {
 	scheduleRepo := postgres.NewScheduleRepo(repoDB)
 	anchorRepo := postgres.NewAnchorRepo(repoDB)
 	treasuryRepo := postgres.NewTreasuryRepo(repoDB)
+	incidentRepo := postgres.NewIncidentRepository(db)
 	idempotencyRepo := postgres.NewIdempotencyRepo(repoDB)
 	complianceRepo := postgres.NewComplianceRepo(repoDB).WithPrimary(db)
 	idemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
 		TTL: time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 	})
+	// Transfers reconcile their durable transaction before creating or
+	// enqueueing anything, so they may safely take over a lease left behind by
+	// a crashed process. Other endpoints keep the conservative behaviour.
+	transferIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
+		TTL:                time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
+		AllowLeaseRecovery: true,
 	batchIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
 		Required: true,
 		TTL:      time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 	})
 
-	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork, cfg.StellarHorizonTimeout)
-	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarNetwork)
+	// Live and test environments are separate Horizon clients, signers, and
+	// networks; the resolver picks one from the authenticated key's mode.
+	stellarClient := stellar.NewClient(cfg.StellarLiveHorizonURL, cfg.StellarLiveNetwork, cfg.StellarHorizonTimeout)
+	testStellarClient := stellar.NewClient(cfg.StellarTestnetHorizonURL, cfg.StellarTestnetNetwork, cfg.StellarHorizonTimeout)
+	clientResolver := stellar.NewModeAwareClients(stellarClient, testStellarClient)
+	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarLiveNetwork)
+	testSigner := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarTestnetNetwork)
+	signerResolver := stellar.NewModeAwareSigners(signer, testSigner)
 
 	asynqOpt, err := queue.AsynqRedisOptions(cfg.RedisURL, cfg.RedisSentinelMasterName, cfg.RedisSentinelAddrs, cfg.RedisSentinelPassword)
 	if err != nil {
@@ -156,9 +170,15 @@ func main() {
 	feeSvc := fees.NewService(feeRepo)
 	walletSvc := wallet.NewService(walletRepo, stellarClient, cfg.MasterEncryptionKey, tenantRepo).
 		WithSigner(signer).
+		WithClientResolver(clientResolver).
+		WithSignerResolver(signerResolver).
+		WithTestnetProvisioner(wallet.NewFriendbotProvisioner(cfg.FriendbotURL)).
 		WithIssuers(cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer)
-	transferSvc := transfer.NewService(txRepo, walletRepo, feeSvc, queueClient, tenantRepo).
-		WithStellarClient(stellarClient)
+	transferSvc := transfer.ConfigureClientResolver(
+		transfer.NewService(txRepo, walletRepo, feeSvc, queueClient, tenantRepo).
+			WithStellarClient(stellarClient),
+		clientResolver,
+	)
 	webhookSvc := webhook.NewService(webhookRepo, redisClient, queueClient, 120, cfg.WebhookAllowPrivateNetworks)
 
 	// Compliance screening sits in front of settlement, so it is wired before
@@ -245,15 +265,15 @@ func main() {
 
 	engine := settlement.NewEngine(
 		txRepo, walletRepo, feeSvc, stellarClient, signer,
-		cfg.StellarNetwork, map[string]string{
+		cfg.StellarLiveNetwork, map[string]string{
 			"USDC": cfg.StellarUSDCIssuer,
 			"EURC": cfg.StellarEURCIssuer,
 		}, cfg.PlatformFeeWalletPublicKey,
-	)
+	).WithClientResolver(clientResolver).WithSignerResolver(signerResolver)
 	settlementWorker := settlement.NewWorker(engine)
 
 	idx := indexer.New(walletRepo, txRepo, stellarClient)
-	indexerWorker := indexer.NewWorker(idx)
+	indexerWorker := indexer.NewWorker(idx, *cfg)
 
 	asynqSrv := asynq.NewServer(asynqOpt, asynq.Config{
 		Concurrency: 5,
@@ -320,7 +340,7 @@ func main() {
 		walletHandler = walletHandler.WithContractService(contractSvc).
 			WithGuardianGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 	}
-	transferHandler := transfer.NewHandler(transferSvc).WithIdempotency(idemMW)
+	transferHandler := transfer.NewHandler(transferSvc).WithIdempotency(transferIdemMW)
 	fxHandler := fx.NewHandler(fxSvc).WithIdempotency(idemMW)
 	fiatHandler := fiat.NewHandler(fiatSvc).WithIdempotency(idemMW)
 	anchorFiatHandler := fiat.NewAnchorHandler(anchorFiatSvc)
@@ -332,6 +352,7 @@ func main() {
 	batchHandler := batch.NewHandler(batchSvc).WithIdempotency(batchIdemMW).WithAssetValidator(assetRegistry.IsSupported)
 	scheduleHandler := schedule.NewHandler(scheduleSvc)
 	treasuryHandler := treasury.NewHandler(treasurySvc).WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
+	statusHandler := status.NewHandler(status.NewService(incidentRepo))
 
 	// Claimable balances move real funds in both directions, so the mutating
 	// routes share the Owner/Admin gate used by /v1/keys and the treasury.
@@ -357,7 +378,7 @@ func main() {
 		anchorFiatHandler, anchorHandler,
 		feeHandler, reconcileHandler, apikeyHandler, apiKeyRepo,
 		webhookHandler, batchHandler, scheduleHandler, treasuryHandler, claimableHandler,
-		complianceHandler, jwtSecretBytes, cfg.Port,
+		statusHandler, complianceHandler, jwtSecretBytes, cfg.Port,
 		map[string]server.DependencyCheck{
 			"postgres": db.Ping,
 			"replica":  func(ctx context.Context) error { return repoDB.ReplicaAvailable(ctx) },
@@ -374,6 +395,12 @@ func main() {
 
 		orgRepo,
 		cfg.CORSAllowedOrigins,
+		server.AuthRateLimitConfig{
+			IPRPS:        cfg.AuthRateLimitIPRPS,
+			IPBurst:      cfg.AuthRateLimitIPBurst,
+			AccountRPS:   cfg.AuthRateLimitAccountRPS,
+			AccountBurst: cfg.AuthRateLimitAccountBurst,
+		},
 	)
 	server.RegisterDocsRoutes(srv.Router())
 

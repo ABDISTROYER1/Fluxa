@@ -1,39 +1,87 @@
 // Package idempotency implements request deduplication for state-mutating
-// endpoints via the X-Idempotency-Key and Idempotency-Key headers, following the
-// pattern used by modern payment APIs: a client-supplied key scopes a request
-// so that a retry (e.g. after a network timeout) replays the original result
-// instead of re-executing the handler and creating duplicate transactions.
+// endpoints via the X-Idempotency-Key and Idempotency-Key headers, following
+// the pattern used by modern payment APIs: a client-supplied key scopes a
+// request so that a retry (e.g. after a network timeout) replays the original
+// result instead of re-executing the handler and creating duplicate
+// transactions.
 package idempotency
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/api"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 const (
 	headerKey  = "Idempotency-Key"
 	xHeaderKey = "X-Idempotency-Key"
+
 	// DefaultTTL is the default idempotency key lifetime. It matches the value
 	// documented in docs/idempotency.md and the IDEMPOTENCY_TTL_HOURS default.
 	DefaultTTL = 24 * time.Hour
+
+	defaultLeaseTTL          = 30 * time.Second
+	defaultCompletionTimeout = 5 * time.Second
+	defaultMaxResponseBody   = 1 << 20
+	minimumRetryAfterSeconds = 1
 )
 
 // Options controls middleware behavior for idempotency enforcement.
 type Options struct {
 	// Required specifies whether the request must supply an idempotency key.
-	// If false, requests without an idempotency key proceed normally without deduplication.
+	// If false, requests without an idempotency key proceed normally without
+	// deduplication.
 	Required bool
 	// TTL overrides the lifetime applied to new idempotency records.
 	// A zero value defaults to DefaultTTL.
 	TTL time.Duration
+	// LeaseTTL bounds how long a single in-flight request may hold a key before
+	// another request may recover it.
+	LeaseTTL time.Duration
+	// CompletionTimeout bounds how long the middleware waits for the durable
+	// response to be persisted after the handler returns.
+	CompletionTimeout time.Duration
+	// MaxResponseBody caps the buffered response size.
+	MaxResponseBody int64
+	// AllowLeaseRecovery must only be enabled for operations whose handler is
+	// safe to execute again after a crash (currently transfers reconcile their
+	// durable transaction before creating or enqueueing anything). Without it,
+	// an expired lease is reported as still in progress.
+	AllowLeaseRecovery bool
+	// Now is injectable for tests.
+	Now func() time.Time
+}
+
+func (o Options) withDefaults() Options {
+	if o.TTL <= 0 {
+		o.TTL = DefaultTTL
+	}
+	if o.LeaseTTL <= 0 {
+		o.LeaseTTL = defaultLeaseTTL
+	}
+	if o.CompletionTimeout <= 0 {
+		o.CompletionTimeout = defaultCompletionTimeout
+	}
+	if o.MaxResponseBody <= 0 {
+		o.MaxResponseBody = defaultMaxResponseBody
+	}
+	if o.Now == nil {
+		o.Now = func() time.Time { return time.Now().UTC() }
+	}
+	return o
 }
 
 // Middleware returns middleware with optional idempotency-key semantics.
@@ -51,12 +99,12 @@ func RequiredMiddleware(repo Repository) func(http.Handler) http.Handler {
 	return MiddlewareWithOptions(repo, Options{Required: true})
 }
 
-// MiddlewareWithOptions returns middleware configured with the specified options.
+// MiddlewareWithOptions returns middleware configured with the specified
+// options. The downstream response is buffered and only released to the client
+// after the idempotency record has been made durable, so a retry can never
+// observe a client-visible success that was not recorded.
 func MiddlewareWithOptions(repo Repository, opts Options) func(http.Handler) http.Handler {
-	ttl := opts.TTL
-	if ttl <= 0 {
-		ttl = DefaultTTL
-	}
+	opts = opts.withDefaults()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rawKey := ExtractKey(r)
@@ -80,36 +128,137 @@ func MiddlewareWithOptions(repo Repository, opts Options) func(http.Handler) htt
 
 			hash := requestHash(r.Method, r.URL.Path, body)
 			orgID := tenant.IDFromContext(r.Context())
+			mode := tenant.ModeOrDefault(r.Context(), domain.ModeLive)
+			now := opts.Now().UTC()
 
-			rec, existed, err := repo.TryAcquire(r.Context(), orgID, key, hash, time.Now().UTC().Add(ttl))
+			acquisition, err := repo.Acquire(
+				r.Context(),
+				orgID,
+				mode,
+				key,
+				hash,
+				now,
+				now.Add(opts.LeaseTTL),
+				now.Add(opts.TTL),
+				opts.AllowLeaseRecovery,
+			)
 			if err != nil {
 				api.InternalError(w, err)
 				return
 			}
 
-			if existed {
-				switch {
-				case rec.Status == StatusProcessing:
-					api.Error(w, http.StatusConflict, "REQUEST_IN_PROGRESS", "a request with this idempotency key is already being processed")
-				case rec.RequestHash != hash:
-					// Issue #151: Return 409 Conflict if the same key is used with a different request body
-					api.Error(w, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY", "this idempotency key was previously used with a different request body")
-				default:
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(rec.ResponseStatus)
-					_, _ = w.Write(rec.ResponseBody)
+			switch acquisition.State {
+			case Replay:
+				writeResponse(w, acquisition.Record.ResponseStatus, acquisition.Record.ResponseHeaders, acquisition.Record.ResponseBody, true)
+				return
+			case BodyMismatch:
+				// Issue #151: the same key with a different body is a conflict.
+				api.Error(w, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY", "this idempotency key was previously used with a different request body")
+				return
+			case InProgress:
+				writeInProgress(w, acquisition.Record.LeaseExpiresAt, now)
+				return
+			case LeaseExpired:
+				if !opts.AllowLeaseRecovery {
+					writeInProgress(w, acquisition.Record.LeaseExpiresAt, now)
+					return
 				}
+			case Acquired:
+			default:
+				api.InternalError(w, fmt.Errorf("unknown idempotency acquisition state %d", acquisition.State))
 				return
 			}
 
-			rec2 := newRecorder(w)
-			next.ServeHTTP(rec2, r)
-			_ = repo.Complete(r.Context(), orgID, key, rec2.status, rec2.body)
+			recorder := newRecorder(int(opts.MaxResponseBody))
+			next.ServeHTTP(recorder, r.WithContext(withRecordID(r.Context(), acquisition.Record.ID)))
+			if recorder.err != nil {
+				zerolog.Ctx(r.Context()).Error().Err(recorder.err).Str("idempotency_key", key).Msg("failed to buffer idempotent response")
+				api.Error(w, http.StatusInternalServerError, "IDEMPOTENCY_RESPONSE_TOO_LARGE", "the response could not be buffered for idempotent replay")
+				return
+			}
+
+			response := recorder.response()
+			response.Headers = replayableHeader(response.Headers)
+			completeCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), opts.CompletionTimeout)
+			err = repo.Complete(completeCtx, acquisition.Record.ID, acquisition.Record.LeaseToken, response, opts.Now().UTC().Add(opts.TTL))
+			cancel()
+			if err != nil {
+				zerolog.Ctx(r.Context()).Error().Err(err).Str("idempotency_key", key).Msg("failed to persist idempotent response")
+				api.Error(w, http.StatusInternalServerError, "IDEMPOTENCY_RECORD_PERSISTENCE_FAILED", "the operation completed but its idempotency record could not be persisted; retry with the same key")
+				return
+			}
+
+			writeResponse(w, response.Status, response.Headers, response.Body, false)
 		})
 	}
 }
 
-// ExtractKey reads the idempotency key from X-Idempotency-Key or Idempotency-Key header.
+func writeInProgress(w http.ResponseWriter, leaseExpiresAt, now time.Time) {
+	retryAfter := minimumRetryAfterSeconds
+	if !leaseExpiresAt.IsZero() {
+		seconds := int(math.Ceil(leaseExpiresAt.Sub(now).Seconds()))
+		if seconds > retryAfter {
+			retryAfter = seconds
+		}
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	api.Error(w, http.StatusConflict, "REQUEST_IN_PROGRESS", "a request with this idempotency key is already being processed")
+}
+
+func writeResponse(w http.ResponseWriter, status int, headers http.Header, body []byte, replay bool) {
+	if status == 0 {
+		status = http.StatusOK
+	}
+	copyReplayableHeader(w.Header(), headers)
+	if replay {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	w.WriteHeader(status)
+	if len(body) > 0 {
+		_, _ = w.Write(body)
+	}
+}
+
+func replayableHeader(header http.Header) http.Header {
+	filtered := make(http.Header)
+	copyReplayableHeader(filtered, header)
+	return filtered
+}
+
+func copyReplayableHeader(dst, src http.Header) {
+	for name, values := range src {
+		if !isReplayableHeader(name) {
+			continue
+		}
+		for _, value := range values {
+			dst.Add(name, value)
+		}
+	}
+}
+
+func isReplayableHeader(name string) bool {
+	canonical := http.CanonicalHeaderKey(name)
+	switch canonical {
+	case "Connection",
+		"Content-Length",
+		"Date",
+		"Idempotency-Replayed",
+		"Keep-Alive",
+		"Proxy-Authenticate",
+		"Proxy-Authorization",
+		"Te",
+		"Trailer",
+		"Transfer-Encoding",
+		"Upgrade",
+		"X-Request-Id":
+		return false
+	default:
+		return true
+	}
+}
+
+// ExtractKey reads the idempotency key from X-Idempotency-Key or
+// Idempotency-Key header.
 func ExtractKey(r *http.Request) string {
 	if k := r.Header.Get(xHeaderKey); k != "" {
 		return k
@@ -140,8 +289,32 @@ func DeterministicKey(raw string) string {
 
 func requestHash(method, path string, body []byte) string {
 	h := sha256.New()
-	h.Write([]byte(method))
-	h.Write([]byte(path))
-	h.Write(body)
+	_, _ = h.Write([]byte(method))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(path))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+type recordIDContextKey struct{}
+
+func withRecordID(ctx context.Context, recordID string) context.Context {
+	return context.WithValue(ctx, recordIDContextKey{}, recordID)
+}
+
+// WithRecordID attaches a durable idempotency record ID to the context. It is
+// used by request paths that recover a transfer outside the HTTP middleware
+// (for example, an operator re-running a request whose process died) so the
+// transfer service can fence the recovery to the exact generation.
+func WithRecordID(ctx context.Context, recordID string) context.Context {
+	return withRecordID(ctx, recordID)
+}
+
+// RecordIDFromContext returns the durable idempotency record ID for the
+// current request. Transfer persistence uses it to enforce one transaction per
+// processing generation without coupling the transfer service to HTTP state.
+func RecordIDFromContext(ctx context.Context) string {
+	recordID, _ := ctx.Value(recordIDContextKey{}).(string)
+	return recordID
 }

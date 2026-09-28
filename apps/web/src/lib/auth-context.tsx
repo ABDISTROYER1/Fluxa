@@ -2,62 +2,99 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
+export type EnvironmentMode = 'live' | 'test';
+
 interface AuthContextValue {
   apiKey: string | null;
+  mode: EnvironmentMode;
   isAuthenticated: boolean;
   login: (apiKey: string) => void;
   logout: () => void;
+  switchMode: (mode: EnvironmentMode) => void;
   getStoredWalletIds: () => string[];
   addStoredWalletId: (id: string) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
 const WALLET_IDS_KEY = 'fluxa_wallet_ids';
+const MODE_KEY = 'fluxa_mode';
+
+function readMode(): EnvironmentMode {
+  if (typeof window === 'undefined') return 'live';
+  return window.localStorage.getItem(MODE_KEY) === 'test' ? 'test' : 'live';
+}
+
+function keyForMode(mode: EnvironmentMode): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(`fluxa_api_key_${mode}`);
+}
+
+function modeForKey(key: string): EnvironmentMode {
+  return key.startsWith('sk_test_') ? 'test' : 'live';
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const [mode, setMode] = useState<EnvironmentMode>(() => readMode());
   const [apiKey, setApiKey] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem('fluxa_api_key');
+    const storedMode = readMode();
+    return keyForMode(storedMode) || window.localStorage.getItem('fluxa_api_key');
   });
 
   const login = useCallback((key: string) => {
-    localStorage.setItem('fluxa_api_key', key);
+    const nextMode = modeForKey(key);
+    window.localStorage.setItem(`fluxa_api_key_${nextMode}`, key);
+    window.localStorage.setItem('fluxa_api_key', key);
+    window.localStorage.setItem(MODE_KEY, nextMode);
+    setMode(nextMode);
     setApiKey(key);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('fluxa_api_key');
-    localStorage.removeItem(WALLET_IDS_KEY);
+    const currentMode = readMode();
+    window.localStorage.removeItem(`fluxa_api_key_${currentMode}`);
+    window.localStorage.removeItem('fluxa_api_key');
+    window.localStorage.removeItem(WALLET_IDS_KEY);
     setApiKey(null);
+  }, []);
+
+  const switchMode = useCallback((nextMode: EnvironmentMode) => {
+    window.localStorage.setItem(MODE_KEY, nextMode);
+    const nextKey = keyForMode(nextMode);
+    if (nextKey) window.localStorage.setItem('fluxa_api_key', nextKey);
+    else window.localStorage.removeItem('fluxa_api_key');
+    setMode(nextMode);
+    setApiKey(nextKey);
   }, []);
 
   const getStoredWalletIds = useCallback((): string[] => {
     try {
-      const raw = localStorage.getItem(WALLET_IDS_KEY);
+      const raw = window.localStorage.getItem(`${WALLET_IDS_KEY}_${mode}`);
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
     }
-  }, []);
+  }, [mode]);
 
   const addStoredWalletId = useCallback(
     (id: string) => {
       const existing = getStoredWalletIds();
       if (!existing.includes(id)) {
-        localStorage.setItem(WALLET_IDS_KEY, JSON.stringify([...existing, id]));
+        window.localStorage.setItem(`${WALLET_IDS_KEY}_${mode}`, JSON.stringify([...existing, id]));
       }
     },
-    [getStoredWalletIds],
+    [getStoredWalletIds, mode],
   );
 
   return (
     <AuthContext.Provider
       value={{
         apiKey,
+        mode,
         isAuthenticated: !!apiKey,
         login,
         logout,
+        switchMode,
         getStoredWalletIds,
         addStoredWalletId,
       }}

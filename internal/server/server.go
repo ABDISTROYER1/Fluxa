@@ -21,6 +21,7 @@ import (
 	"github.com/fluxa/fluxa/internal/postgres"
 	"github.com/fluxa/fluxa/internal/reconcile"
 	"github.com/fluxa/fluxa/internal/schedule"
+	"github.com/fluxa/fluxa/internal/status"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/fluxa/fluxa/internal/wallet"
@@ -52,14 +53,22 @@ func New(
 	scheduleHandler *schedule.Handler,
 	treasuryHandler *treasury.Handler,
 	claimableHandler *claimable.Handler,
+	statusHandler *status.Handler,
 	complianceHandler *compliance.Handler,
 	jwtSecret []byte,
 	port string,
 	healthChecks map[string]DependencyCheck,
 	membershipValidator MembershipValidator,
 	corsOrigins []string,
+	authRateLimitCfg ...AuthRateLimitConfig,
 ) *Server {
 	r := chi.NewRouter()
+
+	rateCfg := DefaultAuthRateLimitConfig()
+	if len(authRateLimitCfg) > 0 {
+		rateCfg = authRateLimitCfg[0]
+	}
+	authLimiter := NewAuthRateLimiter(rateCfg)
 
 	r.Use(middleware.RealIP)
 	r.Use(requestID)
@@ -80,10 +89,20 @@ func New(
 	r.Get("/health/live", fluxahealth.LiveHandler())
 	r.Get("/metrics", MetricsHandler)
 
+	// Platform status is intentionally public and must remain outside tenant
+	// authentication.
+	if statusHandler != nil {
+		statusHandler.RegisterRoutes(r)
+	}
+
 	r.Route("/v1", func(r chi.Router) {
 		// Unauthenticated public endpoints
-		r.Route("/auth", authHandler.Routes())
-		r.Post("/org/invites/accept", orgHandler.AcceptInvite)
+		r.Route("/auth", func(r chi.Router) {
+			r.With(authLimiter.Limit(ExtractEmail)).Post("/register", authHandler.Register)
+			r.With(authLimiter.Limit(ExtractEmail)).Post("/login", authHandler.Login)
+			r.Post("/refresh", authHandler.Refresh)
+		})
+		r.With(authLimiter.Limit(ExtractInviteToken)).Post("/org/invites/accept", orgHandler.AcceptInvite)
 		// Registered as a direct path (not r.Route("/webhooks", ...)) because
 		// the authenticated group below already mounts a "/webhooks"
 		// sub-router for Register/List/Delete/deliveries; chi doesn't support
@@ -118,6 +137,10 @@ func New(
 				r.Get("/{id}/deliveries", webhookHandler.ListDeliveries)
 			})
 
+			// Sandbox-only escape hatch: lets a developer drive a webhook event
+			// through the test environment without moving real funds.
+			r.With(RequireTestMode).Post("/test/trigger-event", webhookHandler.TriggerTestEvent)
+
 			// Operational routes (Require not viewer for mutating calls)
 			r.Group(func(r chi.Router) {
 				r.Use(RequireNotViewer)
@@ -144,6 +167,9 @@ func New(
 				r.Route("/admin/anchors", anchorHandler.AdminRoutes())
 				r.Route("/admin", reconcileHandler.AdminRoutes())
 				r.With(RequirePlatformOperator()).Route("/admin/treasury", treasuryHandler.AdminRoutes())
+				if statusHandler != nil {
+					statusHandler.RegisterAdminRoutes(r)
+				}
 				// Mounted at /admin/compliance, not /admin: reconcileHandler
 				// already owns the bare /admin pattern above, and chi panics
 				// when two sub-routers share one.
@@ -165,8 +191,18 @@ func New(
 	return &Server{router: r, http: srv}
 }
 
+// Router exposes the underlying chi router so callers (and tests) can mount
+// additional handlers or drive requests through the full middleware stack.
+func (s *Server) Router() chi.Router {
+	return s.router
+}
+
 func (s *Server) Start() error {
 	return s.http.ListenAndServe()
+}
+
+func (s *Server) Router() *chi.Mux {
+	return s.router
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

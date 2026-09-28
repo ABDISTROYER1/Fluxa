@@ -5,7 +5,11 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"math/big"
+	"strings"
+
+	"github.com/fluxa/fluxa/internal/domain"
 )
 
 var b58Alphabet = []byte("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
@@ -33,18 +37,38 @@ func base58Encode(b []byte) string {
 	return string(result)
 }
 
-// Generate creates a new API key of the form sk_live_<base58>
-func Generate() (raw string, prefix string, err error) {
+// Generate creates a new API key of the form sk_<mode>_<base58>. The mode is
+// carried by the raw key so a credential cannot be replayed against the other
+// environment: sk_live_ keys authenticate against mainnet and sk_test_ keys
+// against the isolated testnet tenant environment.
+func Generate(mode domain.Mode) (raw string, prefix string, err error) {
+	if !mode.Valid() {
+		return "", "", fmt.Errorf("invalid API key mode %q", mode)
+	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", "", err
 	}
-	encoded := base58Encode(b)
-	raw = "sk_live_" + encoded
+	raw = "sk_" + string(mode) + "_" + base58Encode(b)
 
-	// Prefix is first 8 chars for display
-	prefix = raw[:8]
+	// Prefix is the environment marker plus the first eight base58 characters,
+	// long enough to identify a key in a list without being usable as one.
+	prefix = raw[:16]
 	return raw, prefix, nil
+}
+
+// ModeFromRaw returns the environment encoded by a raw API key. It is used by
+// authentication to reject keys minted for the other environment rather than
+// silently upgrading them.
+func ModeFromRaw(raw string) (domain.Mode, error) {
+	switch {
+	case strings.HasPrefix(raw, "sk_live_"):
+		return domain.ModeLive, nil
+	case strings.HasPrefix(raw, "sk_test_"):
+		return domain.ModeTest, nil
+	default:
+		return "", fmt.Errorf("API key must start with sk_live_ or sk_test_")
+	}
 }
 
 // Hash returns the SHA-256 hash of the raw API key for storage

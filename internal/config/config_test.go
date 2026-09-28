@@ -25,7 +25,10 @@ func setRequiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://localhost/fluxa")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
-	t.Setenv("MASTER_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	// A high-entropy 32-byte key: the entropy guard rejects repeated-byte keys
+	// before any other validation runs, so fixtures must use real-looking
+	// material to exercise the checks under test.
+	t.Setenv("MASTER_ENCRYPTION_KEY", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
 	t.Setenv("COMPLIANCE_ENABLED", "false")
 	t.Setenv("ENV", "development")
 }
@@ -164,4 +167,49 @@ func TestValidateStellarAddress(t *testing.T) {
 	if err := validateStellarAddress("X", "", false); err != nil {
 		t.Fatalf("optional empty value should pass: %v", err)
 	}
+}
+
+func TestLoad_AuthRateLimitDefaultsAndOverrides(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg, err := loadWith(t, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.AuthRateLimitIPRPS != 5 {
+			t.Errorf("AuthRateLimitIPRPS = %v, want 5", cfg.AuthRateLimitIPRPS)
+		}
+		if cfg.AuthRateLimitIPBurst != 10 {
+			t.Errorf("AuthRateLimitIPBurst = %v, want 10", cfg.AuthRateLimitIPBurst)
+		}
+		if cfg.AuthRateLimitAccountRPS != 1 {
+			t.Errorf("AuthRateLimitAccountRPS = %v, want 1", cfg.AuthRateLimitAccountRPS)
+		}
+		if cfg.AuthRateLimitAccountBurst != 5 {
+			t.Errorf("AuthRateLimitAccountBurst = %v, want 5", cfg.AuthRateLimitAccountBurst)
+		}
+	})
+
+	t.Run("overrides", func(t *testing.T) {
+		cfg, err := loadWith(t, map[string]string{
+			"AUTH_RATE_LIMIT_IP_RPS":        "20",
+			"AUTH_RATE_LIMIT_IP_BURST":      "50",
+			"AUTH_RATE_LIMIT_ACCOUNT_RPS":   "5",
+			"AUTH_RATE_LIMIT_ACCOUNT_BURST": "15",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.AuthRateLimitIPRPS != 20 {
+			t.Errorf("AuthRateLimitIPRPS = %v, want 20", cfg.AuthRateLimitIPRPS)
+		}
+		if cfg.AuthRateLimitIPBurst != 50 {
+			t.Errorf("AuthRateLimitIPBurst = %v, want 50", cfg.AuthRateLimitIPBurst)
+		}
+		if cfg.AuthRateLimitAccountRPS != 5 {
+			t.Errorf("AuthRateLimitAccountRPS = %v, want 5", cfg.AuthRateLimitAccountRPS)
+		}
+		if cfg.AuthRateLimitAccountBurst != 15 {
+			t.Errorf("AuthRateLimitAccountBurst = %v, want 15", cfg.AuthRateLimitAccountBurst)
+		}
+	})
 }

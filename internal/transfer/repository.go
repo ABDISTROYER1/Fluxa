@@ -37,3 +37,11 @@ type Repository interface {
 	// org/idempotency-key pair, or domain.ErrTransactionNotFound if none exists.
 	GetByIdempotencyKey(ctx context.Context, orgID, idempotencyKey string) (*domain.Transaction, error)
 }
+
+// IdempotencyRecordRepository is implemented by durable transaction stores that
+// can fence a transfer to the exact idempotency generation being recovered.
+// It is optional so lightweight in-memory repositories from older callers keep
+// compiling; production PostgreSQL implements it.
+type IdempotencyRecordRepository interface {
+	GetByIdempotencyRecordID(ctx context.Context, recordID string) (*domain.Transaction, error)
+}
