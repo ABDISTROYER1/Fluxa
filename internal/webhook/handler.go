@@ -10,6 +10,8 @@ import (
 	"strconv"
 
 	"github.com/fluxa/fluxa/internal/api"
+	"github.com/fluxa/fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -34,6 +36,49 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/subscriptions", h.CreateSubscription)
 		r.Get("/subscriptions", h.ListSubscriptions)
 		r.Delete("/subscriptions/{id}", h.DeleteSubscription)
+	})
+}
+
+// TriggerTestEvent is the sandbox-only escape hatch for #7: a developer holding
+// an sk_test_ API key can drive a real webhook event through the normal
+// dispatch path without moving real funds. The route is gated by
+// RequireTestMode, and the environment is re-checked here so the handler stays
+// safe if it is ever mounted directly.
+func (h *Handler) TriggerTestEvent(w http.ResponseWriter, r *http.Request) {
+	mode, ok := tenant.ModeFromContext(r.Context())
+	if !ok || mode != domain.ModeTest {
+		api.Error(w, http.StatusForbidden, "TEST_MODE_REQUIRED", "this endpoint requires an sk_test_ API key")
+		return
+	}
+
+	var req struct {
+		Event string                 `json:"event"`
+		Data  map[string]interface{} `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.BadRequest(w, "invalid request body")
+		return
+	}
+
+	allowed := map[string]bool{
+		"transfer.settled": true,
+		"transfer.failed":  true,
+		"wallet.funded":    true,
+	}
+	if !allowed[req.Event] {
+		api.BadRequest(w, "event must be transfer.settled, transfer.failed, or wallet.funded")
+		return
+	}
+
+	if err := h.svc.Dispatch(r.Context(), domain.EventType(req.Event), req.Data); err != nil {
+		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to dispatch test event")
+		return
+	}
+
+	api.JSON(w, http.StatusAccepted, map[string]interface{}{
+		"event":  req.Event,
+		"mode":   mode,
+		"status": "queued",
 	})
 }
 

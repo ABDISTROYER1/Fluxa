@@ -38,6 +38,9 @@ const (
 )
 
 var SupportedEventTypes = []string{
+	EventTransferSettled,
+	EventTransferFailed,
+	EventWalletFunded,
 	EventTypePaymentCompleted,
 	EventTypePaymentFailed,
 	EventTypeFxQuoteCreated,
@@ -51,6 +54,7 @@ type WebhookEndpoint struct {
 	URL             string     `json:"url"`
 	Secret          string     `json:"secret,omitempty"`
 	Events          []string   `json:"events"`
+	Mode            Mode       `json:"mode"`
 	Active          bool       `json:"active"`
 	SuccessCount    int        `json:"success_count"`
 	FailureCount    int        `json:"failure_count"`
@@ -64,6 +68,7 @@ type WebhookSubscription struct {
 	ID         string    `json:"id"`
 	TenantID   *string   `json:"tenant_id,omitempty"`
 	EventType  string    `json:"event_type"`
+	Mode       Mode      `json:"mode"`
 	WebhookURL string    `json:"webhook_url"`
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -72,6 +77,7 @@ type WebhookDelivery struct {
 	ID            string     `json:"id"`
 	EndpointID    string     `json:"endpoint_id"`
 	TenantID      *string    `json:"tenant_id,omitempty"`
+	Mode          Mode       `json:"mode"`
 	EventType     string     `json:"event_type"`
 	Method        string     `json:"method"`
 	Payload       string     `json:"payload"`
@@ -91,6 +97,7 @@ type WebhookDeadLetter struct {
 	ID           string    `json:"id"`
 	EndpointID   string    `json:"endpoint_id"`
 	TenantID     *string   `json:"tenant_id,omitempty"`
+	Mode         Mode      `json:"mode"`
 	DeliveryID   string    `json:"delivery_id"`
 	Payload      string    `json:"payload"`
 	ErrorMessage string    `json:"error_message"`
@@ -124,9 +131,6 @@ type TenantWebhookConfig struct {
 	// after the secret has been stripped from an API response.
 	SecretConfigured bool
 }
-
-// DeliveryStatus is the lifecycle state of a tenant webhook delivery attempt.
-type DeliveryStatus string
 
 const (
 	DeliveryPending DeliveryStatus = "pending"

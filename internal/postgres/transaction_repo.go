@@ -10,18 +10,48 @@ import (
 	"github.com/fluxa/fluxa/internal/reconcile"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 )
 
 type TransactionRepo struct {
-	db DB
+	db      DB
+	primary DB
 }
 
 func NewTransactionRepo(db DB) *TransactionRepo {
 	return &TransactionRepo{db: db}
 }
 
+func (r *TransactionRepo) WithPrimary(primary DB) *TransactionRepo {
+	r.primary = primary
+	return r
+}
+
+func (r *TransactionRepo) readDB() DB {
+	if r.primary != nil {
+		return r.primary
+	}
+	return r.db
+}
+
+func mapTransactionInsertError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		(pgErr.ConstraintName == "uq_transactions_idempotency_record" || pgErr.ConstraintName == "uq_transactions_mode_tx_hash") {
+		return fmt.Errorf("%w: %v", domain.ErrConcurrentUpdate, err)
+	}
+	return err
+}
+
+func transactionMode(ctx context.Context) domain.Mode {
+	return tenant.ModeOrDefault(ctx, domain.ModeLive)
+}
+
 func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) error {
+	if tx.Mode == "" {
+		tx.Mode = transactionMode(ctx)
+	}
 	tID := tenant.IDFromContext(ctx)
 	if tID != "" {
 		tx.TenantID = &tID
@@ -32,7 +62,7 @@ func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) er
 		tx.ID, nullableString(tx.TxHash), tx.Type, tx.Status,
 		nullableString(tx.FromWallet), nullableString(tx.ToWallet),
 		tx.Asset, tx.Amount.String(), tx.Fee.String(), nullableFeeBps(tx.FeeBps),
-		nullableUUID(tx.TenantID), tx.CreatedAt,
+		nullableUUID(tx.TenantID), tx.Mode, tx.CreatedAt,
 		tx.RequeueCount, nullableTime(tx.ReconciledAt),
 		nullableStringPtr(tx.FiatRail), nullableStringPtr(tx.FiatProviderRef),
 		nullableStringPtr(tx.FiatStatus), nullableStringPtr(tx.LocalCurrency),
@@ -41,7 +71,7 @@ func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) er
 		nullableString(tx.FailureReason), nullableString(tx.FailureMessage),
 	)
 	if err != nil {
-		return fmt.Errorf("insert transaction: %w", err)
+		return fmt.Errorf("insert transaction: %w", mapTransactionInsertError(err))
 	}
 	return nil
 }
@@ -52,8 +82,8 @@ func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) er
 func (r *TransactionRepo) ExistsByTxHash(ctx context.Context, txHash string) (bool, error) {
 	var exists bool
 	err := r.db.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM transactions WHERE tx_hash = $1)`,
-		txHash,
+		`SELECT EXISTS(SELECT 1 FROM transactions WHERE tx_hash = $1 AND mode = $2)`,
+		txHash, transactionMode(ctx),
 	).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check transaction exists by hash: %w", err)
@@ -68,26 +98,31 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 	var feeBps *int
 	var tenantID *string
 	var batchID *string
+	var idempotencyRecordID *string
 	var reference string
 	var failureReason, failureMessage string
 
 	tID := tenant.IDFromContext(ctx)
+	mode := transactionMode(ctx)
 	query := `SELECT id, COALESCE(tx_hash,''), type, status,
 		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
-		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
+		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, mode, created_at,
 		        COALESCE(requeue_count, 0), reconciled_at,
 		        fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount,
+		        batch_id, COALESCE(reference,''), idempotency_record_id
+		 FROM transactions WHERE id = $1 AND mode = $2`
+	args := []interface{}{id, mode}
 		        batch_id, COALESCE(reference,''), COALESCE(failure_reason,''), COALESCE(failure_message,'')
 		 FROM transactions WHERE id = $1`
 	args := []interface{}{id}
 	if tID != "" {
-		query += ` AND tenant_id = $2`
+		query += ` AND tenant_id = $3`
 		args = append(args, tID)
 	}
 
-	err := r.db.QueryRow(ctx, query, args...).Scan(&tx.ID, &tx.TxHash, &tx.Type, &tx.Status,
+	err := r.readDB().QueryRow(ctx, query, args...).Scan(&tx.ID, &tx.TxHash, &tx.Type, &tx.Status,
 		&tx.FromWallet, &tx.ToWallet,
-		&tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.CreatedAt,
+		&tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.Mode, &tx.CreatedAt,
 		&tx.RequeueCount, &tx.ReconciledAt,
 		&tx.FiatRail, &tx.FiatProviderRef, &tx.FiatStatus, &tx.LocalCurrency, &localAmt,
 		&batchID, &reference, &failureReason, &failureMessage)
@@ -103,6 +138,7 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 		tx.FeeBps = *feeBps
 	}
 	tx.TenantID = tenantID
+	tx.IdempotencyRecordID = idempotencyRecordID
 	if localAmt != nil {
 		d, _ := decimal.NewFromString(*localAmt)
 		tx.LocalAmount = &d
@@ -115,37 +151,48 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 }
 
 // GetByIdempotencyKey returns the transaction previously created for this
-// org/idempotency-key pair, used by the transfer service to guarantee
-// exactly-once transfer creation for a given key.
+// tenant/mode/idempotency-key tuple.
 func (r *TransactionRepo) GetByIdempotencyKey(ctx context.Context, orgID, idempotencyKey string) (*domain.Transaction, error) {
+	mode := transactionMode(ctx)
+	tx, err := r.getIdempotentTransaction(ctx, "idempotency_key = $1", idempotencyKey, mode, orgID)
+	if tx != nil {
+		tx.IdempotencyKey = idempotencyKey
+	}
+	return tx, err
+}
+
+// GetByIdempotencyRecordID returns the transaction linked to the exact
+// idempotency generation. This is the recovery fence used after a process dies
+// after inserting a transfer but before completing the idempotency record.
+func (r *TransactionRepo) GetByIdempotencyRecordID(ctx context.Context, recordID string) (*domain.Transaction, error) {
+	return r.getIdempotentTransaction(ctx, "idempotency_record_id = $1", recordID, transactionMode(ctx), tenant.IDFromContext(ctx))
+}
+
+func (r *TransactionRepo) getIdempotentTransaction(ctx context.Context, predicate, value string, mode domain.Mode, orgID string) (*domain.Transaction, error) {
 	tx := &domain.Transaction{}
 	var amount, fee string
 	var feeBps *int
-	var tenantID *string
-	var batchID *string
+	var tenantID, batchID, recordID *string
 	var reference string
-	var failureReason, failureMessage string
-
 	query := `SELECT id, COALESCE(tx_hash,''), type, status,
 		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
-		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
-		        COALESCE(requeue_count, 0), reconciled_at, batch_id, COALESCE(reference,''), COALESCE(failure_reason,''), COALESCE(failure_message,'')
-		 FROM transactions WHERE idempotency_key = $1`
-	args := []interface{}{idempotencyKey}
+		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, mode, created_at,
+		        COALESCE(requeue_count, 0), reconciled_at, batch_id, COALESCE(reference,''),
+		        idempotency_record_id
+		 FROM transactions WHERE ` + predicate + ` AND mode = $2`
+	args := []interface{}{value, mode}
 	if orgID != "" {
-		query += ` AND tenant_id = $2`
+		query += ` AND tenant_id = $3`
 		args = append(args, orgID)
 	}
-
-	err := r.db.QueryRow(ctx, query, args...).Scan(&tx.ID, &tx.TxHash, &tx.Type, &tx.Status,
-		&tx.FromWallet, &tx.ToWallet,
-		&tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.CreatedAt,
-		&tx.RequeueCount, &tx.ReconciledAt, &batchID, &reference, &failureReason, &failureMessage)
+	err := r.readDB().QueryRow(ctx, query, args...).Scan(&tx.ID, &tx.TxHash, &tx.Type, &tx.Status,
+		&tx.FromWallet, &tx.ToWallet, &tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.Mode,
+		&tx.CreatedAt, &tx.RequeueCount, &tx.ReconciledAt, &batchID, &reference, &recordID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrTransactionNotFound
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrTransactionNotFound
-		}
-		return nil, fmt.Errorf("get transaction by idempotency key: %w", err)
+		return nil, fmt.Errorf("get transaction by idempotency reference: %w", err)
 	}
 	tx.Amount, _ = decimal.NewFromString(amount)
 	tx.Fee, _ = decimal.NewFromString(fee)
@@ -215,11 +262,11 @@ func (r *TransactionRepo) UpdateStatus(ctx context.Context, id string, status do
 	tID := tenant.IDFromContext(ctx)
 	query := `UPDATE transactions
 		 SET status = $2, tx_hash = COALESCE(NULLIF($3, ''), tx_hash)
-		 WHERE id = $1
+		 WHERE id = $1 AND mode = $4
 		   AND status != 'confirmed'`
-	args := []interface{}{id, status, txHash}
+	args := []interface{}{id, status, txHash, transactionMode(ctx)}
 	if tID != "" {
-		query += ` AND tenant_id = $4`
+		query += ` AND tenant_id = $5`
 		args = append(args, tID)
 	}
 
@@ -235,19 +282,19 @@ func (r *TransactionRepo) ListByWallet(ctx context.Context, walletID string, lim
 
 	query := `SELECT id, COALESCE(tx_hash,''), type, status,
 		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
-		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
+		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, mode, created_at,
 		        COALESCE(requeue_count, 0), reconciled_at,
 		        fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount,
 		        batch_id, COALESCE(reference,''), COALESCE(failure_reason,''), COALESCE(failure_message,'')
 		 FROM transactions
-		 WHERE (from_wallet = $1 OR to_wallet = $1)`
-	args := []interface{}{walletID}
+		 WHERE (from_wallet = $1 OR to_wallet = $1) AND mode = $2`
+	args := []interface{}{walletID, transactionMode(ctx)}
 
 	if tID != "" {
-		query += ` AND tenant_id = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4`
+		query += ` AND tenant_id = $3 ORDER BY created_at DESC LIMIT $4 OFFSET $5`
 		args = append(args, tID, limit, offset)
 	} else {
-		query += ` ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+		query += ` ORDER BY created_at DESC LIMIT $3 OFFSET $4`
 		args = append(args, limit, offset)
 	}
 
@@ -270,14 +317,14 @@ func (r *TransactionRepo) ListByBatch(ctx context.Context, batchID string) ([]*d
 
 	query := `SELECT id, COALESCE(tx_hash,''), type, status,
 		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
-		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, created_at,
+		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, mode, created_at,
 		        COALESCE(requeue_count, 0), reconciled_at,
 		        fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount,
 		        batch_id, COALESCE(reference,''), COALESCE(failure_reason,''), COALESCE(failure_message,'')
 		 FROM transactions WHERE batch_id = $1`
 	args := []interface{}{batchID}
 	if tID != "" {
-		query += ` AND tenant_id = $2`
+		query += ` AND tenant_id = $3`
 		args = append(args, tID)
 	}
 	query += ` ORDER BY created_at ASC`
@@ -302,12 +349,12 @@ func scanTransactions(rows pgx.Rows) ([]*domain.Transaction, error) {
 		var amount, fee string
 		var localAmt *string
 		var feeBps *int
-		var tenantID, batchID *string
+		var tenantID, batchID, idempotencyRecordID *string
 		var reference string
 		var failureReason, failureMessage string
 		if err := rows.Scan(&tx.ID, &tx.TxHash, &tx.Type, &tx.Status,
 			&tx.FromWallet, &tx.ToWallet,
-			&tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.CreatedAt,
+			&tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.Mode, &tx.CreatedAt,
 			&tx.RequeueCount, &tx.ReconciledAt,
 			&tx.FiatRail, &tx.FiatProviderRef, &tx.FiatStatus, &tx.LocalCurrency, &localAmt,
 			&batchID, &reference, &failureReason, &failureMessage); err != nil {
@@ -319,6 +366,7 @@ func scanTransactions(rows pgx.Rows) ([]*domain.Transaction, error) {
 			tx.FeeBps = *feeBps
 		}
 		tx.TenantID = tenantID
+		tx.IdempotencyRecordID = idempotencyRecordID
 		if localAmt != nil {
 			d, _ := decimal.NewFromString(*localAmt)
 			tx.LocalAmount = &d
@@ -584,23 +632,26 @@ func (r *TransactionRepo) GetPendingStuckCount(ctx context.Context, olderThan ti
 // UpsertByTxHash inserts a transaction only if no row with the same tx_hash exists.
 // Returns nil (no-op) when a duplicate is detected, making it safe for concurrent callers.
 func (r *TransactionRepo) UpsertByTxHash(ctx context.Context, tx *domain.Transaction) error {
+	if tx.Mode == "" {
+		tx.Mode = transactionMode(ctx)
+	}
 	tID := tenant.IDFromContext(ctx)
 	if tID != "" {
 		tx.TenantID = &tID
 	}
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, created_at, requeue_count, reconciled_at, fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount, batch_id, reference, idempotency_key)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-		 ON CONFLICT (tx_hash) DO NOTHING`,
+		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, mode, created_at, requeue_count, reconciled_at, fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount, batch_id, reference, idempotency_key, idempotency_record_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+		 ON CONFLICT (mode, tx_hash) WHERE tx_hash IS NOT NULL DO NOTHING`,
 		tx.ID, nullableString(tx.TxHash), tx.Type, tx.Status,
 		nullableString(tx.FromWallet), nullableString(tx.ToWallet),
 		tx.Asset, tx.Amount.String(), tx.Fee.String(), nullableFeeBps(tx.FeeBps),
-		nullableUUID(tx.TenantID), tx.CreatedAt,
+		nullableUUID(tx.TenantID), tx.Mode, tx.CreatedAt,
 		tx.RequeueCount, nullableTime(tx.ReconciledAt),
 		nullableStringPtr(tx.FiatRail), nullableStringPtr(tx.FiatProviderRef),
 		nullableStringPtr(tx.FiatStatus), nullableStringPtr(tx.LocalCurrency),
 		nullableDecimalPtr(tx.LocalAmount),
-		nullableUUID(tx.BatchID), nullableString(tx.Reference), nullableString(tx.IdempotencyKey),
+		nullableUUID(tx.BatchID), nullableString(tx.Reference), nullableString(tx.IdempotencyKey), nullableUUID(tx.IdempotencyRecordID),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert transaction by tx_hash: %w", err)
@@ -720,8 +771,8 @@ func (r *TransactionRepo) CountMonthlyTransfersByTenant(ctx context.Context, ten
 
 	var count int
 	err := r.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM transactions WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3`,
-		tenantID, startDate, endDate,
+		`SELECT COUNT(*) FROM transactions WHERE tenant_id = $1 AND mode = $2 AND created_at >= $3 AND created_at < $4`,
+		tenantID, transactionMode(ctx), startDate, endDate,
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count monthly transfers: %w", err)
@@ -755,8 +806,8 @@ func (r *TransactionRepo) CreateWithMonthlyLimit(ctx context.Context, tx *domain
 
 	var count int
 	err = dbTx.QueryRow(ctx,
-		`SELECT COUNT(*) FROM transactions WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3`,
-		tenantID, startDate, endDate,
+		`SELECT COUNT(*) FROM transactions WHERE tenant_id = $1 AND mode = $2 AND created_at >= $3 AND created_at < $4`,
+		tenantID, transactionMode(ctx), startDate, endDate,
 	).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("count monthly transfers: %w", err)
@@ -767,17 +818,17 @@ func (r *TransactionRepo) CreateWithMonthlyLimit(ctx context.Context, tx *domain
 	}
 
 	_, err = dbTx.Exec(ctx,
-		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, created_at, requeue_count, reconciled_at, batch_id, reference, idempotency_key)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, mode, created_at, requeue_count, reconciled_at, batch_id, reference, idempotency_key, idempotency_record_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
 		tx.ID, nullableString(tx.TxHash), tx.Type, tx.Status,
 		nullableString(tx.FromWallet), nullableString(tx.ToWallet),
 		tx.Asset, tx.Amount.String(), tx.Fee.String(), nullableFeeBps(tx.FeeBps),
-		nullableUUID(tx.TenantID), tx.CreatedAt,
+		nullableUUID(tx.TenantID), transactionMode(ctx), tx.CreatedAt,
 		tx.RequeueCount, nullableTime(tx.ReconciledAt),
-		nullableUUID(tx.BatchID), nullableString(tx.Reference), nullableString(tx.IdempotencyKey),
+		nullableUUID(tx.BatchID), nullableString(tx.Reference), nullableString(tx.IdempotencyKey), nullableUUID(tx.IdempotencyRecordID),
 	)
 	if err != nil {
-		return fmt.Errorf("insert transaction: %w", err)
+		return fmt.Errorf("insert transaction: %w", mapTransactionInsertError(err))
 	}
 
 	if err := dbTx.Commit(ctx); err != nil {

@@ -27,17 +27,13 @@ func (s *Service) GetStatus(ctx context.Context) (*StatusResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	activeIncidents, err := s.repo.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	operationalStatus := "operational"
 	message := "All systems operational"
-
-	// Check active incidents
-	var activeIncidents []domain.Incident
-	for _, inc := range incidents {
-		if inc.Status != string(domain.StatusResolved) {
-			activeIncidents = append(activeIncidents, inc)
-		}
-	}
 
 	if len(activeIncidents) > 0 {
 		highestSeverity := domain.SeverityMinor
@@ -88,7 +84,7 @@ func (s *Service) CreateIncident(ctx context.Context, req domain.CreateIncidentR
 		Description: req.Description,
 		Severity:    req.Severity,
 		Status:      string(domain.StatusInvestigating),
-		CreatedAt:   time.Now(),
+		CreatedAt:   time.Now().UTC(),
 	}
 	err := s.repo.Create(ctx, inc)
 	return inc, err
@@ -112,7 +108,7 @@ func (s *Service) UpdateIncident(ctx context.Context, id string, req domain.Upda
 	if req.Status != nil {
 		newStatus := *req.Status
 		if newStatus == string(domain.StatusResolved) && inc.Status != string(domain.StatusResolved) {
-			now := time.Now()
+			now := time.Now().UTC()
 			inc.ResolvedAt = &now
 		} else if newStatus != string(domain.StatusResolved) {
 			inc.ResolvedAt = nil

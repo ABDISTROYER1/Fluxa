@@ -170,7 +170,9 @@ func (s *service) Register(ctx context.Context, req RegisterRequest) (*AuthRespo
 		}
 
 		var genErr error
-		raw, prefix, genErr = apikey.Generate()
+		// Onboarding mints a live key. A test key is an explicit, later action
+		// so a new tenant cannot accidentally run in sandbox mode.
+		raw, prefix, genErr = apikey.Generate(domain.ModeLive)
 		if genErr != nil {
 			return fmt.Errorf("generate api key: %w", genErr)
 		}
@@ -180,6 +182,7 @@ func (s *service) Register(ctx context.Context, req RegisterRequest) (*AuthRespo
 			TenantID:  tenantID,
 			KeyHash:   apikey.Hash(raw),
 			Prefix:    prefix,
+			Mode:      domain.ModeLive,
 			Role:      domain.RoleOwner,
 			CreatedAt: now,
 		}

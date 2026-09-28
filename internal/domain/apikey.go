@@ -7,6 +7,7 @@ type APIKey struct {
 	TenantID   string
 	KeyHash    string
 	Prefix     string
+	Mode       Mode
 	Label      *string
 	Role       string
 	LastUsedAt *time.Time

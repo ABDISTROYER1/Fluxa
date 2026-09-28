@@ -93,7 +93,7 @@ func main() {
 	repoDB := postgres.NewReplicaAwareDB(db, replica)
 
 	walletRepo := postgres.NewWalletRepo(repoDB)
-	txRepo := postgres.NewTransactionRepo(repoDB)
+	txRepo := postgres.NewTransactionRepo(repoDB).WithPrimary(db)
 	feeRepo := postgres.NewFeeRepo(repoDB)
 	webhookRepo := postgres.NewWebhookRepository(repoDB)
 	reconcileRepo := postgres.NewReconcileRepo(repoDB)
@@ -103,17 +103,21 @@ func main() {
 	fiatRepo := postgres.NewFiatRepo(repoDB)
 	idempotencyRepo := postgres.NewIdempotencyRepo(repoDB)
 
-	stellarClient := stellar.NewClient(cfg.StellarHorizonURL, cfg.StellarNetwork, cfg.StellarHorizonTimeout)
-	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarNetwork)
+	stellarClient := stellar.NewClient(cfg.StellarLiveHorizonURL, cfg.StellarLiveNetwork, cfg.StellarHorizonTimeout)
+	testStellarClient := stellar.NewClient(cfg.StellarTestnetHorizonURL, cfg.StellarTestnetNetwork, cfg.StellarHorizonTimeout)
+	clientResolver := stellar.NewModeAwareClients(stellarClient, testStellarClient)
+	signer := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarLiveNetwork)
+	testSigner := stellar.NewEnvSigner(cfg.MasterEncryptionKey, cfg.StellarTestnetNetwork)
+	signerResolver := stellar.NewModeAwareSigners(signer, testSigner)
 
 	feeSvc := fees.NewService(feeRepo)
 	engine := settlement.NewEngine(
 		txRepo, walletRepo, feeSvc, stellarClient, signer,
-		cfg.StellarNetwork, map[string]string{
+		cfg.StellarLiveNetwork, map[string]string{
 			"USDC": cfg.StellarUSDCIssuer,
 			"EURC": cfg.StellarEURCIssuer,
 		}, cfg.PlatformFeeWalletPublicKey,
-	)
+	).WithClientResolver(clientResolver).WithSignerResolver(signerResolver)
 	settlementWorker := settlement.NewWorker(engine)
 
 	idx := indexer.NewWithConfig(walletRepo, txRepo, stellarClient, indexer.Config{
@@ -122,7 +126,7 @@ func main() {
 		StreamMaxBackoff:  parseDuration(cfg.IndexerStreamMaxBackoff, 30*time.Second),
 		SyncPageSize:      cfg.IndexerSyncPageSize,
 	})
-	indexerWorker := indexer.NewWorker(idx, cfg)
+	indexerWorker := indexer.NewWorker(idx, *cfg)
 
 	// StreamAll keeps a live Horizon SSE connection open per wallet so new
 	// payments land in the DB in real time; the @every 30s indexer:sync task

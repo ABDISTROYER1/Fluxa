@@ -1,10 +1,15 @@
 package tenant
 
-import "context"
+import (
+	"context"
+
+	"github.com/fluxa/fluxa/internal/domain"
+)
 
 type contextKey struct{}
 type userIDKey struct{}
 type roleKey struct{}
+type modeKey struct{}
 
 // WithID attaches a tenant ID to the context.
 func WithID(ctx context.Context, tenantID string) context.Context {
@@ -15,6 +20,28 @@ func WithID(ctx context.Context, tenantID string) context.Context {
 func IDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(contextKey{}).(string)
 	return id
+}
+
+// WithMode attaches the authenticated environment mode. Request-path services
+// must fail closed when it is absent; background jobs rehydrate it from the
+// persisted resource before invoking mode-sensitive code.
+func WithMode(ctx context.Context, mode domain.Mode) context.Context {
+	return context.WithValue(ctx, modeKey{}, mode)
+}
+
+// ModeFromContext returns the mode and whether it was present.
+func ModeFromContext(ctx context.Context) (domain.Mode, bool) {
+	mode, ok := ctx.Value(modeKey{}).(domain.Mode)
+	return mode, ok && mode.Valid()
+}
+
+// ModeOrDefault is intended only for legacy background jobs whose persisted
+// rows predate test mode. HTTP request paths must use ModeFromContext.
+func ModeOrDefault(ctx context.Context, fallback domain.Mode) domain.Mode {
+	if mode, ok := ModeFromContext(ctx); ok {
+		return mode
+	}
+	return fallback
 }
 
 // WithUser attaches a user ID and role to context.

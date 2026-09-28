@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -53,6 +54,7 @@ func (h *Handler) Routes() func(r chi.Router) {
 			post = r.With(h.idem).Post
 		}
 		post("/", h.createWallet)
+		r.Get("/", h.listWallets)
 		r.Get("/{id}", h.getWallet)
 		r.Get("/{id}/balances", h.getBalances)
 		post("/{id}/trustlines", h.addTrustline)
@@ -93,6 +95,27 @@ type setTimeLockRequest struct {
 	UntilTimestamp uint64 `json:"untilTimestamp"`
 }
 
+func (h *Handler) listWallets(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if value := r.URL.Query().Get("limit"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+	offset := 0
+	if value := r.URL.Query().Get("offset"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+	wallets, err := h.svc.ListWallets(r.Context(), limit, offset)
+	if err != nil {
+		api.InternalError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, map[string]interface{}{"wallets": wallets})
+}
+
 func (h *Handler) getWallet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	// Use service's repository directly via GetBalances path to avoid exposing secret
@@ -109,6 +132,7 @@ func (h *Handler) getWallet(w http.ResponseWriter, r *http.Request) {
 	api.JSON(w, http.StatusOK, map[string]interface{}{
 		"id":           wallet.ID,
 		"public_key":   wallet.PublicKey,
+		"mode":         wallet.Mode,
 		"custody_type": wallet.CustodyType,
 		"created_at":   wallet.CreatedAt,
 	})
@@ -143,6 +167,7 @@ func (h *Handler) createWallet(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"id":           wallet.ID,
 		"public_key":   wallet.PublicKey,
+		"mode":         wallet.Mode,
 		"custody_type": wallet.CustodyType,
 		"created_at":   wallet.CreatedAt,
 	}

@@ -19,6 +19,10 @@ func NewWalletRepo(db DB) *WalletRepo {
 	return &WalletRepo{db: db}
 }
 
+func walletMode(ctx context.Context) domain.Mode {
+	return tenant.ModeOrDefault(ctx, domain.ModeLive)
+}
+
 // custodyType defaults wallets persisted by older callers to custodial, matching
 // the column default.
 func custodyType(w *domain.Wallet) domain.CustodyType {
@@ -29,14 +33,17 @@ func custodyType(w *domain.Wallet) domain.CustodyType {
 }
 
 func (r *WalletRepo) Create(ctx context.Context, w *domain.Wallet) error {
+	if w.Mode == "" {
+		w.Mode = walletMode(ctx)
+	}
 	tID := tenant.IDFromContext(ctx)
 	if tID != "" {
 		w.TenantID = &tID
 	}
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO wallets (id, public_key, encrypted_secret, tenant_id, sync_cursor, created_at, custody_type, contract_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		w.ID, w.PublicKey, w.EncryptedSecret, nullableUUID(w.TenantID), w.SyncCursor, w.CreatedAt, custodyType(w), w.ContractID,
+		`INSERT INTO wallets (id, public_key, encrypted_secret, tenant_id, mode, sync_cursor, created_at, custody_type, contract_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		w.ID, w.PublicKey, w.EncryptedSecret, nullableUUID(w.TenantID), w.Mode, w.SyncCursor, w.CreatedAt, custodyType(w), w.ContractID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert wallet: %w", err)
@@ -46,20 +53,19 @@ func (r *WalletRepo) Create(ctx context.Context, w *domain.Wallet) error {
 
 func (r *WalletRepo) GetByID(ctx context.Context, id string) (*domain.Wallet, error) {
 	w := &domain.Wallet{}
+	mode := walletMode(ctx)
 	tID := tenant.IDFromContext(ctx)
-
-	query := `SELECT id, public_key, encrypted_secret, tenant_id, created_at, sync_cursor, custody_type, contract_id FROM wallets WHERE id = $1`
-	args := []interface{}{id}
+	query := `SELECT id, public_key, encrypted_secret, tenant_id, mode, created_at, sync_cursor, custody_type, contract_id FROM wallets WHERE id = $1 AND mode = $2`
+	args := []interface{}{id, mode}
 	if tID != "" {
-		query += ` AND tenant_id = $2`
+		query += ` AND tenant_id = $3`
 		args = append(args, tID)
 	}
-
-	err := r.db.QueryRow(ctx, query, args...).Scan(&w.ID, &w.PublicKey, &w.EncryptedSecret, &w.TenantID, &w.CreatedAt, &w.SyncCursor, &w.CustodyType, &w.ContractID)
+	err := r.db.QueryRow(ctx, query, args...).Scan(&w.ID, &w.PublicKey, &w.EncryptedSecret, &w.TenantID, &w.Mode, &w.CreatedAt, &w.SyncCursor, &w.CustodyType, &w.ContractID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrWalletNotFound
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrWalletNotFound
-		}
 		return nil, fmt.Errorf("get wallet by id: %w", err)
 	}
 	return w, nil
@@ -67,20 +73,19 @@ func (r *WalletRepo) GetByID(ctx context.Context, id string) (*domain.Wallet, er
 
 func (r *WalletRepo) GetByPublicKey(ctx context.Context, pubKey string) (*domain.Wallet, error) {
 	w := &domain.Wallet{}
+	mode := walletMode(ctx)
 	tID := tenant.IDFromContext(ctx)
-
-	query := `SELECT id, public_key, encrypted_secret, tenant_id, created_at, sync_cursor, custody_type, contract_id FROM wallets WHERE public_key = $1`
-	args := []interface{}{pubKey}
+	query := `SELECT id, public_key, encrypted_secret, tenant_id, mode, created_at, sync_cursor, custody_type, contract_id FROM wallets WHERE public_key = $1 AND mode = $2`
+	args := []interface{}{pubKey, mode}
 	if tID != "" {
-		query += ` AND tenant_id = $2`
+		query += ` AND tenant_id = $3`
 		args = append(args, tID)
 	}
-
-	err := r.db.QueryRow(ctx, query, args...).Scan(&w.ID, &w.PublicKey, &w.EncryptedSecret, &w.TenantID, &w.CreatedAt, &w.SyncCursor, &w.CustodyType, &w.ContractID)
+	err := r.db.QueryRow(ctx, query, args...).Scan(&w.ID, &w.PublicKey, &w.EncryptedSecret, &w.TenantID, &w.Mode, &w.CreatedAt, &w.SyncCursor, &w.CustodyType, &w.ContractID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrWalletNotFound
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrWalletNotFound
-		}
 		return nil, fmt.Errorf("get wallet by public key: %w", err)
 	}
 	return w, nil
@@ -88,7 +93,7 @@ func (r *WalletRepo) GetByPublicKey(ctx context.Context, pubKey string) (*domain
 
 func (r *WalletRepo) CountByTenant(ctx context.Context, tenantID string) (int, error) {
 	var count int
-	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM wallets WHERE tenant_id = $1`, tenantID).Scan(&count)
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM wallets WHERE tenant_id = $1 AND mode = $2`, tenantID, walletMode(ctx)).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count wallets by tenant: %w", err)
 	}
@@ -96,37 +101,34 @@ func (r *WalletRepo) CountByTenant(ctx context.Context, tenantID string) (int, e
 }
 
 func (r *WalletRepo) List(ctx context.Context, limit, offset int) ([]*domain.Wallet, error) {
+	mode := walletMode(ctx)
 	tID := tenant.IDFromContext(ctx)
-
-	query := `SELECT id, public_key, encrypted_secret, tenant_id, created_at, sync_cursor, custody_type, contract_id FROM wallets`
-	args := []interface{}{}
+	query := `SELECT id, public_key, encrypted_secret, tenant_id, mode, created_at, sync_cursor, custody_type, contract_id FROM wallets WHERE mode = $1`
+	args := []interface{}{mode}
 	if tID != "" {
-		query += ` WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`
-		args = []interface{}{tID, limit, offset}
+		query += ` AND tenant_id = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4`
+		args = append(args, tID, limit, offset)
 	} else {
-		query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
-		args = []interface{}{limit, offset}
+		query += ` ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+		args = append(args, limit, offset)
 	}
-
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list wallets: %w", err)
 	}
 	defer rows.Close()
 
-	var wallets []*domain.Wallet
+	wallets := make([]*domain.Wallet, 0)
 	for rows.Next() {
 		w := &domain.Wallet{}
-		if err := rows.Scan(&w.ID, &w.PublicKey, &w.EncryptedSecret, &w.TenantID, &w.CreatedAt, &w.SyncCursor, &w.CustodyType, &w.ContractID); err != nil {
-			return nil, err
+		if err := rows.Scan(&w.ID, &w.PublicKey, &w.EncryptedSecret, &w.TenantID, &w.Mode, &w.CreatedAt, &w.SyncCursor, &w.CustodyType, &w.ContractID); err != nil {
+			return nil, fmt.Errorf("scan wallet: %w", err)
 		}
 		wallets = append(wallets, w)
 	}
 	return wallets, rows.Err()
 }
 
-// UpsertBalance persists the current on-chain balance for a wallet/asset pair,
-// overwriting any previously stored value.
 func (r *WalletRepo) UpsertBalance(ctx context.Context, walletID, assetCode, issuer string, balance decimal.Decimal) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO balances (wallet_id, asset_code, issuer, balance, updated_at)
@@ -141,21 +143,15 @@ func (r *WalletRepo) UpsertBalance(ctx context.Context, walletID, assetCode, iss
 	return nil
 }
 
-// GetBalances returns all persisted balances for a wallet from DB cache.
 func (r *WalletRepo) GetBalances(ctx context.Context, walletID string) ([]domain.BalanceRecord, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT wallet_id, asset_code, issuer, balance, updated_at
-		 FROM balances
-		 WHERE wallet_id = $1
-		 ORDER BY asset_code ASC`,
-		walletID,
-	)
+		 FROM balances WHERE wallet_id = $1 ORDER BY asset_code ASC`, walletID)
 	if err != nil {
 		return nil, fmt.Errorf("get balances: %w", err)
 	}
 	defer rows.Close()
-
-	var records []domain.BalanceRecord
+	records := make([]domain.BalanceRecord, 0)
 	for rows.Next() {
 		var rec domain.BalanceRecord
 		var bal decimal.Decimal
@@ -168,12 +164,8 @@ func (r *WalletRepo) GetBalances(ctx context.Context, walletID string) ([]domain
 	return records, rows.Err()
 }
 
-// UpdateSyncCursor advances the Horizon paging token used to resume incremental sync.
 func (r *WalletRepo) UpdateSyncCursor(ctx context.Context, walletID, cursor string) error {
-	_, err := r.db.Exec(ctx,
-		`UPDATE wallets SET sync_cursor = $2 WHERE id = $1`,
-		walletID, cursor,
-	)
+	_, err := r.db.Exec(ctx, `UPDATE wallets SET sync_cursor = $2 WHERE id = $1 AND mode = $3`, walletID, cursor, walletMode(ctx))
 	if err != nil {
 		return fmt.Errorf("update sync cursor: %w", err)
 	}
