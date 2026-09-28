@@ -18,7 +18,7 @@ export interface FluxaClientConfig {
 
 const DEFAULT_BASE_URL = 'https://api.fluxa.io';
 const DEFAULT_TIMEOUT = 30_000;
-const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_MAX_RETRIES = 0;
 const DEFAULT_RETRY_DELAY = 500;
 
 export class FluxaClient {
@@ -41,9 +41,9 @@ export class FluxaClient {
     const httpConfig: HttpClientConfig = {
       baseUrl: config.baseUrl ?? DEFAULT_BASE_URL,
       apiKey: config.apiKey,
-      timeout: config.timeout ?? DEFAULT_TIMEOUT,
-      maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
-      retryDelay: config.retryDelay ?? DEFAULT_RETRY_DELAY,
+      timeout: config.timeout && config.timeout > 0 ? config.timeout : DEFAULT_TIMEOUT,
+      maxRetries: Math.max(0, config.maxRetries ?? DEFAULT_MAX_RETRIES),
+      retryDelay: Math.max(0, config.retryDelay ?? DEFAULT_RETRY_DELAY),
     };
 
     this.http = new HttpClient(httpConfig);

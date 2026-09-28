@@ -17,6 +17,19 @@ export interface GetBalancesResponse {
   balances: Balance[];
 }
 
+export interface CreateTrustlineRequest {
+  asset_code: string;
+  asset_issuer: string;
+  limit?: string;
+}
+
+export interface TrustlineResponse {
+  wallet_id: string;
+  asset_code: string;
+  asset_issuer: string;
+  status: string;
+}
+
 // ── Transaction / Transfer ──────────────────────────────────────────────────
 
 export type TransactionStatus =

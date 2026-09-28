@@ -1,0 +1,107 @@
+{
+  "cases": [
+    {
+      "name": "wallet_creation_gets_default_key",
+      "method": "POST",
+      "path": "/wallets",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "retry_after": "0",
+      "key_mode": "generated",
+      "expected_requests": 2
+    },
+    {
+      "name": "financial_mutation_auto_key_and_retry_after",
+      "method": "POST",
+      "path": "/transfers",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "retry_after": "0",
+      "key_mode": "generated",
+      "expected_requests": 2
+    },
+    {
+      "name": "batch_transfer_gets_default_key",
+      "method": "POST",
+      "path": "/transfers/batch",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "key_mode": "generated",
+      "expected_requests": 2
+    },
+    {
+      "name": "fx_conversion_gets_default_key",
+      "method": "POST",
+      "path": "/fx/convert",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "key_mode": "generated",
+      "expected_requests": 2
+    },
+    {
+      "name": "trustline_creation_gets_default_key",
+      "method": "POST",
+      "path": "/wallets/wallet-1/trustlines",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "key_mode": "generated",
+      "expected_requests": 2
+    },
+    {
+      "name": "fiat_withdrawal_gets_default_key",
+      "method": "POST",
+      "path": "/wallets/wallet-1/withdraw/fiat",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "key_mode": "generated",
+      "expected_requests": 2
+    },
+    {
+      "name": "schedule_creation_gets_default_key",
+      "method": "POST",
+      "path": "/schedules",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "key_mode": "generated",
+      "expected_requests": 2
+    },
+    {
+      "name": "caller_key_is_reused_for_retry",
+      "method": "POST",
+      "path": "/transfers",
+      "idempotency_key": "caller-stable-key",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "key_mode": "caller",
+      "expected_requests": 2
+    },
+    {
+      "name": "get_retries_when_enabled",
+      "method": "GET",
+      "path": "/wallets/wallet-1/balances",
+      "max_retries": 1,
+      "statuses": [503, 200],
+      "key_mode": "none",
+      "expected_requests": 2
+    },
+    {
+      "name": "unkeyed_key_creation_is_not_retried",
+      "method": "POST",
+      "path": "/keys",
+      "max_retries": 2,
+      "statuses": [503, 200],
+      "key_mode": "none",
+      "expected_requests": 1,
+      "expected_error": true
+    },
+    {
+      "name": "retries_are_disabled_by_default",
+      "method": "GET",
+      "path": "/wallets/wallet-1/balances",
+      "statuses": [503, 200],
+      "key_mode": "none",
+      "expected_requests": 1,
+      "expected_error": true
+    }
+  ]
+}
