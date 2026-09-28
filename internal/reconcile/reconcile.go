@@ -18,7 +18,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
-	horizonclient "github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/protocols/horizon/operations"
 )
@@ -318,8 +317,7 @@ func (s *Service) checkPendingTransaction(ctx context.Context, tx *domain.Transa
 
 	horizonTx, fetchErr := stellar.TransactionDetailWithContext(ctx, s.stellar, tx.TxHash)
 	if fetchErr != nil {
-		hErr, ok := fetchErr.(*horizonclient.Error)
-		if ok && hErr.Problem.Status == 404 {
+		if stellar.IsNotFound(fetchErr) {
 			// Hash exists in DB but Horizon doesn't know about it.
 			if time.Since(tx.CreatedAt) > stuckThreshold {
 				log.Warn().Str("tx_id", tx.ID).Str("tx_hash", tx.TxHash).
@@ -459,8 +457,7 @@ func (s *Service) checkTransaction(ctx context.Context, tx *domain.Transaction) 
 
 	horizonTx, err := stellar.TransactionDetailWithContext(ctx, s.stellar, hash)
 	if err != nil {
-		hErr, ok := err.(*horizonclient.Error)
-		if ok && hErr.Problem.Status == 404 {
+		if stellar.IsNotFound(err) {
 			log.Error().Str("tx_id", tx.ID).Str("tx_hash", hash).Msg("reconcile: confirmed tx not found on horizon")
 			if repoErr := s.repo.UpdateReconciliationStatus(ctx, tx.ID, domain.StatusReconciliationFailed); repoErr != nil {
 				return fmt.Errorf("update status to reconciliation_failed: %w", repoErr)
@@ -817,8 +814,7 @@ func (s *Service) RunBalanceReconciliation(ctx context.Context) error {
 func (s *Service) checkWalletBalance(ctx context.Context, w *domain.Wallet) error {
 	acct, err := stellar.LoadAccountWithContext(ctx, s.stellar, w.PublicKey)
 	if err != nil {
-		hErr, ok := err.(*horizonclient.Error)
-		if ok && hErr.Problem.Status == 404 {
+		if stellar.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("load Horizon account %s: %w", w.PublicKey, err)

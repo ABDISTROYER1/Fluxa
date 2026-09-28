@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/fees"
 	"github.com/shopspring/decimal"
+	horizonclient "github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/keypair"
 	stellarnetwork "github.com/stellar/go/network"
 	"github.com/stellar/go/protocols/horizon"
@@ -478,7 +480,7 @@ func TestSubmitTransfer_AmbiguousOutcome_NeverMarkedFailed(t *testing.T) {
 	walletRepo := &fakeWalletRepo{wallets: map[string]*domain.Wallet{src.ID: src, dst.ID: dst}}
 	stl := &fakeStellarClient{
 		submitFunc: func(_ *txnbuild.Transaction) (horizon.Transaction, error) {
-			return horizon.Transaction{}, errors.New("request timeout")
+			return horizon.Transaction{}, context.DeadlineExceeded
 		},
 		// Horizon doesn't know about the hash yet — genuinely inconclusive.
 		txDetailFunc: func(_ string) (horizon.Transaction, error) {
@@ -510,7 +512,7 @@ func TestSubmitTransfer_AmbiguousOutcome_ResolvedConfirmedByHashLookup(t *testin
 	stl := &fakeStellarClient{
 		submitFunc: func(_ *txnbuild.Transaction) (horizon.Transaction, error) {
 			// The client never saw a response, but it actually landed.
-			return horizon.Transaction{}, errors.New("request timeout")
+			return horizon.Transaction{}, context.DeadlineExceeded
 		},
 		txDetailFunc: func(hash string) (horizon.Transaction, error) {
 			return horizon.Transaction{Hash: hash, Successful: true}, nil
@@ -533,7 +535,7 @@ func TestSubmitTransfer_AmbiguousOutcome_ResolvedFailedByHashLookup(t *testing.T
 	walletRepo := &fakeWalletRepo{wallets: map[string]*domain.Wallet{src.ID: src, dst.ID: dst}}
 	stl := &fakeStellarClient{
 		submitFunc: func(_ *txnbuild.Transaction) (horizon.Transaction, error) {
-			return horizon.Transaction{}, errors.New("request timeout")
+			return horizon.Transaction{}, context.DeadlineExceeded
 		},
 		txDetailFunc: func(hash string) (horizon.Transaction, error) {
 			return horizon.Transaction{Hash: hash, Successful: false}, nil
@@ -571,7 +573,7 @@ func TestSubmitTransfer_RetryReusesSameEnvelope(t *testing.T) {
 			mu.Unlock()
 			attempt++
 			if attempt < 3 {
-				return horizon.Transaction{}, errors.New("503 service unavailable")
+				return horizon.Transaction{}, &horizonclient.Error{Response: &http.Response{StatusCode: http.StatusServiceUnavailable}}
 			}
 			return horizon.Transaction{Hash: hash, Successful: true}, nil
 		},

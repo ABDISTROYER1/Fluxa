@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
-	horizonclient "github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/protocols/horizon/operations"
 )
@@ -105,7 +103,7 @@ func (idx *Indexer) SyncAll(ctx context.Context) error {
 func (idx *Indexer) SyncWallet(ctx context.Context, w *domain.Wallet) error {
 	acct, err := stellar.LoadAccountWithContext(ctx, idx.stellar, w.PublicKey)
 	if err != nil {
-		if isNotFound(err) {
+		if stellar.IsNotFound(err) {
 			return nil // account not yet funded — nothing to sync
 		}
 		return fmt.Errorf("load account %s: %w", w.PublicKey, err)
@@ -269,11 +267,8 @@ func (idx *Indexer) processPayment(ctx context.Context, w *domain.Wallet, op ope
 	hash := op.GetTransactionHash()
 
 	var reference string
-	horizonTx, txErr := stellar.TransactionDetailWithContext(ctx, idx.stellar, hash)
-	if txErr == nil {
-		if horizonTx.MemoType == "text" {
-			reference = horizonTx.Memo
-		} else if horizonTx.MemoType == "hash" {
+	if horizonTx := op.GetBase().Transaction; horizonTx != nil {
+		if horizonTx.MemoType == "text" || horizonTx.MemoType == "hash" {
 			reference = horizonTx.Memo
 		}
 	}
@@ -333,12 +328,4 @@ func newInboundTransaction(walletID, publicKey, txHash, asset, amount string, te
 		TenantID:  tenantID,
 		CreatedAt: time.Now().UTC(),
 	}, nil
-}
-
-func isNotFound(err error) bool {
-	var hErr *horizonclient.Error
-	if errors.As(err, &hErr) && hErr.Response != nil && hErr.Response.StatusCode == 404 {
-		return true
-	}
-	return false
 }

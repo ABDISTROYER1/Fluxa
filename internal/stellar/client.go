@@ -100,6 +100,7 @@ func (c *horizonClient) Payments(accountID, cursor string, limit uint) ([]operat
 		Cursor:     cursor,
 		Limit:      limit,
 		Order:      horizonclient.OrderAsc,
+		Join:       "transactions",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("payments for account %s: %w", accountID, err)
@@ -115,6 +116,7 @@ func (c *horizonClient) StreamPayments(ctx context.Context, accountID, cursor st
 	err := c.inner.StreamPayments(streamCtx, horizonclient.OperationRequest{
 		ForAccount: accountID,
 		Cursor:     cursor,
+		Join:       "transactions",
 	}, func(op operations.Operation) {
 		if handlerErr != nil {
 			return

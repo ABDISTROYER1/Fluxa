@@ -137,9 +137,10 @@ func (f *fakeTransferRepo) UpsertByTxHash(_ context.Context, tx *domain.Transact
 }
 
 type fakeStellarClient struct {
-	loadAccount    func(accountID string) (horizon.Account, error)
-	payments       func(accountID, cursor string, limit uint) ([]operations.Operation, error)
-	streamPayments func(ctx context.Context, accountID, cursor string, handler func(operations.Operation) error) error
+	loadAccount            func(accountID string) (horizon.Account, error)
+	payments               func(accountID, cursor string, limit uint) ([]operations.Operation, error)
+	streamPayments         func(ctx context.Context, accountID, cursor string, handler func(operations.Operation) error) error
+	transactionDetailCalls int
 }
 
 func (f *fakeStellarClient) LoadAccount(accountID string) (horizon.Account, error) {
@@ -158,6 +159,7 @@ func (f *fakeStellarClient) FindPathsStrict(sourceAccount, destAccount, destAsse
 }
 
 func (f *fakeStellarClient) TransactionDetail(hash string) (horizon.Transaction, error) {
+	f.transactionDetailCalls++
 	return horizon.Transaction{}, nil
 }
 
@@ -192,6 +194,7 @@ func incomingPaymentOp(id, pagingToken, txHash, to, amount string) operations.Pa
 			Type:                  "payment",
 			TransactionHash:       txHash,
 			TransactionSuccessful: true,
+			Transaction:           &horizon.Transaction{MemoType: "text", Memo: "invoice-123"},
 		},
 		Asset:  base.Asset{Type: "native"},
 		From:   "GSOURCEACCOUNT",
@@ -241,6 +244,12 @@ func TestSyncWallet_PersistsBalancesAndRecordsIncomingPayment(t *testing.T) {
 	tx := txRepo.created[0]
 	if tx.ToWallet != w.ID || tx.TxHash != "hash-1" || tx.Asset != "XLM" || !tx.Amount.Equal(decimal.NewFromFloat(42.5)) {
 		t.Fatalf("unexpected transaction: %+v", tx)
+	}
+	if tx.Reference != "invoice-123" {
+		t.Fatalf("reference = %q, want %q", tx.Reference, "invoice-123")
+	}
+	if stellarClient.transactionDetailCalls != 0 {
+		t.Fatalf("transaction detail calls = %d, want 0", stellarClient.transactionDetailCalls)
 	}
 }
 
