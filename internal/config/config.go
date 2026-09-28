@@ -95,6 +95,12 @@ type Config struct {
 	IndexerStreamMinBackoff  string
 	IndexerStreamMaxBackoff  string
 	IndexerSyncPageSize      int
+
+	// Auth rate limiting configuration for /v1/auth/register, /v1/auth/login, /v1/org/invites/accept
+	AuthRateLimitIPRPS        float64
+	AuthRateLimitIPBurst      int
+	AuthRateLimitAccountRPS   float64
+	AuthRateLimitAccountBurst int
 }
 
 // defaultCORSOrigins is the development-friendly default. Serving it outside
@@ -119,6 +125,30 @@ var wellKnownTestnetAddresses = map[string]struct{}{
 	"GC2BKLYOOYPDEFJKLKY6FNNRQMGFLVHJKQRGNSSRRGSMPGF32LHCQVGF": {},
 	// Stellar testnet root account public key from the developer docs.
 	"GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H": {},
+}
+
+// wellKnownJWTSecrets are public or trivially guessable strings that have
+// appeared in documentation, README examples, or this repository's own source
+// history. Any of these must never be used as a signing key in any
+// environment.
+var wellKnownJWTSecrets = map[string]struct{}{
+	// Was the hardcoded viper default in this repo (removed in this commit).
+	"fluxa-default-jwt-secret-key-change-in-production": {},
+	// Common tutorial / StackOverflow examples.
+	"secret":                    {},
+	"your-256-bit-secret":       {},
+	"your-secret-key":           {},
+	"changeme":                  {},
+	"supersecret":               {},
+	"jwt_secret":                {},
+	"mysecretkey":               {},
+	"my_secret_key":             {},
+	"dev_jwt_secret":            {},
+	"development_jwt_secret":    {},
+	"test_jwt_secret":           {},
+	"jwt-secret":                {},
+	"jwt-secret-key":            {},
+	"keyboard cat":              {},
 }
 
 func validateStellarAddress(name, value string, required bool) error {
@@ -180,7 +210,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Env != "development" && c.CORSAllowedOriginsConfiguredExplicitly == false && containsLocalhostWildcard(c.CORSAllowedOrigins) {
+	if !c.CORSAllowedOriginsConfiguredExplicitly && c.Env != "development" && containsLocalhostWildcard(c.CORSAllowedOrigins) {
 		fmt.Fprintf(os.Stderr, "WARNING: CORS_ALLOWED_ORIGINS is still the development default (localhost:*); set it explicitly for the %q environment\n", c.Env)
 	}
 
@@ -189,7 +219,9 @@ func (c *Config) Validate() error {
 
 func containsLocalhostWildcard(origins []string) bool {
 	for _, origin := range origins {
-		if origin == "localhost:*" || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "https://localhost") {
+		if origin == "localhost:*" ||
+			strings.HasPrefix(origin, "http://localhost") ||
+			strings.HasPrefix(origin, "https://localhost") {
 			return true
 		}
 	}
@@ -210,7 +242,7 @@ func Load() (*Config, error) {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("PORT", "3000")
-	viper.SetDefault("CORS_ALLOWED_ORIGINS", "localhost:*")
+	viper.SetDefault("CORS_ALLOWED_ORIGINS", defaultCORSOrigins)
 	viper.SetDefault("ENV", "development")
 	viper.SetDefault("LOG_LEVEL", "info")
 	viper.SetDefault("STELLAR_NETWORK", "testnet")
@@ -228,7 +260,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("OTEL_EXPORTER_ENDPOINT", "http://localhost:4318")
 	viper.SetDefault("OTEL_SERVICE_NAME", "fluxa")
 	viper.SetDefault("FX_SPREAD_BPS", "50")
-	viper.SetDefault("JWT_SECRET", "fluxa-default-jwt-secret-key-change-in-production")
+	// JWT_SECRET has no default — a missing value fails at boot in all environments.
+	// Generate with: openssl rand -hex 32
 	viper.SetDefault("SOROBAN_RPC_URL", "https://soroban-testnet.stellar.org")
 	viper.SetDefault("CONTRACT_WALLET_SPENDING_LIMIT", "1000")
 	viper.SetDefault("CONTRACT_WALLET_WINDOW_SECONDS", "86400")
@@ -248,11 +281,14 @@ func Load() (*Config, error) {
 	viper.SetDefault("TREASURY_RESERVE_CONCURRENCY", "16")
 	viper.SetDefault("WEBHOOK_ALLOW_PRIVATE_NETWORKS", "false")
 	viper.SetDefault("IDEMPOTENCY_TTL_HOURS", "24")
-	viper.SetDefault("CORS_ALLOWED_ORIGINS", "localhost:*")
 	viper.SetDefault("INDEXER_PAYMENTS_PAGE_LIMIT", "50")
 	viper.SetDefault("INDEXER_STREAM_MIN_BACKOFF", "1s")
 	viper.SetDefault("INDEXER_STREAM_MAX_BACKOFF", "30s")
 	viper.SetDefault("INDEXER_SYNC_PAGE_SIZE", "100")
+	viper.SetDefault("AUTH_RATE_LIMIT_IP_RPS", "5")
+	viper.SetDefault("AUTH_RATE_LIMIT_IP_BURST", "10")
+	viper.SetDefault("AUTH_RATE_LIMIT_ACCOUNT_RPS", "1")
+	viper.SetDefault("AUTH_RATE_LIMIT_ACCOUNT_BURST", "5")
 
 	viper.SetConfigFile(".env")
 	viper.SetConfigType("env")
@@ -277,12 +313,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("MASTER_ENCRYPTION_KEY entropy check failed: %w", err)
 	}
 
-	env := viper.GetString("ENV")
+	// JWT_SECRET is required in every environment — no default is provided.
+	// A missing, too-short, or well-known secret fails at boot so that staging,
+	// preview, and developer environments are subject to the same bar as
+	// production.
 	jwtSecret := viper.GetString("JWT_SECRET")
-	if env == "production" {
-		if jwtSecret == "fluxa-default-jwt-secret-key-change-in-production" || len(jwtSecret) < 32 {
-			return nil, fmt.Errorf("a secure, high-entropy JWT_SECRET (min 32 bytes) must be explicitly configured in production")
-		}
+	if jwtSecret == "" {
+		return nil, fmt.Errorf("JWT_SECRET is not set; generate one with: openssl rand -hex 32")
+	}
+	if len(jwtSecret) < 32 {
+		return nil, fmt.Errorf("JWT_SECRET is too short (%d bytes); minimum is 32 bytes", len(jwtSecret))
+	}
+	if _, known := wellKnownJWTSecrets[jwtSecret]; known {
+		return nil, fmt.Errorf("JWT_SECRET is a well-known public string; use a randomly generated secret")
 	}
 
 	ycSandbox, _ := strconv.ParseBool(viper.GetString("YELLOW_CARD_SANDBOX"))
@@ -290,10 +333,24 @@ func Load() (*Config, error) {
 	workerEnabled, _ := strconv.ParseBool(viper.GetString("WORKER_ENABLED"))
 	webhookAllowPrivateNetworks, _ := strconv.ParseBool(viper.GetString("WEBHOOK_ALLOW_PRIVATE_NETWORKS"))
 
-	indexerPaymentsPageLimit := viper.GetInt("INDEXER_PAYMENTS_PAGE_LIMIT")
-	indexerStreamMinBackoff := viper.GetString("INDEXER_STREAM_MIN_BACKOFF")
-	indexerStreamMaxBackoff := viper.GetString("INDEXER_STREAM_MAX_BACKOFF")
-	indexerSyncPageSize := viper.GetInt("INDEXER_SYNC_PAGE_SIZE")
+	env := viper.GetString("ENV")
+
+	authRateLimitIPRPS := viper.GetFloat64("AUTH_RATE_LIMIT_IP_RPS")
+	if authRateLimitIPRPS <= 0 {
+		authRateLimitIPRPS = 5
+	}
+	authRateLimitIPBurst := viper.GetInt("AUTH_RATE_LIMIT_IP_BURST")
+	if authRateLimitIPBurst <= 0 {
+		authRateLimitIPBurst = 10
+	}
+	authRateLimitAccountRPS := viper.GetFloat64("AUTH_RATE_LIMIT_ACCOUNT_RPS")
+	if authRateLimitAccountRPS <= 0 {
+		authRateLimitAccountRPS = 1
+	}
+	authRateLimitAccountBurst := viper.GetInt("AUTH_RATE_LIMIT_ACCOUNT_BURST")
+	if authRateLimitAccountBurst <= 0 {
+		authRateLimitAccountBurst = 5
+	}
 
 	if webhookAllowPrivateNetworks && env != "development" {
 		return nil, fmt.Errorf("WEBHOOK_ALLOW_PRIVATE_NETWORKS can only be enabled in development environment")
@@ -335,7 +392,7 @@ func Load() (*Config, error) {
 		FlutterwaveWebhookHash:          viper.GetString("FLUTTERWAVE_WEBHOOK_HASH"),
 		BalanceDiscrepancyThreshold:     viper.GetString("BALANCE_DISCREPANCY_THRESHOLD"),
 		ReconciliationDriftThresholdUSD: viper.GetString("RECONCILIATION_DRIFT_THRESHOLD_USD"),
-		JWTSecret:                       viper.GetString("JWT_SECRET"),
+		JWTSecret:                       jwtSecret,
 		OTELEnabled:                     viper.GetBool("OTEL_ENABLED"),
 		OTELExporterEndpoint:            viper.GetString("OTEL_EXPORTER_ENDPOINT"),
 		OTELServiceName:                 viper.GetString("OTEL_SERVICE_NAME"),
@@ -358,9 +415,11 @@ func Load() (*Config, error) {
 		ComplianceReloadMinutes:         viper.GetInt("COMPLIANCE_RELOAD_MINUTES"),
 		WorkerEnabled:                   workerEnabled,
 		WebhookAllowPrivateNetworks:     webhookAllowPrivateNetworks,
-
-		ClaimableBalanceSourceWalletID: viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
-
+		IndexerPaymentsPageLimit:        viper.GetInt("INDEXER_PAYMENTS_PAGE_LIMIT"),
+		IndexerStreamMinBackoff:         viper.GetString("INDEXER_STREAM_MIN_BACKOFF"),
+		IndexerStreamMaxBackoff:         viper.GetString("INDEXER_STREAM_MAX_BACKOFF"),
+		IndexerSyncPageSize:             viper.GetInt("INDEXER_SYNC_PAGE_SIZE"),
+		ClaimableBalanceSourceWalletID:  viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
 		IdempotencyTTLHours: func() int {
 			h := viper.GetInt("IDEMPOTENCY_TTL_HOURS")
 			if h < 1 {
@@ -369,6 +428,16 @@ func Load() (*Config, error) {
 			return h
 		}(),
 		CORSAllowedOriginsConfiguredExplicitly: os.Getenv("CORS_ALLOWED_ORIGINS") != "",
+
+		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
+		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
+		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
+		IndexerSyncPageSize:      indexerSyncPageSize,
+
+		AuthRateLimitIPRPS:        authRateLimitIPRPS,
+		AuthRateLimitIPBurst:      authRateLimitIPBurst,
+		AuthRateLimitAccountRPS:   authRateLimitAccountRPS,
+		AuthRateLimitAccountBurst: authRateLimitAccountBurst,
 	}
 
 	cfg.IndexerPaymentsPageLimit = indexerPaymentsPageLimit
@@ -390,7 +459,7 @@ func validateKeyEntropy(key []byte) error {
 		return fmt.Errorf("key is empty")
 	}
 
-	// Check for all zeros
+	// Check for all zeros.
 	allZero := true
 	for _, b := range key {
 		if b != 0 {
@@ -402,7 +471,7 @@ func validateKeyEntropy(key []byte) error {
 		return fmt.Errorf("key cannot be all zeros")
 	}
 
-	// Check for all same byte
+	// Check for all same byte.
 	allSame := true
 	first := key[0]
 	for _, b := range key {
@@ -415,8 +484,8 @@ func validateKeyEntropy(key []byte) error {
 		return fmt.Errorf("key cannot be all identical bytes")
 	}
 
-	// Calculate Shannon entropy (bits per byte)
-	// For a 32-byte key, we expect entropy close to 8 bits/byte
+	// Calculate Shannon entropy (bits per byte).
+	// For a 32-byte key, we expect entropy close to 8 bits/byte.
 	freq := make(map[byte]int)
 	for _, b := range key {
 		freq[b]++
@@ -425,7 +494,7 @@ func validateKeyEntropy(key []byte) error {
 	entropy := 0.0
 	for _, count := range freq {
 		p := float64(count) / float64(len(key))
-		entropy -= p * log2(p)
+		entropy -= p * math.Log2(p)
 	}
 
 	// Shannon entropy over n samples is bounded by log2(n): a 32-byte key can
@@ -442,8 +511,4 @@ func validateKeyEntropy(key []byte) error {
 	}
 
 	return nil
-}
-
-func log2(x float64) float64 {
-	return math.Log2(x)
 }

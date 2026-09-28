@@ -121,7 +121,7 @@ func (m *mockIdemRepo) DeleteExpired(_ context.Context, batchSize int) (int64, e
 }
 
 func newBatchRouter(svc Service, repo idempotency.Repository) http.Handler {
-	h := NewHandler(svc).WithIdempotency(idempotency.Middleware(repo))
+	h := NewHandler(svc).WithIdempotency(idempotency.RequiredMiddleware(repo))
 	r := chi.NewRouter()
 	r.Route("/", h.Routes())
 	return r
@@ -139,38 +139,18 @@ func newBatchRequest(t *testing.T, key string) *http.Request {
 	return req
 }
 
-func TestCreateBatchWithoutIdempotencyKeySucceeds(t *testing.T) {
+func TestCreateBatchWithoutIdempotencyKeyIsRejected(t *testing.T) {
 	svc := &fakeService{}
 	router := newBatchRouter(svc, newMockIdemRepo())
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, newBatchRequest(t, ""))
 
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if svc.hits() != 1 {
-		t.Fatalf("expected CreateBatch to run once, ran %d times", svc.hits())
-	}
-}
-
-func TestCreateBatchWithoutIdempotencyKeyDoesNotDeduplicateAcrossRequests(t *testing.T) {
-	// Two independent submissions with no key are two independent server-
-	// generated keys, so both must reach the service normally rather than
-	// being treated as a retry of each other.
-	svc := &fakeService{}
-	router := newBatchRouter(svc, newMockIdemRepo())
-
-	first := httptest.NewRecorder()
-	router.ServeHTTP(first, newBatchRequest(t, ""))
-	second := httptest.NewRecorder()
-	router.ServeHTTP(second, newBatchRequest(t, ""))
-
-	if svc.hits() != 2 {
-		t.Fatalf("expected CreateBatch to run twice for two keyless requests, ran %d times", svc.hits())
-	}
-	if first.Code != http.StatusAccepted || second.Code != http.StatusAccepted {
-		t.Fatalf("expected both requests to succeed, got %d and %d", first.Code, second.Code)
+	if svc.hits() != 0 {
+		t.Fatalf("expected CreateBatch not to run, ran %d times", svc.hits())
 	}
 }
 

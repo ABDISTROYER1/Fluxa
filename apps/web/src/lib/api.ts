@@ -12,6 +12,8 @@ export interface FeeSchedule {
   max_fee_amount?: string;
   asset: string;
 }
+import type { BatchResponse, BatchTransferRequest } from "./types";
+export type { BatchResponse } from "./types";
 
 export interface Wallet {
   id: string;
@@ -239,6 +241,23 @@ export interface FiatDepositRequest {
   currency: string;
   email: string;
   name: string;
+  currency?: string;
+  batch_id?: string;
+  failure_reason?: string;
+  failure_message?: string;
+}
+
+export interface TransferListParams {
+  before?: string;
+  after?: string;
+  limit?: number;
+  sort?: "created_at" | "amount" | "status";
+  order?: "asc" | "desc";
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  currency?: string;
+  batch_id?: string;
 }
 
 export interface FiatDepositResponse {
@@ -275,7 +294,7 @@ export interface TrustlineResponse {
   tx_hash?: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
 function currentMode(): EnvironmentMode {
   if (typeof window === 'undefined') return 'live';

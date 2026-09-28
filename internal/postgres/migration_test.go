@@ -163,6 +163,7 @@ func TestMigrations(t *testing.T) {
 		domain.BatchStatusPartial,
 		domain.BatchStatusCompleted,
 		domain.BatchStatusFailed,
+		domain.BatchStatusComplianceHold,
 	}
 	for _, bst := range batchStatuses {
 		b := &domain.Batch{

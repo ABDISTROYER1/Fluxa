@@ -140,6 +140,9 @@ func main() {
 	transferIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
 		TTL:                time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 		AllowLeaseRecovery: true,
+	batchIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
+		Required: true,
+		TTL:      time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 	})
 
 	// Live and test environments are separate Horizon clients, signers, and
@@ -346,7 +349,7 @@ func main() {
 	apikeyHandler := apikey.NewHandler(apiKeyRepo)
 	webhookHandler := webhook.NewHandler(webhookSvc)
 	assetRegistry := assets.NewRegistry(cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer)
-	batchHandler := batch.NewHandler(batchSvc).WithIdempotency(idemMW).WithAssetValidator(assetRegistry.IsSupported)
+	batchHandler := batch.NewHandler(batchSvc).WithIdempotency(batchIdemMW).WithAssetValidator(assetRegistry.IsSupported)
 	scheduleHandler := schedule.NewHandler(scheduleSvc)
 	treasuryHandler := treasury.NewHandler(treasurySvc).WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 	statusHandler := status.NewHandler(status.NewService(incidentRepo))
@@ -392,6 +395,12 @@ func main() {
 
 		orgRepo,
 		cfg.CORSAllowedOrigins,
+		server.AuthRateLimitConfig{
+			IPRPS:        cfg.AuthRateLimitIPRPS,
+			IPBurst:      cfg.AuthRateLimitIPBurst,
+			AccountRPS:   cfg.AuthRateLimitAccountRPS,
+			AccountBurst: cfg.AuthRateLimitAccountBurst,
+		},
 	)
 	server.RegisterDocsRoutes(srv.Router())
 

@@ -13,6 +13,19 @@ import (
 	"time"
 )
 
+// dummyHash is a precomputed bcrypt hash used to perform dummy comparisons
+// when a login attempts to authenticate a non-existent account, ensuring
+// response times are indistinguishable and preventing timing-based user enumeration.
+var dummyHash []byte
+
+func init() {
+	var err error
+	dummyHash, err = bcrypt.GenerateFromPassword([]byte("fluxa-timing-dummy-password"), bcrypt.DefaultCost)
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate dummy bcrypt hash: %v", err))
+	}
+}
+
 type RegisterRequest struct {
 	Email       string             `json:"email"`
 	Password    string             `json:"password"`
@@ -39,9 +52,15 @@ type RefreshTokenStore interface {
 	RevokeIfActive(ctx context.Context, token string, expiresAt time.Time) (bool, error)
 }
 
+type UserRepo interface {
+	Create(ctx context.Context, u *domain.User) error
+	GetByEmail(ctx context.Context, email string) (*domain.User, error)
+	GetByID(ctx context.Context, id string) (*domain.User, error)
+}
+
 type service struct {
 	db            postgres.DB
-	userRepo      *postgres.UserRepo
+	userRepo      UserRepo
 	tenantRepo    *postgres.TenantRepo
 	orgRepo       *postgres.OrgRepo
 	apiKeyRepo    *postgres.APIKeyRepo
@@ -52,7 +71,7 @@ type service struct {
 
 func NewService(
 	db postgres.DB,
-	userRepo *postgres.UserRepo,
+	userRepo UserRepo,
 	tenantRepo *postgres.TenantRepo,
 	orgRepo *postgres.OrgRepo,
 	apiKeyRepo *postgres.APIKeyRepo,
@@ -75,6 +94,10 @@ func NewService(
 func (s *service) Register(ctx context.Context, req RegisterRequest) (*AuthResponse, error) {
 	if req.Email == "" || req.Password == "" || req.Name == "" {
 		return nil, errors.New("email, password, and name are required")
+	}
+
+	if err := ValidatePassword(req.Password); err != nil {
+		return nil, err
 	}
 
 	if req.AccountType == "" {
@@ -210,8 +233,12 @@ func (s *service) Login(ctx context.Context, email, password string) (*AuthRespo
 	}
 
 	user, err := s.userRepo.GetByEmail(ctx, email)
-	if err != nil {
-		return nil, domain.ErrInvalidCredentials
+	if err != nil || user == nil {
+		if errors.Is(err, domain.ErrUserNotFound) || (err == nil && user == nil) {
+			_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+			return nil, domain.ErrInvalidCredentials
+		}
+		return nil, fmt.Errorf("lookup user: %w", err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {

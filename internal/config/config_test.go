@@ -168,3 +168,48 @@ func TestValidateStellarAddress(t *testing.T) {
 		t.Fatalf("optional empty value should pass: %v", err)
 	}
 }
+
+func TestLoad_AuthRateLimitDefaultsAndOverrides(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg, err := loadWith(t, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.AuthRateLimitIPRPS != 5 {
+			t.Errorf("AuthRateLimitIPRPS = %v, want 5", cfg.AuthRateLimitIPRPS)
+		}
+		if cfg.AuthRateLimitIPBurst != 10 {
+			t.Errorf("AuthRateLimitIPBurst = %v, want 10", cfg.AuthRateLimitIPBurst)
+		}
+		if cfg.AuthRateLimitAccountRPS != 1 {
+			t.Errorf("AuthRateLimitAccountRPS = %v, want 1", cfg.AuthRateLimitAccountRPS)
+		}
+		if cfg.AuthRateLimitAccountBurst != 5 {
+			t.Errorf("AuthRateLimitAccountBurst = %v, want 5", cfg.AuthRateLimitAccountBurst)
+		}
+	})
+
+	t.Run("overrides", func(t *testing.T) {
+		cfg, err := loadWith(t, map[string]string{
+			"AUTH_RATE_LIMIT_IP_RPS":        "20",
+			"AUTH_RATE_LIMIT_IP_BURST":      "50",
+			"AUTH_RATE_LIMIT_ACCOUNT_RPS":   "5",
+			"AUTH_RATE_LIMIT_ACCOUNT_BURST": "15",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.AuthRateLimitIPRPS != 20 {
+			t.Errorf("AuthRateLimitIPRPS = %v, want 20", cfg.AuthRateLimitIPRPS)
+		}
+		if cfg.AuthRateLimitIPBurst != 50 {
+			t.Errorf("AuthRateLimitIPBurst = %v, want 50", cfg.AuthRateLimitIPBurst)
+		}
+		if cfg.AuthRateLimitAccountRPS != 5 {
+			t.Errorf("AuthRateLimitAccountRPS = %v, want 5", cfg.AuthRateLimitAccountRPS)
+		}
+		if cfg.AuthRateLimitAccountBurst != 15 {
+			t.Errorf("AuthRateLimitAccountBurst = %v, want 15", cfg.AuthRateLimitAccountBurst)
+		}
+	})
+}

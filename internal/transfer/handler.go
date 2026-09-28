@@ -66,6 +66,8 @@ type transferResponse struct {
 	NetAmount  string `json:"net_amount"`
 	FeeBps     int    `json:"fee_bps"`
 	Reference  string `json:"reference,omitempty"`
+	FailureReason  string `json:"failure_reason,omitempty"`
+	FailureMessage string `json:"failure_message,omitempty"`
 	CreatedAt  string `json:"created_at"`
 }
 
@@ -83,7 +85,9 @@ func toTransferResponse(tx *domain.Transaction) transferResponse {
 		FeeAmount:  tx.Fee.StringFixed(7),
 		NetAmount:  tx.NetAmount().StringFixed(7),
 		FeeBps:     tx.FeeBps,
-		Reference:  tx.Reference,
+		Reference:      tx.Reference,
+		FailureReason:  tx.FailureReason,
+		FailureMessage: tx.FailureMessage,
 		CreatedAt:  tx.CreatedAt.Format(time.RFC3339),
 	}
 }
