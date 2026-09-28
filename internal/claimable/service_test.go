@@ -64,7 +64,7 @@ func (m *mockRepo) visible(ctx context.Context, id string) (*domain.ClaimableBal
 	return b, true
 }
 
-func (m *mockRepo) List(ctx context.Context, f claimable.Filter) ([]*domain.ClaimableBalance, error) {
+func (m *mockRepo) List(ctx context.Context, f domain.ClaimableFilter) ([]*domain.ClaimableBalance, error) {
 	var out []*domain.ClaimableBalance
 	for _, id := range m.order {
 		b, ok := m.visible(ctx, id)
@@ -750,7 +750,7 @@ func TestListForwardsFilters(t *testing.T) {
 	f.seed("c-claimed", future(), false, pending)
 	f.repo.balances["c-claimed"].Status = domain.ClaimableBalanceStatusClaimed
 
-	got, err := f.svc.List(ctx, claimable.Filter{Status: domain.ClaimableBalanceStatusPending})
+	got, err := f.svc.List(ctx, domain.ClaimableFilter{Status: domain.ClaimableBalanceStatusPending})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -763,7 +763,7 @@ func TestListForwardsFilters(t *testing.T) {
 		}
 	}
 
-	byClaimant, err := f.svc.List(ctx, claimable.Filter{Claimant: f.claimant.Address()})
+	byClaimant, err := f.svc.List(ctx, domain.ClaimableFilter{Claimant: f.claimant.Address()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -771,7 +771,7 @@ func TestListForwardsFilters(t *testing.T) {
 		t.Errorf("expected all 3 balances for the claimant, got %d", len(byClaimant))
 	}
 
-	limited, err := f.svc.List(ctx, claimable.Filter{Limit: 1})
+	limited, err := f.svc.List(ctx, domain.ClaimableFilter{Limit: 1})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -786,7 +786,7 @@ func TestListDefaultLimit(t *testing.T) {
 		f.seed(fmt.Sprintf("balance-%02d", i), future(), false, domain.Claimant{Account: "GX"})
 	}
 
-	got, err := f.svc.List(context.Background(), claimable.Filter{})
+	got, err := f.svc.List(context.Background(), domain.ClaimableFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

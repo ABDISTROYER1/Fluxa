@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 
-	"github.com/fluxa/fluxa/internal/claimable"
 	"github.com/fluxa/fluxa/internal/domain"
 )
 
@@ -22,7 +21,7 @@ func NewClaimableWalletResolver(repo *WalletRepo) *ClaimableWalletResolver {
 	return &ClaimableWalletResolver{repo: repo}
 }
 
-func (r *ClaimableWalletResolver) GetByID(ctx context.Context, walletID string) (*claimable.SourceWallet, error) {
+func (r *ClaimableWalletResolver) GetByID(ctx context.Context, walletID string) (*domain.SourceWallet, error) {
 	wallet, err := r.repo.GetByID(ctx, walletID)
 	if err != nil {
 		return nil, err
@@ -33,7 +32,7 @@ func (r *ClaimableWalletResolver) GetByID(ctx context.Context, walletID string) 
 	return nil, domain.ErrWalletNotFound
 }
 
-func (r *ClaimableWalletResolver) GetByPublicKey(ctx context.Context, publicKey string) (*claimable.SourceWallet, error) {
+func (r *ClaimableWalletResolver) GetByPublicKey(ctx context.Context, publicKey string) (*domain.SourceWallet, error) {
 	wallet, err := r.repo.GetByPublicKey(ctx, publicKey)
 	if err != nil {
 		return nil, err
@@ -47,11 +46,11 @@ func (r *ClaimableWalletResolver) GetByPublicKey(ctx context.Context, publicKey 
 // toSourceWallet returns nil for a wallet Fluxa cannot sign for. Contract
 // wallets have no custodial secret, so they can neither fund a claimable
 // balance nor claim one on a claimant's behalf.
-func toSourceWallet(wallet *domain.Wallet) *claimable.SourceWallet {
+func toSourceWallet(wallet *domain.Wallet) *domain.SourceWallet {
 	if wallet == nil || wallet.EncryptedSecret == "" {
 		return nil
 	}
-	return &claimable.SourceWallet{
+	return &domain.SourceWallet{
 		ID:              wallet.ID,
 		PublicKey:       wallet.PublicKey,
 		EncryptedSecret: wallet.EncryptedSecret,

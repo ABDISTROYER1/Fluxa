@@ -89,16 +89,25 @@ type service struct {
 	queueClient          *queue.Client
 	maxPerMinute         int
 	maxAttempts          int
-	backoffSchedule      []time.Time
 	allowPrivateNetworks bool
 }
 
-var DefaultBackoffSchedule = []time.Duration{
-	1 * time.Minute,
-	5 * time.Minute,
-	30 * time.Minute,
-	2 * time.Hour,
-	6 * time.Hour,
+func defaultBackoffSchedule() []time.Duration {
+	return []time.Duration{
+		1 * time.Minute,
+		5 * time.Minute,
+		30 * time.Minute,
+		2 * time.Hour,
+		6 * time.Hour,
+	}
+}
+
+func backoffFor(attempt int) time.Duration {
+	schedule := defaultBackoffSchedule()
+	if attempt <= 0 || attempt > len(schedule) {
+		return 1 * time.Minute
+	}
+	return schedule[attempt-1]
 }
 
 func NewService(repo Repository, rdb redis.UniversalClient, queueClient *queue.Client, maxPerMinute int, allowPrivateNetworks bool) Service {
@@ -110,7 +119,7 @@ func NewService(repo Repository, rdb redis.UniversalClient, queueClient *queue.C
 		rdb:                  rdb,
 		queueClient:          queueClient,
 		maxPerMinute:         maxPerMinute,
-		maxAttempts:          len(DefaultBackoffSchedule),
+		maxAttempts:          len(defaultBackoffSchedule()),
 		allowPrivateNetworks: allowPrivateNetworks,
 	}
 	s.client = s.newSafeHTTPClient()
@@ -127,7 +136,7 @@ func NewConfigService(repo Repository, configRepo ConfigRepository, q *queue.Cli
 		configRepo:   configRepo,
 		queueClient:  q,
 		maxPerMinute: 120,
-		maxAttempts:  len(DefaultBackoffSchedule),
+		maxAttempts:  len(defaultBackoffSchedule()),
 	}
 	s.client = s.newSafeHTTPClient()
 	return s
@@ -379,10 +388,7 @@ func (s *service) Deliver(ctx context.Context, deliveryID string) error {
 		// Rate limited: re-queue with backoff
 		deliv.AttemptCount++
 		deliv.UpdatedAt = time.Now().UTC()
-		nextDelay := 1 * time.Minute
-		if deliv.AttemptCount <= len(DefaultBackoffSchedule) {
-			nextDelay = DefaultBackoffSchedule[deliv.AttemptCount-1]
-		}
+		nextDelay := backoffFor(deliv.AttemptCount)
 		nextAttempt := time.Now().UTC().Add(nextDelay)
 		deliv.NextAttemptAt = &nextAttempt
 		deliv.Status = "pending"
@@ -491,10 +497,7 @@ func (s *service) handleDeliveryFailure(ctx context.Context, deliv *domain.Webho
 		return fmt.Errorf("webhook delivery reached max attempts (%d) and was sent to dead letter queue: %s", s.maxAttempts, errMsg)
 	}
 
-	nextDelay := 1 * time.Minute
-	if deliv.AttemptCount <= len(DefaultBackoffSchedule) {
-		nextDelay = DefaultBackoffSchedule[deliv.AttemptCount-1]
-	}
+	nextDelay := backoffFor(deliv.AttemptCount)
 	nextAttempt := time.Now().UTC().Add(nextDelay)
 	deliv.NextAttemptAt = &nextAttempt
 	_ = s.repo.UpdateDelivery(ctx, deliv)

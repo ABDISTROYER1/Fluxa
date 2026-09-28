@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/fluxa/fluxa/internal/domain"
-	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 )
@@ -19,8 +18,8 @@ func NewTreasuryRepo(db DB) *TreasuryRepo {
 	return &TreasuryRepo{db: db}
 }
 
-func (r *TreasuryRepo) GetConfig(ctx context.Context, asset string) (*treasury.Config, error) {
-	cfg := &treasury.Config{}
+func (r *TreasuryRepo) GetConfig(ctx context.Context, asset string) (*domain.TreasuryConfig, error) {
+	cfg := &domain.TreasuryConfig{}
 	var sweepThreshold, minBuffer string
 
 	err := r.db.QueryRow(ctx,
@@ -40,7 +39,7 @@ func (r *TreasuryRepo) GetConfig(ctx context.Context, asset string) (*treasury.C
 	return cfg, nil
 }
 
-func (r *TreasuryRepo) ListConfig(ctx context.Context) ([]*treasury.Config, error) {
+func (r *TreasuryRepo) ListConfig(ctx context.Context) ([]*domain.TreasuryConfig, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT asset, sweep_threshold, min_operating_buffer, cold_storage_address, auto_sweep_enabled, updated_at
 		 FROM treasury_config ORDER BY asset ASC`,
@@ -50,9 +49,9 @@ func (r *TreasuryRepo) ListConfig(ctx context.Context) ([]*treasury.Config, erro
 	}
 	defer rows.Close()
 
-	var configs []*treasury.Config
+	var configs []*domain.TreasuryConfig
 	for rows.Next() {
-		cfg := &treasury.Config{}
+		cfg := &domain.TreasuryConfig{}
 		var sweepThreshold, minBuffer string
 		if err := rows.Scan(&cfg.Asset, &sweepThreshold, &minBuffer, &cfg.ColdStorageAddress, &cfg.AutoSweepEnabled, &cfg.UpdatedAt); err != nil {
 			return nil, err
@@ -64,7 +63,7 @@ func (r *TreasuryRepo) ListConfig(ctx context.Context) ([]*treasury.Config, erro
 	return configs, rows.Err()
 }
 
-func (r *TreasuryRepo) UpdateConfig(ctx context.Context, cfg *treasury.Config) error {
+func (r *TreasuryRepo) UpdateConfig(ctx context.Context, cfg *domain.TreasuryConfig) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO treasury_config (asset, sweep_threshold, min_operating_buffer, cold_storage_address, auto_sweep_enabled, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, NOW())
@@ -103,7 +102,7 @@ func (r *TreasuryRepo) ListWalletPublicKeys(ctx context.Context) ([]string, erro
 	return keys, rows.Err()
 }
 
-func (r *TreasuryRepo) RecordSweep(ctx context.Context, log *treasury.SweepLog) error {
+func (r *TreasuryRepo) RecordSweep(ctx context.Context, log *domain.TreasurySweepLog) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO sweep_log (id, asset, amount, destination, tx_hash, triggered_by, swept_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -115,7 +114,7 @@ func (r *TreasuryRepo) RecordSweep(ctx context.Context, log *treasury.SweepLog) 
 	return nil
 }
 
-func (r *TreasuryRepo) ListSweeps(ctx context.Context, limit, offset int) ([]*treasury.SweepLog, error) {
+func (r *TreasuryRepo) ListSweeps(ctx context.Context, limit, offset int) ([]*domain.TreasurySweepLog, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT id, asset, amount, destination, tx_hash, triggered_by, swept_at
 		 FROM sweep_log ORDER BY swept_at DESC LIMIT $1 OFFSET $2`,
@@ -126,9 +125,9 @@ func (r *TreasuryRepo) ListSweeps(ctx context.Context, limit, offset int) ([]*tr
 	}
 	defer rows.Close()
 
-	var logs []*treasury.SweepLog
+	var logs []*domain.TreasurySweepLog
 	for rows.Next() {
-		entry := &treasury.SweepLog{}
+		entry := &domain.TreasurySweepLog{}
 		var amount string
 		if err := rows.Scan(&entry.ID, &entry.Asset, &amount, &entry.Destination, &entry.TxHash, &entry.TriggeredBy, &entry.SweptAt); err != nil {
 			return nil, err

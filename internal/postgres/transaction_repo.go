@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
-	"github.com/fluxa/fluxa/internal/reconcile"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -48,17 +47,10 @@ func transactionMode(ctx context.Context) domain.Mode {
 	return tenant.ModeOrDefault(ctx, domain.ModeLive)
 }
 
-func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) error {
-	if tx.Mode == "" {
-		tx.Mode = transactionMode(ctx)
-	}
-	tID := tenant.IDFromContext(ctx)
-	if tID != "" {
-		tx.TenantID = &tID
-	}
-	_, err := r.db.Exec(ctx,
-		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, created_at, requeue_count, reconciled_at, fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount, batch_id, reference, idempotency_key, failure_reason, failure_message)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+const txInsertColumns = `id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, mode, created_at, requeue_count, reconciled_at, fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount, batch_id, reference, idempotency_key, failure_reason, failure_message, idempotency_record_id`
+
+func insertTx(ctx context.Context, db DB, tx *domain.Transaction, conflict string) (pgconn.CommandTag, error) {
+	args := []interface{}{
 		tx.ID, nullableString(tx.TxHash), tx.Type, tx.Status,
 		nullableString(tx.FromWallet), nullableString(tx.ToWallet),
 		tx.Asset, tx.Amount.String(), tx.Fee.String(), nullableFeeBps(tx.FeeBps),
@@ -69,7 +61,24 @@ func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) er
 		nullableDecimalPtr(tx.LocalAmount),
 		nullableUUID(tx.BatchID), nullableString(tx.Reference), nullableString(tx.IdempotencyKey),
 		nullableString(tx.FailureReason), nullableString(tx.FailureMessage),
-	)
+		nullableUUID(tx.IdempotencyRecordID),
+	}
+	query := fmt.Sprintf(`INSERT INTO transactions (%s) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`, txInsertColumns)
+	if conflict != "" {
+		query += " " + conflict
+	}
+	return db.Exec(ctx, query, args...)
+}
+
+func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) error {
+	if tx.Mode == "" {
+		tx.Mode = transactionMode(ctx)
+	}
+	tID := tenant.IDFromContext(ctx)
+	if tID != "" {
+		tx.TenantID = &tID
+	}
+	_, err := insertTx(ctx, r.db, tx, "")
 	if err != nil {
 		return fmt.Errorf("insert transaction: %w", mapTransactionInsertError(err))
 	}
@@ -566,7 +575,7 @@ func (r *TransactionRepo) UpdateReconciledAt(ctx context.Context, id string) err
 }
 
 // WriteAuditLog inserts a row into the ledger_audit_log table.
-func (r *TransactionRepo) WriteAuditLog(ctx context.Context, entry *reconcile.AuditLogEntry) error {
+func (r *TransactionRepo) WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO ledger_audit_log (id, tx_id, stellar_hash, checked_at, horizon_status, amount_verified, asset_verified, fee_verified, outcome, details)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -581,7 +590,7 @@ func (r *TransactionRepo) WriteAuditLog(ctx context.Context, entry *reconcile.Au
 }
 
 // GetDailyReconciliationSummary returns counts grouped by day for the last 7 days.
-func (r *TransactionRepo) GetDailyReconciliationSummary(ctx context.Context, days int) ([]reconcile.DailySummaryRow, error) {
+func (r *TransactionRepo) GetDailyReconciliationSummary(ctx context.Context, days int) ([]domain.DailySummaryRow, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT d::date AS date,
 		        COALESCE(SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END), 0) AS ok_count,
@@ -598,9 +607,9 @@ func (r *TransactionRepo) GetDailyReconciliationSummary(ctx context.Context, day
 	}
 	defer rows.Close()
 
-	var summary []reconcile.DailySummaryRow
+	var summary []domain.DailySummaryRow
 	for rows.Next() {
-		var row reconcile.DailySummaryRow
+		var row domain.DailySummaryRow
 		if err := rows.Scan(&row.Date, &row.OKCount, &row.MismatchCount, &row.NotFoundCount); err != nil {
 			return nil, err
 		}
@@ -632,20 +641,7 @@ func (r *TransactionRepo) UpsertByTxHash(ctx context.Context, tx *domain.Transac
 	if tID != "" {
 		tx.TenantID = &tID
 	}
-	_, err := r.db.Exec(ctx,
-		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, mode, created_at, requeue_count, reconciled_at, fiat_rail, fiat_provider_ref, fiat_status, local_currency, local_amount, batch_id, reference, idempotency_key, idempotency_record_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
-		 ON CONFLICT (mode, tx_hash) WHERE tx_hash IS NOT NULL DO NOTHING`,
-		tx.ID, nullableString(tx.TxHash), tx.Type, tx.Status,
-		nullableString(tx.FromWallet), nullableString(tx.ToWallet),
-		tx.Asset, tx.Amount.String(), tx.Fee.String(), nullableFeeBps(tx.FeeBps),
-		nullableUUID(tx.TenantID), tx.Mode, tx.CreatedAt,
-		tx.RequeueCount, nullableTime(tx.ReconciledAt),
-		nullableStringPtr(tx.FiatRail), nullableStringPtr(tx.FiatProviderRef),
-		nullableStringPtr(tx.FiatStatus), nullableStringPtr(tx.LocalCurrency),
-		nullableDecimalPtr(tx.LocalAmount),
-		nullableUUID(tx.BatchID), nullableString(tx.Reference), nullableString(tx.IdempotencyKey), nullableUUID(tx.IdempotencyRecordID),
-	)
+	_, err := insertTx(ctx, r.db, tx, `ON CONFLICT (mode, tx_hash) WHERE tx_hash IS NOT NULL DO NOTHING`)
 	if err != nil {
 		return fmt.Errorf("upsert transaction by tx_hash: %w", err)
 	}
@@ -746,7 +742,7 @@ func (r *TransactionRepo) UpdateTxFailed(ctx context.Context, id string) error {
 }
 
 // WriteReconciliationRun persists a record of a completed reconciliation pass.
-func (r *TransactionRepo) WriteReconciliationRun(ctx context.Context, run *reconcile.ReconciliationRun) error {
+func (r *TransactionRepo) WriteReconciliationRun(ctx context.Context, run *domain.ReconciliationRun) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO reconciliation_runs (id, started_at, completed_at, txs_checked, discrepancies_found, corrections_made)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -810,16 +806,7 @@ func (r *TransactionRepo) CreateWithMonthlyLimit(ctx context.Context, tx *domain
 		return domain.ErrTransferLimitReached
 	}
 
-	_, err = dbTx.Exec(ctx,
-		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, mode, created_at, requeue_count, reconciled_at, batch_id, reference, idempotency_key, idempotency_record_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-		tx.ID, nullableString(tx.TxHash), tx.Type, tx.Status,
-		nullableString(tx.FromWallet), nullableString(tx.ToWallet),
-		tx.Asset, tx.Amount.String(), tx.Fee.String(), nullableFeeBps(tx.FeeBps),
-		nullableUUID(tx.TenantID), transactionMode(ctx), tx.CreatedAt,
-		tx.RequeueCount, nullableTime(tx.ReconciledAt),
-		nullableUUID(tx.BatchID), nullableString(tx.Reference), nullableString(tx.IdempotencyKey), nullableUUID(tx.IdempotencyRecordID),
-	)
+	_, err = insertTx(ctx, dbTx, tx, "")
 	if err != nil {
 		return fmt.Errorf("insert transaction: %w", mapTransactionInsertError(err))
 	}

@@ -34,25 +34,12 @@ const (
 // Record is a persisted idempotency request and, once complete, its exact
 // response. ID and LeaseToken fence stale owners from overwriting a recovered
 // record.
-type Record struct {
-	ID              string
-	OrgID           string
-	Mode            domain.Mode
-	Key             string
-	RequestHash     string
-	Status          string
-	LeaseToken      string
-	LeaseExpiresAt  time.Time
-	ExpiresAt       time.Time
-	ResponseStatus  int
-	ResponseHeaders http.Header
-	ResponseBody    []byte
-}
+type Record = domain.IdempotencyRecord
 
 // Acquisition is the result of atomically acquiring an idempotency key.
 type Acquisition struct {
 	State  AcquisitionState
-	Record Record
+	Record domain.IdempotencyRecord
 }
 
 // Response is the durable HTTP response returned by the original request.

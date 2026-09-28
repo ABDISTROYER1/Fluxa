@@ -25,26 +25,10 @@ const (
 	activePairMaxIdle = 10 * time.Minute
 )
 
-// Quote is a priced, time-limited conversion offer identified by a unique token.
-type Quote struct {
-	ID                    string          `json:"id"`
-	OrgID                 string          `json:"org_id"`
-	FromAsset             string          `json:"from_asset"`
-	ToAsset               string          `json:"to_asset"`
-	FromAmount            decimal.Decimal `json:"from_amount"`
-	ToAmount              decimal.Decimal `json:"to_amount"`
-	Rate                  decimal.Decimal `json:"rate"`
-	Fee                   decimal.Decimal `json:"fee"`
-	ExpiresAt             time.Time       `json:"expires_at"`
-	Used                  bool            `json:"used"`
-	FromRequiresTrustline bool            `json:"from_requires_trustline"`
-	ToRequiresTrustline   bool            `json:"to_requires_trustline"`
-}
-
 // FXQuoteAuditRepo persists quote snapshots as an audit trail.
 // Redis is the live store; Postgres is the audit log.
 type FXQuoteAuditRepo interface {
-	CreateQuote(ctx context.Context, q *Quote) error
+	CreateQuote(ctx context.Context, q *domain.Quote) error
 	MarkQuoteUsed(ctx context.Context, quoteID, conversionID string) error
 }
 
@@ -55,7 +39,7 @@ type ConversionRepo interface {
 
 // Service is the FX domain service interface.
 type Service interface {
-	GetQuote(ctx context.Context, fromAsset, toAsset, amount string) (*Quote, error)
+	GetQuote(ctx context.Context, fromAsset, toAsset, amount string) (*domain.Quote, error)
 	ExecuteConversion(ctx context.Context, walletID, quoteID string, minAmountOut *decimal.Decimal, maxSlippageBps *int) (*domain.Conversion, error)
 	GetRates(ctx context.Context, from, to string) (*RateResponse, error)
 }
@@ -130,7 +114,7 @@ func NewService(
 
 // GetQuote prices a conversion, stores the quote in Redis with a 30-second TTL,
 // and writes an audit row to Postgres. Returns the quote with its ID token.
-func (s *service) GetQuote(ctx context.Context, fromAsset, toAsset, amount string) (*Quote, error) {
+func (s *service) GetQuote(ctx context.Context, fromAsset, toAsset, amount string) (*domain.Quote, error) {
 	fromAsset, toAsset, err := validateFXPair(fromAsset, toAsset)
 	if err != nil {
 		return nil, err
@@ -160,7 +144,7 @@ func (s *service) GetQuote(ctx context.Context, fromAsset, toAsset, amount strin
 		feeAmt = feeResult.FeeAmount
 	}
 
-	q := &Quote{
+	q := &domain.Quote{
 		ID:                    uuid.New().String(),
 		OrgID:                 tenantID,
 		FromAsset:             fromAsset,
@@ -223,7 +207,7 @@ func (s *service) ExecuteConversion(ctx context.Context, walletID, quoteID strin
 		}
 	}
 
-	var q Quote
+	var q domain.Quote
 	if err := json.Unmarshal([]byte(result.(string)), &q); err != nil {
 		return nil, fmt.Errorf("decode quote: %w", err)
 	}

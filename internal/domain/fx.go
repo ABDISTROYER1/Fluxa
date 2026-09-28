@@ -6,17 +6,18 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// RateResponse describes a quoted FX rate between two assets.
-type RateResponse struct {
-	Rate          decimal.Decimal `json:"rate"`
-	MidMarketRate decimal.Decimal `json:"mid_market_rate"`
-	SpreadBps     int             `json:"spread_bps"`
-	Provider      string          `json:"provider"`
-	CachedAt      time.Time       `json:"cached_at"`
-	Stale         bool            `json:"stale"`
-	SourceAmount  decimal.Decimal `json:"source_amount"`
-	DestAmount    decimal.Decimal `json:"dest_amount"`
-	FeeAmount     decimal.Decimal `json:"fee_amount"`
-	NetAmount     decimal.Decimal `json:"net_amount"`
-	FeeBps        int             `json:"fee_bps"`
+// Quote is a priced, time-limited conversion offer identified by a unique token.
+type Quote struct {
+	ID                    string
+	OrgID                 string
+	FromAsset             string
+	ToAsset               string
+	FromAmount            decimal.Decimal
+	ToAmount              decimal.Decimal
+	Rate                  decimal.Decimal
+	Fee                   decimal.Decimal
+	ExpiresAt             time.Time
+	Used                  bool
+	FromRequiresTrustline bool
+	ToRequiresTrustline   bool
 }

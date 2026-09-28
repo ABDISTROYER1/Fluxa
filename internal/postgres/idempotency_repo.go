@@ -9,12 +9,40 @@ import (
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
-	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
 var ErrIdempotencyLeaseLost = errors.New("idempotency processing lease is no longer owned")
+
+const (
+	StatusProcessing = "processing"
+	StatusComplete   = "complete"
+)
+
+// AcquisitionState describes what happened when a key was looked up.
+type AcquisitionState uint8
+
+const (
+	Acquired AcquisitionState = iota
+	Replay
+	InProgress
+	LeaseExpired
+	BodyMismatch
+)
+
+// Acquisition is the result of atomically acquiring an idempotency key.
+type Acquisition struct {
+	State  AcquisitionState
+	Record domain.IdempotencyRecord
+}
+
+// Response is the durable HTTP response returned by the original request.
+type Response struct {
+	Status  int
+	Headers http.Header
+	Body    []byte
+}
 
 type IdempotencyRepo struct {
 	db DB
@@ -27,7 +55,7 @@ func NewIdempotencyRepo(db DB) *IdempotencyRepo {
 // Acquire atomically claims (orgID, mode, key) for a new request. A record that
 // has outlived its retention window is replaced with a fresh generation so a
 // recovered request can never be confused with a later one that reuses the key.
-func (r *IdempotencyRepo) Acquire(ctx context.Context, orgID string, mode domain.Mode, key, requestHash string, now, leaseExpiresAt, recordExpiresAt time.Time, allowRecovery bool) (idempotency.Acquisition, error) {
+func (r *IdempotencyRepo) Acquire(ctx context.Context, orgID string, mode domain.Mode, key, requestHash string, now, leaseExpiresAt, recordExpiresAt time.Time, allowRecovery bool) (Acquisition, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return idempotency.Acquisition{}, fmt.Errorf("begin idempotency acquisition: %w", err)
@@ -72,7 +100,7 @@ func (r *IdempotencyRepo) Acquire(ctx context.Context, orgID string, mode domain
 	// generation, so the body-mismatch check runs only once the original has
 	// completed and a response actually exists to compare against.
 	now = now.UTC()
-	if rec.Status == idempotency.StatusProcessing {
+	if rec.Status == StatusProcessing {
 		if rec.LeaseExpiresAt.IsZero() || !rec.LeaseExpiresAt.After(now) {
 			if allowRecovery {
 				newToken := uuid.New().String()
@@ -82,36 +110,36 @@ func (r *IdempotencyRepo) Acquire(ctx context.Context, orgID string, mode domain
 					 WHERE id = $1 AND status = 'processing'`,
 					rec.ID, newToken, leaseExpiresAt.UTC(),
 				); err != nil {
-					return idempotency.Acquisition{}, fmt.Errorf("take over idempotency lease: %w", err)
+					return Acquisition{}, fmt.Errorf("take over idempotency lease: %w", err)
 				}
 				rec.LeaseToken = newToken
 				rec.LeaseExpiresAt = leaseExpiresAt.UTC()
 			}
 			if err := tx.Commit(ctx); err != nil {
-				return idempotency.Acquisition{}, fmt.Errorf("commit idempotency lease takeover: %w", err)
+				return Acquisition{}, fmt.Errorf("commit idempotency lease takeover: %w", err)
 			}
-			return idempotency.Acquisition{State: idempotency.LeaseExpired, Record: rec}, nil
+			return Acquisition{State: LeaseExpired, Record: rec}, nil
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return idempotency.Acquisition{}, fmt.Errorf("commit idempotency in-progress lookup: %w", err)
+			return Acquisition{}, fmt.Errorf("commit idempotency in-progress lookup: %w", err)
 		}
-		return idempotency.Acquisition{State: idempotency.InProgress, Record: rec}, nil
+		return Acquisition{State: InProgress, Record: rec}, nil
 	}
 
 	if rec.RequestHash != requestHash {
 		if err := tx.Commit(ctx); err != nil {
-			return idempotency.Acquisition{}, fmt.Errorf("commit idempotency body mismatch: %w", err)
+			return Acquisition{}, fmt.Errorf("commit idempotency body mismatch: %w", err)
 		}
-		return idempotency.Acquisition{State: idempotency.BodyMismatch, Record: rec}, nil
+		return Acquisition{State: BodyMismatch, Record: rec}, nil
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return idempotency.Acquisition{}, fmt.Errorf("commit idempotency replay lookup: %w", err)
+		return Acquisition{}, fmt.Errorf("commit idempotency replay lookup: %w", err)
 	}
-	return idempotency.Acquisition{State: idempotency.Replay, Record: rec}, nil
+	return Acquisition{State: Replay, Record: rec}, nil
 }
 
-func insertProcessingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domain.Mode, key, requestHash string, leaseExpiresAt, recordExpiresAt time.Time) (idempotency.Acquisition, bool, error) {
+func insertProcessingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domain.Mode, key, requestHash string, leaseExpiresAt, recordExpiresAt time.Time) (Acquisition, bool, error) {
 	recordID := uuid.New().String()
 	leaseToken := uuid.New().String()
 	var insertedID string
@@ -124,20 +152,20 @@ func insertProcessingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode d
 		recordID, orgID, mode, key, requestHash, leaseToken, leaseExpiresAt.UTC(), recordExpiresAt.UTC(),
 	).Scan(&insertedID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return idempotency.Acquisition{}, false, nil
+		return Acquisition{}, false, nil
 	}
 	if err != nil {
-		return idempotency.Acquisition{}, false, fmt.Errorf("insert idempotency record: %w", err)
+		return Acquisition{}, false, fmt.Errorf("insert idempotency record: %w", err)
 	}
-	return idempotency.Acquisition{
-		State: idempotency.Acquired,
-		Record: idempotency.Record{
+	return Acquisition{
+		State: Acquired,
+		Record: domain.IdempotencyRecord{
 			ID:             insertedID,
 			OrgID:          orgID,
 			Mode:           mode,
 			Key:            key,
 			RequestHash:    requestHash,
-			Status:         idempotency.StatusProcessing,
+			Status:         "processing",
 			LeaseToken:     leaseToken,
 			LeaseExpiresAt: leaseExpiresAt.UTC(),
 			ExpiresAt:      recordExpiresAt.UTC(),
@@ -145,8 +173,8 @@ func insertProcessingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode d
 	}, true, nil
 }
 
-func lockExistingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domain.Mode, key string) (idempotency.Record, error) {
-	rec := idempotency.Record{OrgID: orgID, Mode: mode, Key: key}
+func lockExistingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domain.Mode, key string) (domain.IdempotencyRecord, error) {
+	rec := domain.IdempotencyRecord{OrgID: orgID, Mode: mode, Key: key}
 	var responseStatus *int
 	var responseHeaders []byte
 	var leaseToken *string
@@ -172,7 +200,7 @@ func lockExistingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domai
 		&recordExpiresAt,
 	)
 	if err != nil {
-		return idempotency.Record{}, fmt.Errorf("lock idempotency record: %w", err)
+		return domain.IdempotencyRecord{}, fmt.Errorf("lock idempotency record: %w", err)
 	}
 	if leaseToken != nil {
 		rec.LeaseToken = *leaseToken
@@ -187,7 +215,7 @@ func lockExistingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domai
 	if len(responseHeaders) > 0 {
 		rec.ResponseHeaders = make(http.Header)
 		if err := json.Unmarshal(responseHeaders, &rec.ResponseHeaders); err != nil {
-			return idempotency.Record{}, fmt.Errorf("decode idempotency response headers: %w", err)
+			return domain.IdempotencyRecord{}, fmt.Errorf("decode idempotency response headers: %w", err)
 		}
 	}
 	return rec, nil
@@ -197,7 +225,7 @@ func lockExistingRecord(ctx context.Context, tx pgx.Tx, orgID string, mode domai
 // fenced on the lease token: if the lease was taken over (or the record was
 // already completed) the write is rejected so a stale owner cannot overwrite
 // the recovered generation's response.
-func (r *IdempotencyRepo) Complete(ctx context.Context, recordID, leaseToken string, response idempotency.Response, recordExpiresAt time.Time) error {
+func (r *IdempotencyRepo) Complete(ctx context.Context, recordID, leaseToken string, response Response, recordExpiresAt time.Time) error {
 	headers, err := json.Marshal(response.Headers)
 	if err != nil {
 		return fmt.Errorf("encode idempotency response headers: %w", err)
