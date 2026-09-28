@@ -23,7 +23,7 @@ var (
 	ErrInvalidQuoteAmount           = errors.New("quote amount must be positive")
 	ErrAmountOutOfLimits            = errors.New("amount outside allowed limits for asset")
 	ErrBatchNotFound                = errors.New("batch not found")
-	ErrBatchTooLarge                = errors.New("batch cannot contain more than 100 transfers")
+	ErrBatchTooLarge                = errors.New("batch exceeds the maximum number of transfers")
 	ErrBatchEmpty                   = errors.New("batch must contain at least one transfer")
 	ErrScheduleNotFound             = errors.New("schedule not found")
 	ErrScheduleRunNotFound          = errors.New("schedule run not found")

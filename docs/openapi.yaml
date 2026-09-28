@@ -560,7 +560,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: ["wallet_id", "amount", "currency", "account_bank", "account_number"]
+              required:
+                [
+                  "wallet_id",
+                  "amount",
+                  "currency",
+                  "account_bank",
+                  "account_number",
+                ]
               properties:
                 wallet_id:
                   type: string
@@ -618,8 +625,8 @@ paths:
           description: |
             Client-generated UUID v4 that makes this request safe to retry.
             The result is held for 24 hours: a repeat with the same body
-            replays the original response, a repeat with a different body is
-            rejected with 422, and a concurrent repeat gets 409.
+            replays the original response, a repeat with a different body or
+            a concurrent repeat is rejected with 409.
           schema:
             type: string
             format: uuid
@@ -649,8 +656,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "409":
           $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalServerError"
           description: "Conflict: request in progress or idempotency key reused with different body"
@@ -761,8 +766,8 @@ paths:
           description: |
             Client-generated UUID v4 that makes this request safe to retry.
             The result is held for 24 hours: a repeat with the same body
-            replays the original response, a repeat with a different body is
-            rejected with 422, and a concurrent repeat gets 409.
+            replays the original response, a repeat with a different body or
+            a concurrent repeat is rejected with 409.
           schema:
             type: string
             format: uuid
@@ -779,8 +784,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "409":
           $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -2552,7 +2555,14 @@ components:
           enum: ["transfer", "conversion", "funding"]
         status:
           type: string
-          enum: ["pending", "submitted", "confirmed", "failed", "reconciliation_failed"]
+          enum:
+            [
+              "pending",
+              "submitted",
+              "confirmed",
+              "failed",
+              "reconciliation_failed",
+            ]
         from_wallet_id:
           type: string
         to_wallet_id:
@@ -2571,6 +2581,12 @@ components:
         fee_bps:
           type: integer
           description: "Fee in basis points"
+        failure_reason:
+          type: string
+          description: "Machine-readable reason code when the transfer failed during initiation"
+        failure_message:
+          type: string
+          description: "Underlying initiation error for support diagnostics"
         created_at:
           type: string
           format: date-time
@@ -2613,12 +2629,22 @@ components:
           type: string
         status:
           type: string
-          enum: ["pending", "processing", "partial", "completed", "failed"]
+          enum:
+            [
+              "pending",
+              "processing",
+              "partial",
+              "completed",
+              "failed",
+              "compliance_hold",
+            ]
         total_count:
           type: integer
         success_count:
           type: integer
         failed_count:
+          type: integer
+        held_count:
           type: integer
         created_at:
           type: string
@@ -2648,6 +2674,12 @@ components:
         tx_hash:
           type: string
           nullable: true
+        failure_reason:
+          type: string
+          description: "Machine-readable reason code when the transfer failed during initiation"
+        failure_message:
+          type: string
+          description: "Underlying initiation error for support diagnostics"
 
     # ── FX ────────────────────────────────────────────────────────────────
     QuoteRequest:
@@ -2764,7 +2796,15 @@ components:
     # ── Schedules ─────────────────────────────────────────────────────────
     CreateScheduleRequest:
       type: object
-      required: ["from_wallet_id", "to_wallet_id", "asset", "amount", "frequency", "start_date"]
+      required:
+        [
+          "from_wallet_id",
+          "to_wallet_id",
+          "asset",
+          "amount",
+          "frequency",
+          "start_date",
+        ]
       properties:
         from_wallet_id:
           type: string

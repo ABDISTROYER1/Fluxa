@@ -47,6 +47,8 @@ export interface TransferResponse {
   fee_amount: string;
   net_amount: string;
   fee_bps: number;
+  failure_reason?: string;
+  failure_message?: string;
   created_at: string;
 }
 
@@ -67,7 +69,8 @@ export type BatchStatus =
   | "processing"
   | "partial"
   | "completed"
-  | "failed";
+  | "failed"
+  | "compliance_hold";
 
 export interface BatchItemRequest {
   to_wallet_id: string;
@@ -89,6 +92,8 @@ export interface BatchTransferResponse {
   reference?: string;
   status: TransactionStatus;
   tx_hash?: string;
+  failure_reason?: string;
+  failure_message?: string;
 }
 
 export interface BatchResponse {
@@ -97,6 +102,7 @@ export interface BatchResponse {
   total_count: number;
   success_count: number;
   failed_count: number;
+  held_count: number;
   created_at: string;
   transfers?: BatchTransferResponse[];
 }
