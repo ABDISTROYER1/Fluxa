@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +69,12 @@ type Config struct {
 	// ClaimableBalanceSourceWalletID funds claimable balances whose request did
 	// not name a source wallet.
 	ClaimableBalanceSourceWalletID string
+
+	// Indexer configuration
+	IndexerPaymentsPageLimit int
+	IndexerStreamMinBackoff  string
+	IndexerStreamMaxBackoff  string
+	IndexerSyncPageSize      int
 
 	// IdempotencyTTLHours is the number of hours an idempotency record is
 	// retained after creation. The middleware uses this value when computing
@@ -366,6 +372,11 @@ func Load() (*Config, error) {
 		WebhookAllowPrivateNetworks:     webhookAllowPrivateNetworks,
 
 		ClaimableBalanceSourceWalletID: viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
+
+		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
+		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
+		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
+		IndexerSyncPageSize:      indexerSyncPageSize,
 
 		IdempotencyTTLHours: func() int {
 			h := viper.GetInt("IDEMPOTENCY_TTL_HOURS")

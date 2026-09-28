@@ -1,4 +1,4 @@
-.PHONY: run-api run-worker migrate migrate-down test lint build tidy generate openapi-check openapi-manifest deploy-primary deploy-secondary failover
+.PHONY: run-api run-worker migrate migrate-down test lint fmt-check build tidy generate openapi-check openapi-manifest deploy-primary deploy-secondary failover
 
 # Run the API server
 run-api:
@@ -31,6 +31,17 @@ test-cover:
 # Lint
 lint:
 	golangci-lint run ./...
+
+# Check Go source formatting. gofmt parses before it formats, so a file that
+# lost a brace or gained a stray declaration during a merge fails here first,
+# before vet or a full build has to run.
+fmt-check:
+	@unformatted="$$(gofmt -l .)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "The following files are not gofmt-clean:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
 
 # Build both binaries
 build:
@@ -92,6 +103,6 @@ docker-logs:
 	docker compose logs -f api worker
 
 # CI locally (mimics GitHub Actions)
-ci: lint test openapi-check
+ci: fmt-check lint test openapi-check
 	cd apps/web && npm ci && npm run lint && npm run build
 	cd sdk && npm install && npm run typecheck && npm run build
