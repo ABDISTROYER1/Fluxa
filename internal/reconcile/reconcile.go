@@ -28,6 +28,7 @@ const (
 	pendingCheckThreshold = 2 * time.Minute
 	stuckThreshold        = 10 * time.Minute
 	maxRequeues           = 3
+	pageSize              = 100
 )
 
 type AuditOutcome string
@@ -266,24 +267,33 @@ func (s *Service) RunAll(ctx context.Context) error {
 // locking (SELECT FOR UPDATE SKIP LOCKED) in the repository layer so concurrent
 // reconciler instances process disjoint sets of rows without blocking each other.
 func (s *Service) RunPendingReconciliation(ctx context.Context) (txsChecked, discrepanciesFound, correctionsMade int, err error) {
-	txes, err := s.repo.GetPendingTxesForReconciliation(ctx, pendingCheckThreshold, 100)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("fetch pending txes for reconciliation: %w", err)
-	}
-
-	txsChecked = len(txes)
-	log.Info().Int("count", txsChecked).Msg("reconcile: checking pending transactions against Horizon")
-
-	for _, tx := range txes {
-		discrepancy, correction, checkErr := s.checkPendingTransaction(ctx, tx)
-		if checkErr != nil {
-			log.Error().Err(checkErr).Str("tx_id", tx.ID).Msg("reconcile: pending tx check failed")
+	for {
+		txes, fetchErr := s.repo.GetPendingTxesForReconciliation(ctx, pendingCheckThreshold, pageSize)
+		if fetchErr != nil {
+			return txsChecked, discrepanciesFound, correctionsMade, fmt.Errorf("fetch pending txes for reconciliation: %w", fetchErr)
 		}
-		if discrepancy {
-			discrepanciesFound++
+
+		txsChecked += len(txes)
+		if len(txes) == 0 {
+			break
 		}
-		if correction {
-			correctionsMade++
+		log.Info().Int("count", len(txes)).Int("total", txsChecked).Msg("reconcile: checking pending transactions against Horizon")
+
+		for _, tx := range txes {
+			discrepancy, correction, checkErr := s.checkPendingTransaction(ctx, tx)
+			if checkErr != nil {
+				log.Error().Err(checkErr).Str("tx_id", tx.ID).Msg("reconcile: pending tx check failed")
+			}
+			if discrepancy {
+				discrepanciesFound++
+			}
+			if correction {
+				correctionsMade++
+			}
+		}
+
+		if len(txes) < pageSize {
+			break
 		}
 	}
 
@@ -419,16 +429,25 @@ func (s *Service) RunWalletReconciliation(ctx context.Context, walletID, actor s
 // Reconcile verifies confirmed transactions against Horizon and flags
 // discrepancies in the ledger audit log.
 func (s *Service) Reconcile(ctx context.Context) error {
-	txes, err := s.repo.GetConfirmedTxesForReconciliation(ctx, reconcileInterval, 100)
-	if err != nil {
-		return fmt.Errorf("fetch txes for reconciliation: %w", err)
-	}
+	for {
+		txes, err := s.repo.GetConfirmedTxesForReconciliation(ctx, reconcileInterval, pageSize)
+		if err != nil {
+			return fmt.Errorf("fetch txes for reconciliation: %w", err)
+		}
 
-	log.Info().Int("count", len(txes)).Msg("reconcile: checking confirmed transactions")
+		if len(txes) == 0 {
+			break
+		}
+		log.Info().Int("count", len(txes)).Msg("reconcile: checking confirmed transactions")
 
-	for _, tx := range txes {
-		if err := s.checkTransaction(ctx, tx); err != nil {
-			log.Error().Err(err).Str("tx_id", tx.ID).Str("tx_hash", tx.TxHash).Msg("reconcile: check failed")
+		for _, tx := range txes {
+			if err := s.checkTransaction(ctx, tx); err != nil {
+				log.Error().Err(err).Str("tx_id", tx.ID).Str("tx_hash", tx.TxHash).Msg("reconcile: check failed")
+			}
+		}
+
+		if len(txes) < pageSize {
+			break
 		}
 	}
 
@@ -696,14 +715,18 @@ func verifyOps(ops []operations.Operation, expected expectedPayment) (amountVeri
 // RecoverPending re-enqueues stuck pending transactions (regardless of whether
 // they have a Stellar hash) up to maxRequeues times before marking them failed.
 func (s *Service) RecoverPending(ctx context.Context) error {
-	txes, err := s.repo.GetStuckPendingTxes(ctx, stuckThreshold, 100)
-	if err != nil {
-		return fmt.Errorf("fetch stuck pending txes: %w", err)
-	}
+	for {
+		txes, err := s.repo.GetStuckPendingTxes(ctx, stuckThreshold, pageSize)
+		if err != nil {
+			return fmt.Errorf("fetch stuck pending txes: %w", err)
+		}
 
-	log.Info().Int("count", len(txes)).Msg("reconcile: recovering stuck pending transactions")
+		if len(txes) == 0 {
+			break
+		}
+		log.Info().Int("count", len(txes)).Msg("reconcile: recovering stuck pending transactions")
 
-	for _, tx := range txes {
+		for _, tx := range txes {
 		// Defence in depth, and checked first so no later branch can act on a
 		// held transfer. GetStuckPendingTxes selects pending rows and
 		// submitted-without-hash rows, so a compliance_hold row should never
@@ -756,6 +779,11 @@ func (s *Service) RecoverPending(ctx context.Context) error {
 		}
 
 		log.Info().Str("tx_id", tx.ID).Int("requeue_count", newCount).Msg("reconcile: re-enqueued pending transaction")
+		}
+
+		if len(txes) < pageSize {
+			break
+		}
 	}
 
 	return nil
