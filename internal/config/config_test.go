@@ -29,6 +29,7 @@ func setRequiredEnv(t *testing.T) {
 	// before any other validation runs, so fixtures must use real-looking
 	// material to exercise the checks under test.
 	t.Setenv("MASTER_ENCRYPTION_KEY", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+	t.Setenv("JWT_SECRET", "test-secret-key-that-is-at-least-32-bytes-long-for-validation")
 	t.Setenv("COMPLIANCE_ENABLED", "false")
 	t.Setenv("ENV", "development")
 }
@@ -69,13 +70,13 @@ func TestLoad_ComplianceEnabledRejectsMalformedPlatformWallet(t *testing.T) {
 func TestLoad_ComplianceEnabledAcceptsValidPlatformWallet(t *testing.T) {
 	cfg, err := loadWith(t, map[string]string{
 		"COMPLIANCE_ENABLED": "true",
-		"PLATFORM_WALLET_ID": validAddress,
+		"PLATFORM_WALLET_ID": "550e8400-e29b-41d4-a716-446655440000",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.PlatformWalletID != validAddress {
-		t.Fatalf("PlatformWalletID = %q, want %q", cfg.PlatformWalletID, validAddress)
+	if cfg.PlatformWalletID != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("PlatformWalletID = %q, want %q", cfg.PlatformWalletID, "550e8400-e29b-41d4-a716-446655440000")
 	}
 }
 

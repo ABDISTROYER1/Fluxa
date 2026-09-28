@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/viper"
 	"github.com/stellar/go/keypair"
 )
@@ -176,8 +177,8 @@ func (c *Config) Validate() error {
 		if c.PlatformWalletID == "" {
 			return fmt.Errorf("PLATFORM_WALLET_ID is required when COMPLIANCE_ENABLED=true: the velocity screener would otherwise screen the platform's own traffic (refunds, sweeps, fee collection)")
 		}
-		if _, err := keypair.ParseAddress(c.PlatformWalletID); err != nil {
-			return fmt.Errorf("PLATFORM_WALLET_ID is not a valid Stellar address: %w", err)
+		if _, err := uuid.Parse(c.PlatformWalletID); err != nil {
+			return fmt.Errorf("PLATFORM_WALLET_ID is not a valid wallet UUID: %w", err)
 		}
 	}
 
@@ -429,21 +430,11 @@ func Load() (*Config, error) {
 		}(),
 		CORSAllowedOriginsConfiguredExplicitly: os.Getenv("CORS_ALLOWED_ORIGINS") != "",
 
-		IndexerPaymentsPageLimit: indexerPaymentsPageLimit,
-		IndexerStreamMinBackoff:  indexerStreamMinBackoff,
-		IndexerStreamMaxBackoff:  indexerStreamMaxBackoff,
-		IndexerSyncPageSize:      indexerSyncPageSize,
-
 		AuthRateLimitIPRPS:        authRateLimitIPRPS,
 		AuthRateLimitIPBurst:      authRateLimitIPBurst,
 		AuthRateLimitAccountRPS:   authRateLimitAccountRPS,
 		AuthRateLimitAccountBurst: authRateLimitAccountBurst,
 	}
-
-	cfg.IndexerPaymentsPageLimit = indexerPaymentsPageLimit
-	cfg.IndexerStreamMinBackoff = indexerStreamMinBackoff
-	cfg.IndexerStreamMaxBackoff = indexerStreamMaxBackoff
-	cfg.IndexerSyncPageSize = indexerSyncPageSize
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -511,4 +502,8 @@ func validateKeyEntropy(key []byte) error {
 	}
 
 	return nil
+}
+
+func log2(x float64) float64 {
+	return math.Log(x) / math.Log(2)
 }
