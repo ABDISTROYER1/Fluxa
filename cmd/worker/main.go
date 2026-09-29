@@ -126,7 +126,7 @@ func main() {
 		StreamMaxBackoff:  parseDuration(cfg.IndexerStreamMaxBackoff, 30*time.Second),
 		SyncPageSize:      cfg.IndexerSyncPageSize,
 	})
-	indexerWorker := indexer.NewWorker(idx, *cfg)
+	indexerWorker := indexer.NewWorker(idx, cfg)
 
 	// StreamAll keeps a live Horizon SSE connection open per wallet so new
 	// payments land in the DB in real time; the @every 30s indexer:sync task

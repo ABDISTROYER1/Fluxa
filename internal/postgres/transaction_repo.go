@@ -96,13 +96,11 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 	var amount, fee string
 	var localAmt *string
 	var feeBps *int
-	var tenantID *string
+var tenantID *string
 	var batchID *string
 	var idempotencyRecordID *string
 	var reference string
-	var failureReason, failureMessage string
 
-	tID := tenant.IDFromContext(ctx)
 	mode := transactionMode(ctx)
 	query := `SELECT id, COALESCE(tx_hash,''), type, status,
 		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
@@ -118,7 +116,7 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 		&tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.Mode, &tx.CreatedAt,
 		&tx.RequeueCount, &tx.ReconciledAt,
 		&tx.FiatRail, &tx.FiatProviderRef, &tx.FiatStatus, &tx.LocalCurrency, &localAmt,
-		&batchID, &reference, &failureReason, &failureMessage)
+		&batchID, &reference)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrTransactionNotFound
@@ -138,8 +136,6 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 	}
 	tx.BatchID = batchID
 	tx.Reference = reference
-	tx.FailureReason = failureReason
-	tx.FailureMessage = failureMessage
 	return tx, nil
 }
 
@@ -167,6 +163,8 @@ func (r *TransactionRepo) getIdempotentTransaction(ctx context.Context, predicat
 	var feeBps *int
 	var tenantID, batchID, recordID *string
 	var reference string
+	var failureReason, failureMessage string
+	var idempotencyKey string
 	query := `SELECT id, COALESCE(tx_hash,''), type, status,
 		        COALESCE(from_wallet::text,''), COALESCE(to_wallet::text,''),
 		        asset, amount, COALESCE(fee,'0'), fee_bps, tenant_id, mode, created_at,
@@ -180,7 +178,8 @@ func (r *TransactionRepo) getIdempotentTransaction(ctx context.Context, predicat
 	}
 	err := r.readDB().QueryRow(ctx, query, args...).Scan(&tx.ID, &tx.TxHash, &tx.Type, &tx.Status,
 		&tx.FromWallet, &tx.ToWallet, &tx.Asset, &amount, &fee, &feeBps, &tenantID, &tx.Mode,
-		&tx.CreatedAt, &tx.RequeueCount, &tx.ReconciledAt, &batchID, &reference, &recordID)
+		&tx.CreatedAt, &tx.RequeueCount, &tx.ReconciledAt, &batchID, &reference, &recordID,
+		&failureReason, &failureMessage, &idempotencyKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrTransactionNotFound
 	}

@@ -36,6 +36,7 @@ func (h *Handler) Routes() func(r chi.Router) {
 		}
 		post("/", h.initiateTransfer)
 		r.Get("/{id}", h.getTransaction)
+		r.Post("/{id}/cancel", h.cancelTransfer)
 	}
 }
 
@@ -120,6 +121,29 @@ func (h *Handler) initiateTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.JSON(w, http.StatusAccepted, toTransferResponse(tx))
+}
+
+func (h *Handler) cancelTransfer(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	actor := api.ActorFromContext(r.Context())
+
+	idempotencyKey := r.Header.Get("X-Idempotency-Key")
+	if idempotencyKey == "" {
+		idempotencyKey = r.Header.Get("Idempotency-Key")
+	}
+	if idempotencyKey == "" {
+		api.BadRequest(w, "idempotency key is required")
+		return
+	}
+
+	tx, err := h.svc.CancelTransfer(r.Context(), id, actor, idempotencyKey)
+	if err != nil {
+		api.HandleDomainError(w, err)
+		return
+	}
+
+	api.JSON(w, http.StatusOK, toTransferResponse(tx))
 }
 
 func (h *Handler) getTransaction(w http.ResponseWriter, r *http.Request) {

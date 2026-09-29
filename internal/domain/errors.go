@@ -65,7 +65,7 @@ var (
 	ErrClaimantNotCustodied       = errors.New("claimant account is not a wallet custodied by Fluxa")
 	ErrSourceWalletRequired       = errors.New("a source wallet is required to fund a claimable balance")
 	ErrSponsorNotCustodied        = errors.New("sponsor account is not a wallet custodied by Fluxa")
-	ErrInvalidAmount              = errors.New("amount must be a positive number")
+ErrInvalidAmount              = errors.New("amount must be a positive number")
 )
 
 // Organization membership. Kept in its own block: appending to the var block
@@ -93,4 +93,16 @@ func (e *ErrNoTrustline) Error() string {
 
 func NewErrNoTrustline(asset string) error {
 	return &ErrNoTrustline{Asset: asset}
+}
+
+type ErrTransferNotCancellable struct {
+	Status    string
+	TxHash    string
+}
+
+func (e *ErrTransferNotCancellable) Error() string {
+	if e.TxHash != "" {
+		return "transfer cannot be cancelled: status " + e.Status + ", tx_hash " + e.TxHash
+	}
+	return "transfer cannot be cancelled: status " + e.Status
 }

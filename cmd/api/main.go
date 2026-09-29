@@ -140,6 +140,7 @@ func main() {
 	transferIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
 		TTL:                time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 		AllowLeaseRecovery: true,
+	})
 	batchIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
 		Required: true,
 		TTL:      time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
@@ -273,7 +274,7 @@ func main() {
 	settlementWorker := settlement.NewWorker(engine)
 
 	idx := indexer.New(walletRepo, txRepo, stellarClient)
-	indexerWorker := indexer.NewWorker(idx, *cfg)
+	indexerWorker := indexer.NewWorker(idx, cfg)
 
 	asynqSrv := asynq.NewServer(asynqOpt, asynq.Config{
 		Concurrency: 5,

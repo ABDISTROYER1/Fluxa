@@ -2,6 +2,8 @@ package fx
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"github.com/fluxa/fluxa/internal/assets"
 )
 
@@ -9,6 +11,14 @@ type CatalogPair struct {
 	From     string `json:"from"`
 	To       string `json:"to"`
 	Provider string `json:"provider"`
+}
+
+func parsePair(p string) (string, string, string) {
+	parts := strings.SplitN(p, "-", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1], ""
+	}
+	return p, "", "unknown"
 }
 
 type Catalog struct {

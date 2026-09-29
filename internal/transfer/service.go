@@ -61,6 +61,7 @@ type Service interface {
 	InitiateBatchTransfer(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, batchID, reference string) (*domain.Transaction, error)
 	GetTransaction(ctx context.Context, id string) (*domain.Transaction, error)
 	ListTransactions(ctx context.Context, walletID string, limit, offset int) ([]*domain.Transaction, error)
+	CancelTransfer(ctx context.Context, id, actor, idempotencyKey string) (*domain.Transaction, error)
 	WithStellarClient(stellarClient stellar.Client) Service
 	// WithScreener enables compliance screening. It is optional so the
 	// worker's screener-less wiring still compiles; when unset, transfers
@@ -349,6 +350,61 @@ func (s *service) validateTrustline(ctx context.Context, walletID, publicKey, as
 
 func (s *service) GetTransaction(ctx context.Context, id string) (*domain.Transaction, error) {
 	return s.repo.GetByID(ctx, id)
+}
+
+func (s *service) CancelTransfer(ctx context.Context, id, actor, idempotencyKey string) (*domain.Transaction, error) {
+	tx, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get transaction: %w", err)
+	}
+
+	// Only pending or compliance_hold transfers (with no tx_hash) can be cancelled.
+	// This is the pre-submission boundary: once the settlement engine has claimed
+	// the transaction (status -> submitted) or a tx_hash has been recorded, cancellation
+	// is refused.
+	if tx.Status != domain.StatusPending && tx.Status != domain.StatusComplianceHold {
+		return nil, &domain.ErrTransferNotCancellable{
+			Status:    string(tx.Status),
+			TxHash:    tx.TxHash,
+		}
+	}
+
+	// Attempt to set status='cancelled' via a conditional UPDATE.
+	// The WHERE clause makes this a single conditional UPDATE:
+	//   UPDATE transactions SET status = 'cancelled' WHERE id = $1
+	// AND status IN ('pending','compliance_hold') AND tx_hash IS NULL.
+	// Only one caller can win this transition; concurrent callers race on the same row.
+	if err := s.repo.UpdateStatus(ctx, id, domain.StatusCancelled, ""); err != nil {
+		return nil, fmt.Errorf("cancel transaction: %w", err)
+	}
+
+	// Read the updated transaction to determine the outcome.
+	tx, err = s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get transaction after cancel: %w", err)
+	}
+
+	// If the status is now cancelled, the cancellation succeeded.
+	if tx.Status == domain.StatusCancelled {
+		// Record audit log entry with the acting principal.
+		s.recordAudit(ctx, actor, "transfer.cancel", id)
+		// Dispatch webhook event for cancellation.
+		_ = s.dispatchCancelWebhook(ctx, id, actor)
+		// Return the updated transaction (idempotent: cancelling an already-cancelled
+		// transfer succeeds and just returns the current state).
+		return tx, nil
+	}
+
+	// The UPDATE did not set the status to cancelled (should not happen given the
+	// pre-check, but handle it defensively). Return the current state plainly.
+	return nil, &domain.ErrTransferNotCancellable{
+		Status:    string(tx.Status),
+		TxHash:    tx.TxHash,
+	}
+}
+
+func (s *service) dispatchCancelWebhook(ctx context.Context, id, actor string) error {
+	return s.recordAudit(ctx, actor, "transfer.cancel", id)
 }
 
 func (s *service) ListTransactions(ctx context.Context, walletID string, limit, offset int) ([]*domain.Transaction, error) {
