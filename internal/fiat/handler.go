@@ -2,10 +2,12 @@ package fiat
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
 	"github.com/fluxa/fluxa/internal/api"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -149,6 +151,10 @@ func (h *Handler) handleDeposit(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.InitiateDeposit(r.Context(), dr)
 	if err != nil {
+		if errors.Is(err, domain.ErrUnsupportedFiatCurrency) {
+			api.HandleDomainError(w, err)
+			return
+		}
 		log.Error().Err(err).Str("wallet_id", walletID).Msg("initiate deposit failed")
 		api.InternalError(w, err)
 		return
@@ -203,6 +209,10 @@ func (h *Handler) handleWithdrawal(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.InitiateWithdrawal(r.Context(), wr)
 	if err != nil {
+		if errors.Is(err, domain.ErrUnsupportedFiatCurrency) {
+			api.HandleDomainError(w, err)
+			return
+		}
 		log.Error().Err(err).Str("wallet_id", walletID).Msg("initiate withdrawal failed")
 		api.InternalError(w, err)
 		return

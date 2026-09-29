@@ -140,14 +140,37 @@ type mockRail struct {
 	withdrawErr  error
 	webhookEvt   *RailEvent
 	webhookErr   error
+
+	quote          *FiatQuote
+	quoteErr       error
+	currencies     []string // defaults to NGN, KES, USD when nil
+	quoteCalls     int
+	lastQuoteReq   QuoteRequest
+	lastDepositReq DepositRequest
 }
 
-func (m *mockRail) GetQuote(_ context.Context, _ QuoteRequest) (*FiatQuote, error) {
+func (m *mockRail) SupportedCurrencies() []string {
+	if m.currencies != nil {
+		return m.currencies
+	}
+	return []string{"NGN", "KES", "USD"}
+}
+
+func (m *mockRail) GetQuote(_ context.Context, req QuoteRequest) (*FiatQuote, error) {
+	m.quoteCalls++
+	m.lastQuoteReq = req
+	if m.quoteErr != nil {
+		return nil, m.quoteErr
+	}
+	if m.quote != nil {
+		return m.quote, nil
+	}
 	return &FiatQuote{}, nil
 }
 
 func (m *mockRail) Deposit(ctx context.Context, req DepositRequest) (*DepositResponse, error) {
-	return nil, nil
+	m.lastDepositReq = req
+	return &DepositResponse{Reference: req.Reference}, nil
 }
 
 func (m *mockRail) Withdraw(ctx context.Context, req WithdrawRequest) (*WithdrawResponse, error) {
@@ -168,9 +191,11 @@ func (m *mockRail) HandleWebhook(ctx context.Context, payload []byte, signature 
 type mockFXService struct {
 	quote *fx.Quote
 	err   error
+	calls int // GetQuote invocations; the fiat service must never call it
 }
 
 func (m *mockFXService) GetQuote(ctx context.Context, fromAsset, toAsset, amount string) (*fx.Quote, error) {
+	m.calls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -238,12 +263,9 @@ func TestInitiateWithdrawal_Success(t *testing.T) {
 	repo := newMockRepository()
 	rail := &mockRail{
 		withdrawResp: &WithdrawResponse{Reference: "REF-123", Status: "completed"},
+		quote:        &FiatQuote{USDCAmount: decimal.NewFromInt(10)}, // 16000 NGN at 1600 NGN/USDC
 	}
-	fxSvc := &mockFXService{
-		quote: &fx.Quote{
-			Rate: decimal.NewFromInt(1600),
-		},
-	}
+	fxSvc := &mockFXService{}
 	transferSvc := &mockTransferService{}
 
 	svc := NewService(repo, rail, fxSvc, transferSvc, "platform-wallet-123", "flutterwave")
@@ -266,8 +288,16 @@ func TestInitiateWithdrawal_Success(t *testing.T) {
 		t.Errorf("expected reference REF-123, got %s", resp.Reference)
 	}
 
-	// 16000 NGN / 1600 NGN/USDC = 10 USDC
+	// The rail prices the fiat leg: 16000 NGN -> 10 USDC.
 	expectedUSDCAmount := decimal.NewFromInt(10)
+
+	if rail.quoteCalls != 1 || rail.lastQuoteReq.Side != "withdraw" ||
+		rail.lastQuoteReq.FiatCurrency != "NGN" || !rail.lastQuoteReq.FiatAmount.Equal(req.FiatAmount) {
+		t.Errorf("unexpected rail quote request (calls=%d): %+v", rail.quoteCalls, rail.lastQuoteReq)
+	}
+	if fxSvc.calls != 0 {
+		t.Errorf("FX service must not price a fiat leg, got %d calls", fxSvc.calls)
+	}
 
 	// Verify withdrawal record was created with correct USDC amount
 	var createdWithdrawal *domain.FiatWithdrawal
@@ -295,12 +325,10 @@ func TestInitiateWithdrawal_Success(t *testing.T) {
 	}
 }
 
-func TestInitiateWithdrawal_FXServiceFailure(t *testing.T) {
+func TestInitiateWithdrawal_QuoteFailure(t *testing.T) {
 	repo := newMockRepository()
-	rail := &mockRail{}
-	fxSvc := &mockFXService{
-		err: errors.New("FX provider down"),
-	}
+	rail := &mockRail{quoteErr: errors.New("rail rate provider down")}
+	fxSvc := &mockFXService{}
 	transferSvc := &mockTransferService{}
 
 	svc := NewService(repo, rail, fxSvc, transferSvc, "platform-wallet-123", "flutterwave")
@@ -326,14 +354,10 @@ func TestInitiateWithdrawal_FXServiceFailure(t *testing.T) {
 	}
 }
 
-func TestInitiateWithdrawal_FXZeroRate(t *testing.T) {
+func TestInitiateWithdrawal_ZeroUSDCQuote(t *testing.T) {
 	repo := newMockRepository()
-	rail := &mockRail{}
-	fxSvc := &mockFXService{
-		quote: &fx.Quote{
-			Rate: decimal.Zero,
-		},
-	}
+	rail := &mockRail{quote: &FiatQuote{USDCAmount: decimal.Zero}}
+	fxSvc := &mockFXService{}
 	transferSvc := &mockTransferService{}
 
 	svc := NewService(repo, rail, fxSvc, transferSvc, "platform-wallet-123", "flutterwave")
@@ -357,12 +381,8 @@ func TestInitiateWithdrawal_FXZeroRate(t *testing.T) {
 
 func TestInitiateWithdrawal_TransferFailure(t *testing.T) {
 	repo := newMockRepository()
-	rail := &mockRail{}
-	fxSvc := &mockFXService{
-		quote: &fx.Quote{
-			Rate: decimal.NewFromInt(1600),
-		},
-	}
+	rail := &mockRail{quote: &FiatQuote{USDCAmount: decimal.NewFromInt(10)}}
+	fxSvc := &mockFXService{}
 	transferSvc := &mockTransferService{
 		transferErr: errors.New("insufficient balance"),
 	}
@@ -401,12 +421,9 @@ func TestInitiateWithdrawal_RailFailure(t *testing.T) {
 	repo := newMockRepository()
 	rail := &mockRail{
 		withdrawErr: errors.New("rail endpoint timeout"),
+		quote:       &FiatQuote{USDCAmount: decimal.NewFromInt(10)},
 	}
-	fxSvc := &mockFXService{
-		quote: &fx.Quote{
-			Rate: decimal.NewFromInt(1600),
-		},
-	}
+	fxSvc := &mockFXService{}
 	transferSvc := &mockTransferService{}
 
 	svc := NewService(repo, rail, fxSvc, transferSvc, "platform-wallet-123", "flutterwave")
@@ -436,6 +453,157 @@ func TestInitiateWithdrawal_RailFailure(t *testing.T) {
 
 	if w.Status != domain.FiatStatusFailed {
 		t.Errorf("expected withdrawal status to be Failed, got %s", w.Status)
+	}
+}
+
+// ─── Fiat pricing: currency validation and rail-priced quotes ────────────────
+
+func TestInitiateDeposit_PricedByRail(t *testing.T) {
+	repo := newMockRepository()
+	rail := &mockRail{quote: &FiatQuote{USDCAmount: decimal.NewFromInt(10)}}
+	fxSvc := &mockFXService{}
+	svc := NewService(repo, rail, fxSvc, &mockTransferService{}, "platform-wallet-123", "flutterwave")
+
+	req := DepositRequest{
+		WalletID:     "wallet-123",
+		Reference:    "DEP-1",
+		FiatAmount:   decimal.NewFromInt(16000),
+		FiatCurrency: "NGN",
+	}
+	resp, err := svc.InitiateDeposit(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || resp.Reference != "DEP-1" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+
+	if rail.quoteCalls != 1 || rail.lastQuoteReq.Side != "deposit" ||
+		rail.lastQuoteReq.FiatCurrency != "NGN" || !rail.lastQuoteReq.FiatAmount.Equal(req.FiatAmount) {
+		t.Errorf("unexpected rail quote request (calls=%d): %+v", rail.quoteCalls, rail.lastQuoteReq)
+	}
+	if fxSvc.calls != 0 {
+		t.Errorf("FX service must not price a fiat leg, got %d calls", fxSvc.calls)
+	}
+
+	if len(repo.deposits) != 1 {
+		t.Fatalf("expected 1 deposit record, got %d", len(repo.deposits))
+	}
+	for _, d := range repo.deposits {
+		if !d.USDCAmount.Equal(decimal.NewFromInt(10)) {
+			t.Errorf("expected USDC amount 10, got %s", d.USDCAmount)
+		}
+		if d.FiatCurrency != "NGN" {
+			t.Errorf("expected currency NGN, got %s", d.FiatCurrency)
+		}
+	}
+}
+
+func TestInitiateDeposit_NormalisesCurrency(t *testing.T) {
+	repo := newMockRepository()
+	rail := &mockRail{quote: &FiatQuote{USDCAmount: decimal.NewFromInt(10)}}
+	svc := NewService(repo, rail, &mockFXService{}, &mockTransferService{}, "platform-wallet-123", "flutterwave")
+
+	_, err := svc.InitiateDeposit(context.Background(), DepositRequest{
+		WalletID: "wallet-123", Reference: "DEP-1",
+		FiatAmount: decimal.NewFromInt(16000), FiatCurrency: " ngn ",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rail.lastQuoteReq.FiatCurrency != "NGN" || rail.lastDepositReq.FiatCurrency != "NGN" {
+		t.Errorf("currency not normalised: quote=%q deposit=%q", rail.lastQuoteReq.FiatCurrency, rail.lastDepositReq.FiatCurrency)
+	}
+}
+
+func TestInitiateDeposit_UnsupportedCurrency_RejectedBeforePricing(t *testing.T) {
+	for _, cur := range []string{"XYZ", "", "USDC"} {
+		t.Run("currency="+cur, func(t *testing.T) {
+			repo := newMockRepository()
+			rail := &mockRail{quote: &FiatQuote{USDCAmount: decimal.NewFromInt(10)}}
+			fxSvc := &mockFXService{}
+			svc := NewService(repo, rail, fxSvc, &mockTransferService{}, "platform-wallet-123", "flutterwave")
+
+			_, err := svc.InitiateDeposit(context.Background(), DepositRequest{
+				WalletID: "wallet-123", Reference: "DEP-1",
+				FiatAmount: decimal.NewFromInt(16000), FiatCurrency: cur,
+			})
+			if !errors.Is(err, domain.ErrUnsupportedFiatCurrency) {
+				t.Fatalf("expected ErrUnsupportedFiatCurrency, got %v", err)
+			}
+			if rail.quoteCalls != 0 {
+				t.Errorf("rail must not be asked for a quote, got %d calls", rail.quoteCalls)
+			}
+			if fxSvc.calls != 0 {
+				t.Errorf("FX service must not be called, got %d calls", fxSvc.calls)
+			}
+			if len(repo.deposits) != 0 {
+				t.Errorf("expected no deposit record, got %d", len(repo.deposits))
+			}
+		})
+	}
+}
+
+func TestInitiateDeposit_QuoteFailure(t *testing.T) {
+	repo := newMockRepository()
+	rail := &mockRail{quoteErr: errors.New("rail rate provider down")}
+	svc := NewService(repo, rail, &mockFXService{}, &mockTransferService{}, "platform-wallet-123", "flutterwave")
+
+	_, err := svc.InitiateDeposit(context.Background(), DepositRequest{
+		WalletID: "wallet-123", Reference: "DEP-1",
+		FiatAmount: decimal.NewFromInt(16000), FiatCurrency: "NGN",
+	})
+	if err == nil || errors.Is(err, domain.ErrUnsupportedFiatCurrency) {
+		t.Fatalf("expected a plain quote error, got %v", err)
+	}
+	if len(repo.deposits) != 0 {
+		t.Errorf("expected no deposit record, got %d", len(repo.deposits))
+	}
+}
+
+func TestInitiateDeposit_ZeroUSDCQuote(t *testing.T) {
+	repo := newMockRepository()
+	rail := &mockRail{quote: &FiatQuote{USDCAmount: decimal.Zero}}
+	svc := NewService(repo, rail, &mockFXService{}, &mockTransferService{}, "platform-wallet-123", "flutterwave")
+
+	_, err := svc.InitiateDeposit(context.Background(), DepositRequest{
+		WalletID: "wallet-123", Reference: "DEP-1",
+		FiatAmount: decimal.NewFromInt(16000), FiatCurrency: "NGN",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if len(repo.deposits) != 0 {
+		t.Errorf("expected no deposit record, got %d", len(repo.deposits))
+	}
+}
+
+func TestInitiateWithdrawal_UnsupportedCurrency_RejectedBeforePricing(t *testing.T) {
+	for _, cur := range []string{"XYZ", "", "USDC"} {
+		t.Run("currency="+cur, func(t *testing.T) {
+			repo := newMockRepository()
+			rail := &mockRail{quote: &FiatQuote{USDCAmount: decimal.NewFromInt(10)}}
+			fxSvc := &mockFXService{}
+			transferSvc := &mockTransferService{}
+			svc := NewService(repo, rail, fxSvc, transferSvc, "platform-wallet-123", "flutterwave")
+
+			_, err := svc.InitiateWithdrawal(context.Background(), WithdrawRequest{
+				WalletID: "wallet-123", Reference: "REF-123",
+				FiatAmount: decimal.NewFromInt(16000), FiatCurrency: cur,
+			})
+			if !errors.Is(err, domain.ErrUnsupportedFiatCurrency) {
+				t.Fatalf("expected ErrUnsupportedFiatCurrency, got %v", err)
+			}
+			if rail.quoteCalls != 0 {
+				t.Errorf("rail must not be asked for a quote, got %d calls", rail.quoteCalls)
+			}
+			if fxSvc.calls != 0 {
+				t.Errorf("FX service must not be called, got %d calls", fxSvc.calls)
+			}
+			if len(repo.withdrawals) != 0 || len(transferSvc.transfers) != 0 {
+				t.Errorf("expected no withdrawal record or transfer, got %d/%d", len(repo.withdrawals), len(transferSvc.transfers))
+			}
+		})
 	}
 }
 

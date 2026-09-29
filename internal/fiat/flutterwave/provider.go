@@ -38,6 +38,12 @@ func (p *Provider) SupportedCountries() []string {
 	return []string{"NG", "GH", "KE", "ZA", "UG", "TZ"}
 }
 
+// SupportedCurrencies are the settlement currencies of the supported countries,
+// plus USD.
+func (p *Provider) SupportedCurrencies() []string {
+	return []string{"NGN", "GHS", "KES", "ZAR", "UGX", "TZS", "USD"}
+}
+
 func (p *Provider) GetQuote(ctx context.Context, req fiat.QuoteRequest) (*fiat.FiatQuote, error) {
 	if p.secretKey == "mock" || p.secretKey == "" {
 		supported := false

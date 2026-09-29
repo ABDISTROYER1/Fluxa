@@ -68,12 +68,40 @@ func (s *service) GetQuote(ctx context.Context, req QuoteRequest) (*FiatQuote, e
 	return s.rail.GetQuote(ctx, req)
 }
 
+// validateFiatCurrency checks code against the rail's supported list and
+// returns it normalised (trimmed, upper case). It runs before any pricing so an
+// unsupported currency is rejected without touching the rail's quote API.
+func (s *service) validateFiatCurrency(code string) (string, error) {
+	norm := strings.ToUpper(strings.TrimSpace(code))
+	if norm != "" {
+		for _, c := range s.rail.SupportedCurrencies() {
+			if strings.EqualFold(c, norm) {
+				return norm, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("%w: %q", domain.ErrUnsupportedFiatCurrency, code)
+}
+
 func (s *service) InitiateDeposit(ctx context.Context, req DepositRequest) (*DepositResponse, error) {
-	// First get a quote for USDC to ensure conversion is possible and to record expected amount
-	// In deposit, user pays Fiat (Source), gets USDC (Dest).
-	quote, err := s.fxSvc.GetQuote(ctx, req.FiatCurrency, "USDC", req.FiatAmount.String())
+	currency, err := s.validateFiatCurrency(req.FiatCurrency)
+	if err != nil {
+		return nil, err
+	}
+	req.FiatCurrency = currency
+
+	// Price the deposit with the rail: the user pays fiat and receives USDC.
+	// The FX service only quotes Stellar assets, so it cannot price a fiat leg.
+	quote, err := s.rail.GetQuote(ctx, QuoteRequest{
+		Side:         "deposit",
+		FiatCurrency: req.FiatCurrency,
+		FiatAmount:   req.FiatAmount,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get quote for deposit: %w", err)
+	}
+	if !quote.USDCAmount.IsPositive() {
+		return nil, fmt.Errorf("rail returned a non-positive USDC amount for deposit")
 	}
 
 	deposit := &domain.FiatDeposit{
@@ -83,7 +111,7 @@ func (s *service) InitiateDeposit(ctx context.Context, req DepositRequest) (*Dep
 		ProviderReference: req.Reference,
 		FiatAmount:        req.FiatAmount,
 		FiatCurrency:      req.FiatCurrency,
-		USDCAmount:        quote.ToAmount, // amount of USDC to credit user
+		USDCAmount:        quote.USDCAmount, // amount of USDC to credit user
 		Status:            domain.FiatStatusPending,
 		CreatedAt:         time.Now().UTC(),
 	}
@@ -102,19 +130,27 @@ func (s *service) InitiateDeposit(ctx context.Context, req DepositRequest) (*Dep
 }
 
 func (s *service) InitiateWithdrawal(ctx context.Context, req WithdrawRequest) (*WithdrawResponse, error) {
-	// For withdrawal, user provides Fiat amount they want to receive.
-	// Get live exchange rate from FX service. We fetch the quote for 1 USDC to determine the rate.
-	quote, err := s.fxSvc.GetQuote(ctx, "USDC", req.FiatCurrency, "1")
+	currency, err := s.validateFiatCurrency(req.FiatCurrency)
 	if err != nil {
-		return nil, fmt.Errorf("get FX rate for withdrawal: %w", err)
+		return nil, err
+	}
+	req.FiatCurrency = currency
+
+	// The user states the fiat amount they want to receive; the rail tells us
+	// how much USDC that costs.
+	quote, err := s.rail.GetQuote(ctx, QuoteRequest{
+		Side:         "withdraw",
+		FiatCurrency: req.FiatCurrency,
+		FiatAmount:   req.FiatAmount,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get quote for withdrawal: %w", err)
 	}
 
-	rate := quote.Rate
-	if rate.IsZero() {
-		return nil, fmt.Errorf("FX service returned a zero exchange rate")
+	usdcAmount := quote.USDCAmount
+	if !usdcAmount.IsPositive() {
+		return nil, fmt.Errorf("rail returned a non-positive USDC amount for withdrawal")
 	}
-
-	usdcAmount := req.FiatAmount.Div(rate)
 
 	withdrawal := &domain.FiatWithdrawal{
 		ID:                uuid.New().String(),
