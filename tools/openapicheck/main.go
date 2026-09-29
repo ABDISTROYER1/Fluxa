@@ -31,8 +31,7 @@ import (
 )
 
 // idempotentRoutes are the routes whose handlers attach the idempotency-key
-// middleware via WithIdempotency, and which therefore must document the header
-// and every response the middleware can produce.
+// middleware and therefore must document the header and middleware responses.
 //
 // Source of truth: internal/transfer/handler.go (WithIdempotency wraps POST /)
 // and internal/batch/handler.go (WithIdempotency wraps the batch POST). When the
@@ -40,12 +39,12 @@ import (
 var idempotentRoutes = []string{
 	"POST /v1/transfers",
 	"POST /v1/transfers/batch",
+	"POST /v1/schedules",
 }
 
 // idempotencyHeader is the header internal/server/idempotency reads. The
-// middleware answers 400 when it is missing or not a UUID v4, 409 while a request
-// with the same key is still in flight, and 422 when the key is reused with a
-// different body.
+// middleware answers 400 when it is missing or malformed and 409 when a request
+// with the same key is still in flight or has a different body.
 const idempotencyHeader = "Idempotency-Key"
 
 // Finding is one problem with the document.
@@ -583,7 +582,7 @@ func checkErrorCodeEnum(doc *Document, r *Report) {
 }
 
 // checkIdempotency ties the documented contract to the middleware that enforces
-// it. The middleware can answer 400, 409 and 422 on its own; an operation that
+// it. The middleware can answer 400 and 409 on its own; an operation that
 // uses it and does not document those leaves a client guessing.
 func checkIdempotency(doc *Document, r *Report) {
 	required := map[string]bool{}
@@ -596,7 +595,7 @@ func checkIdempotency(doc *Document, r *Report) {
 		if param == nil {
 			if required[op.ID()] {
 				r.add(op.ID(), "the handler attaches the idempotency middleware but the %s header is not documented", idempotencyHeader)
-				for _, code := range []string{"400", "409", "422"} {
+				for _, code := range []string{"400", "409"} {
 					if !hasResponse(op, code) {
 						r.add(op.ID(), "does not document the %s the idempotency middleware can return", code)
 					}
@@ -611,7 +610,7 @@ func checkIdempotency(doc *Document, r *Report) {
 		if format, _ := schema["format"].(string); format != "uuid" {
 			r.add(op.ID(), "%s must declare schema.format: uuid — the middleware rejects anything else with 400", idempotencyHeader)
 		}
-		for _, code := range []string{"400", "409", "422"} {
+		for _, code := range []string{"400", "409"} {
 			if !hasResponse(op, code) {
 				r.add(op.ID(), "declares %s but does not document the %s the middleware can return", idempotencyHeader, code)
 			}

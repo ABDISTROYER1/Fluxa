@@ -34,7 +34,7 @@ tags:
   - name: "FX"
     description: "Foreign-exchange quotes, conversions and rate lookups"
   - name: "Schedules"
-    description: "Recurring transfer schedules"
+    description: "Scheduled and recurring tenant payouts"
   - name: "Webhooks"
     description: "Webhook endpoint management and delivery logs"
   - name: "Fees"
@@ -1036,9 +1036,17 @@ paths:
   /v1/schedules:
     post:
       operationId: createSchedule
-      summary: "Create a recurring transfer schedule"
-      description: "Sets up a recurring transfer that runs daily, weekly, or monthly."
+      summary: "Create a recurring tenant payout schedule"
+      description: "Creates a tenant-scoped recurring payout that runs daily, weekly, or monthly. Requires transfers:write scope and a UUID v4 Idempotency-Key; retries with the same key and body replay the original response."
       tags: ["Schedules"]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: "UUID v4 key for this schedule creation; reuse it only when retrying the same request."
       requestBody:
         required: true
         content:
@@ -1046,11 +1054,13 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateScheduleRequest"
             example:
-              from_wallet_id: "w_1a2b3c4d"
-              to_wallet_id: "w_5e6f7g8h"
+              from_wallet_id: "3f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77"
+              to_wallet_id: "4f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77"
               asset: "USDC"
               amount: "100.0000000"
               frequency: "monthly"
+              timezone: "Africa/Lagos"
+              missed_run_policy: "skip"
               start_date: "2026-02-01T00:00:00Z"
               end_date: "2026-12-31T23:59:59Z"
       responses:
@@ -1064,13 +1074,17 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
     get:
       operationId: listSchedules
       summary: "List schedules"
-      description: "Returns all recurring transfer schedules for the tenant."
+      description: "Returns up to 100 recurring payout schedules belonging to the authenticated tenant. Requires transfers:read scope."
       tags: ["Schedules"]
       responses:
         "200":
@@ -1086,6 +1100,48 @@ paths:
                       $ref: "#/components/schemas/ScheduleResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/schedules/{id}/runs:
+    get:
+      operationId: listScheduleRuns
+      summary: "List payout attempts for a schedule"
+      description: "Returns the authenticated tenant's execution history, newest occurrence first. Requires transfers:read scope. Limit defaults to 20 and is capped at 100; offset defaults to 0."
+      tags: ["Schedules"]
+      parameters:
+        - $ref: "#/components/parameters/ScheduleID"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: "Payout run history"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScheduleRunResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1093,7 +1149,7 @@ paths:
     patch:
       operationId: updateSchedule
       summary: "Update a schedule"
-      description: "Updates the amount, frequency, end date, or pauses/resumes a schedule."
+      description: "Updates the amount, recurrence settings, or status. Requires transfers:write scope."
       tags: ["Schedules"]
       parameters:
         - $ref: "#/components/parameters/ScheduleID"
@@ -1117,6 +1173,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -1125,7 +1183,7 @@ paths:
     delete:
       operationId: cancelSchedule
       summary: "Cancel a schedule"
-      description: "Cancels a recurring transfer schedule. Cannot be undone."
+      description: "Cancels a recurring tenant payout schedule. Requires transfers:write scope. Cannot be undone."
       tags: ["Schedules"]
       parameters:
         - $ref: "#/components/parameters/ScheduleID"
@@ -1134,6 +1192,8 @@ paths:
           description: "Schedule cancelled"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -3059,6 +3119,13 @@ components:
         frequency:
           type: string
           enum: ["daily", "weekly", "monthly"]
+        timezone:
+          type: string
+          description: "IANA time zone; defaults to UTC"
+        missed_run_policy:
+          type: string
+          enum: ["skip", "run_once"]
+          description: "Defaults to run_once. skip advances past elapsed occurrences; run_once makes one catch-up payout."
         start_date:
           type: string
           format: date-time
@@ -3066,7 +3133,36 @@ components:
         end_date:
           type: string
           format: date-time
-          description: "RFC3339 timestamp (optional)"
+          description: "Optional RFC3339 timestamp; must not precede start_date"
+
+    ScheduleRunResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        schedule_id:
+          type: string
+        expected_run_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: ["pending", "running", "succeeded", "failed", "skipped", "cancelled"]
+        transaction_id:
+          type: string
+          nullable: true
+        error:
+          type: string
+          description: "Safe explanation shown only when the run failed"
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
 
     UpdateScheduleRequest:
       type: object
@@ -3084,6 +3180,11 @@ components:
         end_date:
           type: string
           format: date-time
+        timezone:
+          type: string
+        missed_run_policy:
+          type: string
+          enum: ["skip", "run_once"]
 
     ScheduleResponse:
       type: object
@@ -3101,6 +3202,11 @@ components:
         frequency:
           type: string
           enum: ["daily", "weekly", "monthly"]
+        timezone:
+          type: string
+        missed_run_policy:
+          type: string
+          enum: ["skip", "run_once"]
         next_run_at:
           type: string
           format: date-time
@@ -3110,7 +3216,7 @@ components:
           nullable: true
         status:
           type: string
-          enum: ["active", "paused", "cancelled", "completed"]
+          enum: ["active", "processing", "failed", "paused", "cancelled", "completed"]
         created_at:
           type: string
           format: date-time

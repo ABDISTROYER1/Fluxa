@@ -281,6 +281,7 @@ See [sdk/README.md](sdk/README.md) for full documentation.
 - [Interactive API Docs (Swagger UI)](http://localhost:3000/docs) — Explore and test endpoints interactively (served at `/docs`)
 - [OpenAPI 3.0 Specification](docs/openapi.yaml) — Raw OpenAPI YAML spec (also available at `/docs/openapi.yaml`)
 - [Quickstart Guide](docs/quickstart.md) — Complete integration walkthrough
+- [Scheduled tenant payouts](docs/scheduled-payouts.md) — Recurrence policies, run history, retry behavior, and limits
 - [Error Reference](docs/errors.md) — API error codes and resolutions
 - [Idempotency](docs/idempotency.md) — Safe retries with idempotency keys
 - [Webhook Verification](docs/webhook-verification/README.md) — Signature verification in Go/TypeScript

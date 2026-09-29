@@ -146,6 +146,10 @@ func main() {
 		Required: true,
 		TTL:      time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 	})
+	scheduleIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
+		Required: true,
+		TTL:      time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
+	})
 
 	// Live and test environments are separate Horizon clients, signers, and
 	// networks; the resolver picks one from the authenticated key's mode.
@@ -357,7 +361,9 @@ func main() {
 	webhookHandler := webhook.NewHandler(webhookSvc)
 	assetRegistry := assets.NewRegistry(cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer)
 	batchHandler := batch.NewHandler(batchSvc).WithIdempotency(batchIdemMW).WithAssetValidator(assetRegistry.IsSupported)
-	scheduleHandler := schedule.NewHandler(scheduleSvc)
+	scheduleHandler := schedule.NewHandler(scheduleSvc).
+		WithIdempotency(scheduleIdemMW).
+		WithAuditLogger(auditSvc)
 	treasuryHandler := treasury.NewHandler(treasurySvc).WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 	statusHandler := status.NewHandler(status.NewService(incidentRepo))
 

@@ -13,21 +13,48 @@ import (
 )
 
 type Handler struct {
-	svc Service
+	svc   Service
+	idem  func(http.Handler) http.Handler
+	audit interface {
+		Log(r *http.Request, action, resourceType, resourceID string, metadata map[string]interface{})
+	}
 }
 
 func NewHandler(svc Service) *Handler {
 	return &Handler{svc: svc}
 }
 
+func (h *Handler) WithIdempotency(mw func(http.Handler) http.Handler) *Handler {
+	h.idem = mw
+	return h
+}
+
+func (h *Handler) WithAuditLogger(audit interface {
+	Log(r *http.Request, action, resourceType, resourceID string, metadata map[string]interface{})
+}) *Handler {
+	h.audit = audit
+	return h
+}
+
 // Routes is mounted at /v1/schedules.
-func (h *Handler) Routes() func(r chi.Router) {
+func (h *Handler) Routes(scopes ...func(http.Handler) http.Handler) func(r chi.Router) {
 	return func(r chi.Router) {
-		r.Post("/", h.create)
-		r.Get("/", h.list)
-		r.Patch("/{id}", h.update)
-		r.Delete("/{id}", h.cancel)
-		r.Get("/{id}/runs", h.listRuns)
+		readScope, writeScope := func(next http.Handler) http.Handler { return next }, func(next http.Handler) http.Handler { return next }
+		if len(scopes) > 0 && scopes[0] != nil {
+			readScope = scopes[0]
+		}
+		if len(scopes) > 1 && scopes[1] != nil {
+			writeScope = scopes[1]
+		}
+		writeMiddlewares := []func(http.Handler) http.Handler{writeScope}
+		if h.idem != nil {
+			writeMiddlewares = append(writeMiddlewares, h.idem)
+		}
+		r.With(writeMiddlewares...).Post("/", h.create)
+		r.With(readScope).Get("/", h.list)
+		r.With(writeScope).Patch("/{id}", h.update)
+		r.With(writeScope).Delete("/{id}", h.cancel)
+		r.With(readScope).Get("/{id}/runs", h.listRuns)
 	}
 }
 
@@ -37,8 +64,8 @@ type createScheduleRequest struct {
 	Asset           string `json:"asset"          validate:"required"`
 	Amount          string `json:"amount"         validate:"required"`
 	Frequency       string `json:"frequency"      validate:"required,oneof=daily weekly monthly"`
-	Timezone        string `json:"timezone"       validate:"required"`
-	MissedRunPolicy string `json:"missed_run_policy" validate:"required,oneof=skip run_once"`
+	Timezone        string `json:"timezone"       validate:"omitempty"`
+	MissedRunPolicy string `json:"missed_run_policy" validate:"omitempty,oneof=skip run_once"`
 	StartDate       string `json:"start_date"     validate:"required"`
 	EndDate         string `json:"end_date"`
 }
@@ -97,6 +124,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		api.BadRequest(w, err.Error())
 		return
 	}
+	if req.Timezone == "" {
+		req.Timezone = "UTC"
+	}
+	if req.MissedRunPolicy == "" {
+		req.MissedRunPolicy = string(domain.MissedRunPolicyRunOnce)
+	}
 
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil || amount.LessThanOrEqual(decimal.Zero) {
@@ -123,6 +156,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			api.BadRequest(w, "end_date must be an RFC3339 timestamp")
 			return
 		}
+		if parsed.Before(startAt) {
+			api.BadRequest(w, "end_date must not be before start_date")
+			return
+		}
 		endAt = &parsed
 	}
 
@@ -142,6 +179,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.audit != nil {
+		h.audit.Log(r, "schedule.created", "schedule", sch.ID, nil)
+	}
 	api.JSON(w, http.StatusCreated, toScheduleResponse(sch))
 }
 
@@ -216,6 +256,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.audit != nil {
+		h.audit.Log(r, "schedule.updated", "schedule", sch.ID, nil)
+	}
 	api.JSON(w, http.StatusOK, toScheduleResponse(sch))
 }
 
@@ -224,6 +267,9 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Cancel(r.Context(), id); err != nil {
 		api.HandleDomainError(w, err)
 		return
+	}
+	if h.audit != nil {
+		h.audit.Log(r, "schedule.cancelled", "schedule", id, nil)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

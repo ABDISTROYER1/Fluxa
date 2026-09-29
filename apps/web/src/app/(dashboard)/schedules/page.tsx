@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { api, type ScheduleResponse } from '@/lib/api';
+import { api, type ScheduleResponse, type ScheduleRunResponse } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { PageHeader } from '@/components/ui/page-header';
@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Calendar, Plus, Pause, Play, Trash2 } from 'lucide-react';
+import { Calendar, Plus, Pause, Play, Trash2, History } from 'lucide-react';
 
 export default function SchedulesPage() {
   const { getStoredWalletIds } = useAuth();
@@ -29,6 +29,13 @@ export default function SchedulesPage() {
 
   const [schedules, setSchedules] = useState<ScheduleResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [runHistory, setRunHistory] = useState<{
+    scheduleId: string;
+    loading: boolean;
+    error: string;
+    runs: ScheduleRunResponse[];
+  } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
@@ -37,17 +44,21 @@ export default function SchedulesPage() {
     asset: 'XLM',
     amount: '',
     frequency: 'weekly' as 'daily' | 'weekly' | 'monthly',
+    missed_run_policy: 'skip' as 'skip' | 'run_once',
     start_date: new Date().toISOString().slice(0, 16),
     end_date: '',
   });
 
   const fetchSchedules = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const res = await api.listSchedules();
       setSchedules(res.schedules || []);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to load schedules', 'error');
+      const message = err instanceof Error ? err.message : 'Failed to load schedules';
+      setLoadError(message);
+      toast(message, 'error');
     } finally {
       setLoading(false);
     }
@@ -77,6 +88,7 @@ export default function SchedulesPage() {
         asset: form.asset,
         amount: form.amount,
         frequency: form.frequency,
+        missed_run_policy: form.missed_run_policy,
         start_date: startIso,
         end_date: endIso,
       });
@@ -112,11 +124,40 @@ export default function SchedulesPage() {
     }
   };
 
+  const handleRunHistory = async (scheduleId: string) => {
+    if (runHistory?.scheduleId === scheduleId) {
+      setRunHistory(null);
+      return;
+    }
+    setRunHistory({ scheduleId, loading: true, error: '', runs: [] });
+    try {
+      const res = await api.listScheduleRuns(scheduleId);
+      setRunHistory({ scheduleId, loading: false, error: '', runs: res.runs || [] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load payout history';
+      setRunHistory({ scheduleId, loading: false, error: message, runs: [] });
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col gap-8">
         <Skeleton className="h-10 w-64" />
         <Skeleton className="h-64" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-5">
+        <PageHeader title="Scheduled Payouts" description="Manage recurring tenant payouts." />
+        <Card>
+          <CardContent className="flex flex-col items-start gap-4 py-8">
+            <p role="alert">Could not load scheduled payouts: {loadError}</p>
+            <Button onClick={() => void fetchSchedules()}>Try again</Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -197,7 +238,7 @@ export default function SchedulesPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium">Frequency</label>
                   <Select
@@ -212,6 +253,18 @@ export default function SchedulesPage() {
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                     <option value="monthly">Monthly</option>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium">Missed payout behavior</label>
+                  <Select
+                    value={form.missed_run_policy}
+                    onChange={(e) =>
+                      setForm({ ...form, missed_run_policy: e.target.value as 'skip' | 'run_once' })
+                    }
+                  >
+                    <option value="skip">Skip missed occurrences</option>
+                    <option value="run_once">Make one catch-up payout</option>
                   </Select>
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -286,7 +339,7 @@ export default function SchedulesPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right flex justify-end gap-2">
-                    {(s.status === 'active' || s.status === 'paused') && (
+                    {(s.status === 'active' || s.status === 'paused' || s.status === 'failed') && (
                       <Button variant="ghost" size="sm" onClick={() => handleToggle(s)}>
                         {s.status === 'active' ? (
                           <Pause className="h-3.5 w-3.5" />
@@ -296,6 +349,9 @@ export default function SchedulesPage() {
                         {s.status === 'active' ? 'Pause' : 'Resume'}
                       </Button>
                     )}
+                    <Button variant="ghost" size="sm" onClick={() => void handleRunHistory(s.id)}>
+                      <History className="h-3.5 w-3.5" /> History
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -312,6 +368,60 @@ export default function SchedulesPage() {
           </Table>
         )}
       </Card>
+      {runHistory && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Payout history</CardTitle>
+            <CardDescription>Schedule {runHistory.scheduleId.slice(0, 8)}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {runHistory.loading ? (
+              <Skeleton className="h-20" />
+            ) : runHistory.error ? (
+              <p role="alert" className="text-danger">
+                {runHistory.error}
+              </p>
+            ) : runHistory.runs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No payout attempts yet.</p>
+            ) : (
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>Scheduled at</TableHeader>
+                    <TableHeader>Status</TableHeader>
+                    <TableHeader>Transfer</TableHeader>
+                    <TableHeader>Details</TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {runHistory.runs.map((run) => (
+                    <TableRow key={run.id}>
+                      <TableCell>{new Date(run.expected_run_at).toLocaleString()}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            run.status === 'succeeded'
+                              ? 'success'
+                              : run.status === 'failed'
+                                ? 'warning'
+                                : 'default'
+                          }
+                        >
+                          {run.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {run.transaction_id?.slice(0, 8) || '—'}
+                      </TableCell>
+                      <TableCell>{run.error || '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

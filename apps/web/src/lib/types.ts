@@ -227,11 +227,23 @@ export interface ScheduleTransferResponse {
   asset: string;
   amount: string;
   frequency: string;
-  timezone?: string;
-  missed_run_policy?: string;
+  timezone: string;
+  missed_run_policy: 'skip' | 'run_once';
   next_run_at: string;
   end_at?: string;
   status: string;
+  created_at: string;
+}
+
+export interface ScheduleRunResponse {
+  id: string;
+  schedule_id: string;
+  expected_run_at: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
+  transaction_id?: string;
+  error?: string;
+  started_at?: string;
+  completed_at?: string;
   created_at: string;
 }
 

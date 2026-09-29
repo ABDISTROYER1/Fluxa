@@ -19,6 +19,7 @@ package schedule
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -326,6 +327,63 @@ func TestRunOne_Success_CreatesRunRecordWithSucceededStatus(t *testing.T) {
 	}
 }
 
+func TestRunOne_RunOnceCoalescesMissedOccurrences(t *testing.T) {
+	repo := newFakeRunRepo()
+	transferSvc := newIdempTransferSvc()
+	first := time.Now().UTC().Add(-15 * 24 * time.Hour)
+	sch := makeActiveSchedule("sched-run-once", first)
+	sch.MissedRunPolicy = domain.MissedRunPolicyRunOnce
+	repo.schedules[sch.ID] = sch
+
+	worker := NewWorker(repo, transferSvc)
+	if err := worker.HandleRunSchedules(context.Background(), asynq.NewTask(queue.TypeRunSchedules, nil)); err != nil {
+		t.Fatalf("HandleRunSchedules error: %v", err)
+	}
+
+	wantOccurrence := first.AddDate(0, 0, 14).UTC().Truncate(time.Second)
+	run, err := repo.GetRun(context.Background(), sch.ID, wantOccurrence)
+	if err != nil {
+		t.Fatalf("GetRun for latest missed occurrence: %v", err)
+	}
+	if run.Status != domain.ScheduleRunStatusSucceeded {
+		t.Fatalf("run status = %q, want succeeded", run.Status)
+	}
+	if transferSvc.callCount() != 1 {
+		t.Fatalf("transfer calls = %d, want one catch-up payout", transferSvc.callCount())
+	}
+	if !repo.schedules[sch.ID].NextRunAt.After(time.Now().UTC()) {
+		t.Fatalf("next run %v should be after now", repo.schedules[sch.ID].NextRunAt)
+	}
+}
+
+func TestRunOne_SkipPolicyRecordsMissedOccurrenceWithoutPayout(t *testing.T) {
+	repo := newFakeRunRepo()
+	transferSvc := newIdempTransferSvc()
+	first := time.Now().UTC().Add(-15 * 24 * time.Hour)
+	sch := makeActiveSchedule("sched-skip-missed", first)
+	sch.MissedRunPolicy = domain.MissedRunPolicySkip
+	repo.schedules[sch.ID] = sch
+
+	worker := NewWorker(repo, transferSvc)
+	if err := worker.HandleRunSchedules(context.Background(), asynq.NewTask(queue.TypeRunSchedules, nil)); err != nil {
+		t.Fatalf("HandleRunSchedules error: %v", err)
+	}
+
+	run, err := repo.GetRun(context.Background(), sch.ID, first.UTC().Truncate(time.Second))
+	if err != nil {
+		t.Fatalf("GetRun for skipped occurrence: %v", err)
+	}
+	if run.Status != domain.ScheduleRunStatusSkipped {
+		t.Fatalf("run status = %q, want skipped", run.Status)
+	}
+	if transferSvc.callCount() != 0 {
+		t.Fatalf("transfer calls = %d, want none", transferSvc.callCount())
+	}
+	if !repo.schedules[sch.ID].NextRunAt.After(time.Now().UTC()) {
+		t.Fatalf("next run %v should be after now", repo.schedules[sch.ID].NextRunAt)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test: Initiation failure
 // ---------------------------------------------------------------------------
@@ -339,7 +397,7 @@ func TestRunOne_TransferFailure_RecordsFailedRun(t *testing.T) {
 	repo.schedules[sch.ID] = sch
 
 	idempKey := runIDempotencyKey("sched-2", dueAt)
-	transferSvc.failFor[idempKey] = errors.New("insufficient balance")
+	transferSvc.failFor[idempKey] = errors.New("sensitive provider response: account secret 123")
 
 	worker := NewWorker(repo, transferSvc)
 	_ = worker.HandleRunSchedules(context.Background(), asynq.NewTask(queue.TypeRunSchedules, nil))
@@ -353,6 +411,8 @@ func TestRunOne_TransferFailure_RecordsFailedRun(t *testing.T) {
 	}
 	if run.Error == nil || *run.Error == "" {
 		t.Error("error field must be populated on a failed run")
+	} else if strings.Contains(*run.Error, "sensitive provider response") || strings.Contains(*run.Error, "account secret") {
+		t.Errorf("run error exposes provider details: %q", *run.Error)
 	}
 	if run.TransactionID != nil {
 		t.Error("transaction_id must be nil on a failed run")

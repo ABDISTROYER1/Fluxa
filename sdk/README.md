@@ -114,7 +114,7 @@ const conversion = await client.fx.convert({
 const rates = await client.fx.getRates({ from: "USD", to: "USDC" });
 ```
 
-### Schedules (Recurring Transfers)
+### Scheduled Tenant Payouts
 
 ```ts
 // Create a weekly schedule
@@ -125,10 +125,16 @@ const schedule = await client.schedules.create({
   amount: "50.0000000",
   frequency: "weekly",
   start_date: "2026-09-01T00:00:00Z",
+  timezone: "Africa/Lagos",
+  missed_run_policy: "skip",
+}, {
+  // Reuse this key if you retry the same create request.
+  idempotencyKey: "d7f2bc4a-4d87-4f52-82be-356cab14203b",
 });
 
 // List all schedules
 const { schedules } = await client.schedules.list();
+const { runs } = await client.schedules.listRuns(schedule.id, { limit: 20 });
 
 // Pause/resume
 await client.schedules.update(schedule.id, { status: "paused" });

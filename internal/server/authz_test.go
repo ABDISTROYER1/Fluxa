@@ -19,10 +19,12 @@ import (
 	"github.com/fluxa/fluxa/internal/reconcile"
 	"github.com/fluxa/fluxa/internal/schedule"
 	"github.com/fluxa/fluxa/internal/status"
+	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/fluxa/fluxa/internal/wallet"
 	"github.com/fluxa/fluxa/internal/webhook"
+	"github.com/go-chi/chi/v5"
 )
 
 var authzJWTSecret = []byte("test-secret-authz")
@@ -132,6 +134,35 @@ func doRequestWithToken(t *testing.T, srv *Server, method, path, token string) i
 func doRequest(t *testing.T, srv *Server, method, path, role string) int {
 	t.Helper()
 	return doRequestWithToken(t, srv, method, path, mustToken(t, role))
+}
+
+func TestScheduleRoutesRequireTransferReadAndWriteScopes(t *testing.T) {
+	router := chi.NewRouter()
+	h := schedule.NewHandler(nil)
+	router.Route("/v1/schedules", h.Routes(
+		RequireScope(domain.ScopeTransfersRead),
+		RequireScope(domain.ScopeTransfersWrite),
+	))
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		scopes []string
+	}{
+		{name: "read requires transfers:read", method: http.MethodGet, path: "/v1/schedules/", scopes: []string{domain.ScopeTransfersWrite}},
+		{name: "create requires transfers:write", method: http.MethodPost, path: "/v1/schedules/", scopes: []string{domain.ScopeTransfersRead}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req = req.WithContext(tenant.WithScopes(req.Context(), tc.scopes))
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", w.Code)
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
