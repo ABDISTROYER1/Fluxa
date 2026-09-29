@@ -21,6 +21,9 @@ const (
 	EventConversionCompleted    = "conversion.completed"
 	EventTreasurySweepCompleted = "treasury.sweep_completed"
 	EventReconciliationDrift    = "reconciliation.drift"
+	EventFxRateAlertTriggered   = "fx.rate_alert.triggered"
+	EventWalletConsolidated     = "wallet.consolidated"
+	EventAccountClosed          = "account.closed"
 
 	EventTransferComplianceHold     = "transfer.compliance.hold"
 	EventTransferComplianceApproved = "transfer.compliance.approved"

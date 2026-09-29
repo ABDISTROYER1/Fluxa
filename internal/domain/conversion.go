@@ -19,5 +19,6 @@ type Conversion struct {
 	TxHash         string           `json:"tx_hash"`
 	MinAmountOut   *decimal.Decimal `json:"min_amount_out,omitempty"`
 	MaxSlippageBps *int             `json:"max_slippage_bps,omitempty"`
+	RateLockID     *string          `json:"rate_lock_id,omitempty"`
 	CreatedAt      time.Time        `json:"created_at"`
 }
