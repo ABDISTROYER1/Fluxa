@@ -2,6 +2,9 @@ package fx
 
 import (
 	"context"
+	"fmt"
+	"strings"
+
 	"github.com/fluxa/fluxa/internal/assets"
 )
 
@@ -14,6 +17,16 @@ type CatalogPair struct {
 type Catalog struct {
 	Assets []assets.Asset `json:"assets"`
 	Pairs  []CatalogPair  `json:"supported_pairs"`
+}
+
+func parsePair(pair string) (from, to string, ok bool) {
+	if parts := strings.Split(pair, "-"); len(parts) == 2 {
+		return parts[0], parts[1], true
+	}
+	if parts := strings.Split(pair, "/"); len(parts) == 2 {
+		return parts[0], parts[1], true
+	}
+	return "", "", false
 }
 
 func (s *service) GetCatalog(ctx context.Context, registry *assets.Registry) (*Catalog, error) {

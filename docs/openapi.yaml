@@ -45,6 +45,8 @@ tags:
     description: "Health, metrics and fiat provider webhooks"
   - name: "Claimable balances"
     description: "Claimable balance lookup and claiming"
+  - name: "Audit"
+    description: "Append-only tenant audit events and export"
 
 security:
   - BearerAuth: []
@@ -668,11 +670,23 @@ paths:
       parameters:
         - name: wallet_id
           in: query
-          required: true
+          required: false
           schema:
             type: string
             format: uuid
           description: "Filter by wallet ID"
+        - name: external_reference
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by external reference"
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by tag"
         - name: limit
           in: query
           required: false
@@ -1554,6 +1568,152 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  # ── Audit Log ─────────────────────────────────────────────────────────────
+  /v1/audit:
+    get:
+      operationId: listAuditEvents
+      summary: "List audit events"
+      description: "Returns append-only tenant audit events with filtering by action, actor, resource, and time range."
+      tags: ["Audit"]
+      parameters:
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by action name"
+        - name: actor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by actor ID"
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by resource type"
+        - name: resource_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by resource ID"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: "Start of time range"
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: "End of time range"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+          description: "Maximum results"
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: "Offset for pagination"
+      responses:
+        "200":
+          description: "List of audit events"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/audit/export:
+    get:
+      operationId: exportAuditEvents
+      summary: "Export audit events"
+      description: "Exports tenant audit events as CSV or JSON."
+      tags: ["Audit"]
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["csv", "json"]
+            default: "json"
+          description: "Export format"
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by action name"
+        - name: actor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by actor ID"
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by resource type"
+        - name: resource_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by resource ID"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: "Start of time range"
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: "End of time range"
+      responses:
+        "200":
+          description: "Exported audit events"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+            text/csv:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   # ── Usage ─────────────────────────────────────────────────────────────────
   /v1/usage:
     get:
@@ -2287,6 +2447,11 @@ components:
           type: string
           nullable: true
           description: "Optional human-readable label for the key"
+        scopes:
+          type: array
+          items:
+            type: string
+          description: "Granular permission scopes for the API key (e.g. transfers:read, transfers:write, wallets:read, wallets:write)"
 
     APIKeyCreated:
       type: object
@@ -2302,6 +2467,10 @@ components:
         label:
           type: string
           nullable: true
+        scopes:
+          type: array
+          items:
+            type: string
         created_at:
           type: string
           format: date-time
@@ -2316,6 +2485,10 @@ components:
         label:
           type: string
           nullable: true
+        scopes:
+          type: array
+          items:
+            type: string
         last_used_at:
           type: string
           format: date-time
@@ -2541,6 +2714,15 @@ components:
         amount:
           type: string
           description: "Positive decimal amount"
+        external_reference:
+          type: string
+          nullable: true
+          description: "Optional client-specified reference for reconciliation"
+        tags:
+          type: array
+          items:
+            type: string
+          description: "Optional tags for categorization and querying"
 
     TransferResponse:
       type: object
@@ -2581,6 +2763,13 @@ components:
         fee_bps:
           type: integer
           description: "Fee in basis points"
+        external_reference:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
         failure_reason:
           type: string
           description: "Machine-readable reason code when the transfer failed during initiation"
@@ -2590,6 +2779,56 @@ components:
         created_at:
           type: string
           format: date-time
+
+    # ── Audit Log ─────────────────────────────────────────────────────────
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: ["test", "live"]
+        actor_type:
+          type: string
+          enum: ["api_key", "user", "system"]
+        actor_id:
+          type: string
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        metadata:
+          type: object
+        ip_address:
+          type: string
+          nullable: true
+        user_agent:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    AuditListResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
 
     # ── Batch ─────────────────────────────────────────────────────────────
     CreateBatchRequest:

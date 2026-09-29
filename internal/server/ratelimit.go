@@ -1,7 +1,10 @@
 package server
 
 import (
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,30 +68,86 @@ func (rl *rateLimiter) cleanup() {
 	}
 }
 
+func extractClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			ip := strings.TrimSpace(parts[0])
+			if ip != "" {
+				return ip
+			}
+		}
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		ip := strings.TrimSpace(xrip)
+		if ip != "" {
+			return ip
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 // RateLimit returns a middleware that limits requests per-tenant (or per-IP for unauthenticated).
 func RateLimit(rps float64, burst int) func(http.Handler) http.Handler {
 	globalLimiter := newRateLimiter(rps, burst)
-	tenantLimiters := newRateLimiter(rps*10, burst*10) // 10x for authenticated tenants
+	tenantBurst := burst * 10
+	tenantLimiters := newRateLimiter(rps*10, tenantBurst) // 10x for authenticated tenants
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Check global rate first
-			if !globalLimiter.getLimiter("global").Allow() {
-				http.Error(w, `{"error":{"code":"RATE_LIMITED","message":"global rate limit exceeded"}}`, http.StatusTooManyRequests)
+			gLim := globalLimiter.getLimiter("global")
+			gRes := gLim.Reserve()
+			if !gRes.OK() || gRes.Delay() > 0 {
+				gRes.Cancel()
+				w.Header().Set("Retry-After", "1")
+				w.Header().Set("RateLimit-Limit", strconv.Itoa(burst))
+				w.Header().Set("RateLimit-Remaining", "0")
+				w.Header().Set("RateLimit-Reset", "1")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"global rate limit exceeded"}}`))
 				return
 			}
 
 			// Per-tenant or per-IP limiting
 			tid := tenant.IDFromContext(r.Context())
 			key := tid
+			effectiveBurst := tenantBurst
 			if key == "" {
-				key = r.RemoteAddr
+				key = extractClientIP(r)
+				effectiveBurst = burst
 			}
 
-			if !tenantLimiters.getLimiter(key).Allow() {
-				http.Error(w, `{"error":{"code":"RATE_LIMITED","message":"rate limit exceeded"}}`, http.StatusTooManyRequests)
+			tLim := tenantLimiters.getLimiter(key)
+			tRes := tLim.Reserve()
+			if !tRes.OK() || tRes.Delay() > 0 {
+				tRes.Cancel()
+				delaySec := 1
+				if tRes.Delay() > 0 {
+					delaySec = int(tRes.Delay().Seconds()) + 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(delaySec))
+				w.Header().Set("RateLimit-Limit", strconv.Itoa(effectiveBurst))
+				w.Header().Set("RateLimit-Remaining", "0")
+				w.Header().Set("RateLimit-Reset", strconv.Itoa(delaySec))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"rate limit exceeded"}}`))
 				return
 			}
+
+			remaining := int(tLim.Tokens())
+			if remaining < 0 {
+				remaining = 0
+			}
+			w.Header().Set("RateLimit-Limit", strconv.Itoa(effectiveBurst))
+			w.Header().Set("RateLimit-Remaining", strconv.Itoa(remaining))
+			w.Header().Set("RateLimit-Reset", "1")
 
 			next.ServeHTTP(w, r)
 		})

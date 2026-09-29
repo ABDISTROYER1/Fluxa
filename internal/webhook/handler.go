@@ -24,19 +24,22 @@ func NewHandler(svc Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	r.Route("/v1/webhooks", func(r chi.Router) {
-		r.Get("/", h.ListEndpoints)
-		r.Post("/", h.RegisterEndpoint)
-		r.Delete("/{id}", h.DeleteEndpoint)
-		r.Get("/{id}/deliveries", h.ListDeliveries)
-		r.Get("/secret", h.GetSigningSecret)
-		r.Post("/secret/rotate", h.RotateSigningSecret)
-		r.With(VerifyRateLimit()).Post("/verify", h.VerifySignature)
+	r.Get("/", h.ListEndpoints)
+	r.Post("/", h.RegisterEndpoint)
+	r.Delete("/{id}", h.DeleteEndpoint)
+	r.Get("/{id}/deliveries", h.ListDeliveries)
+	r.Get("/secret", h.GetSigningSecret)
+	r.Post("/secret/rotate", h.RotateSigningSecret)
+	r.With(VerifyRateLimit()).Post("/verify", h.VerifySignature)
 
-		r.Post("/subscriptions", h.CreateSubscription)
-		r.Get("/subscriptions", h.ListSubscriptions)
-		r.Delete("/subscriptions/{id}", h.DeleteSubscription)
-	})
+	r.Post("/subscriptions", h.CreateSubscription)
+	r.Get("/subscriptions", h.ListSubscriptions)
+	r.Delete("/subscriptions/{id}", h.DeleteSubscription)
+
+	r.Get("/config", h.GetConfig)
+	r.Put("/config", h.UpdateConfig)
+	r.Get("/config/deliveries", h.ListConfigDeliveries)
+	r.Post("/config/test", h.TestConfigDelivery)
 }
 
 // TriggerTestEvent is the sandbox-only escape hatch for #7: a developer holding
@@ -200,6 +203,142 @@ func (h *Handler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	cs, ok := h.svc.(ConfigService)
+	if !ok {
+		api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config service unavailable")
+		return
+	}
+	tenantID := tenant.IDFromContext(r.Context())
+	if tenantID == "" {
+		api.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "tenant required")
+		return
+	}
+	cfg, err := cs.GetConfig(r.Context())
+	if err != nil {
+		if errors.Is(err, domain.ErrWebhookConfigNotFound) {
+			api.Error(w, http.StatusNotFound, "CONFIG_NOT_FOUND", "webhook config not found")
+			return
+		}
+		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	resp := map[string]interface{}{
+		"tenant_id":         cfg.TenantID,
+		"enabled":           cfg.Enabled,
+		"url":               cfg.URL,
+		"events":            cfg.Events,
+		"paused":            cfg.Paused,
+		"resume_at":         cfg.ResumeAt,
+		"last_delivered_at": cfg.LastDeliveredAt,
+		"created_at":        cfg.CreatedAt,
+		"updated_at":        cfg.UpdatedAt,
+		"secret_configured": cfg.SecretConfigured,
+	}
+	api.JSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	cs, ok := h.svc.(ConfigService)
+	if !ok {
+		api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config service unavailable")
+		return
+	}
+	tenantID := tenant.IDFromContext(r.Context())
+	if tenantID == "" {
+		api.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "tenant required")
+		return
+	}
+
+	var req domain.WebhookConfigUpdate
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	res, err := cs.UpdateConfig(r.Context(), req)
+	if err != nil {
+		if errors.Is(err, domain.ErrWebhookConfigNotFound) {
+			api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config unavailable")
+			return
+		}
+		if errors.Is(err, ErrUnsafeWebhookURL) {
+			api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	resp := map[string]interface{}{
+		"tenant_id":         res.Config.TenantID,
+		"enabled":           res.Config.Enabled,
+		"url":               res.Config.URL,
+		"events":            res.Config.Events,
+		"paused":            res.Config.Paused,
+		"resume_at":         res.Config.ResumeAt,
+		"last_delivered_at": res.Config.LastDeliveredAt,
+		"created_at":        res.Config.CreatedAt,
+		"updated_at":        res.Config.UpdatedAt,
+		"secret_configured": res.Config.SecretConfigured,
+	}
+	if res.Secret != "" {
+		resp["secret"] = res.Secret
+	}
+	api.JSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ListConfigDeliveries(w http.ResponseWriter, r *http.Request) {
+	cs, ok := h.svc.(ConfigService)
+	if !ok {
+		api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config service unavailable")
+		return
+	}
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	offsetStr := r.URL.Query().Get("offset")
+	offset := 0
+	if offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+	deliveries, err := cs.ListConfigDeliveries(r.Context(), limit, offset)
+	if err != nil {
+		if errors.Is(err, domain.ErrWebhookConfigNotFound) {
+			api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config unavailable")
+			return
+		}
+		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	api.JSON(w, http.StatusOK, map[string]interface{}{"deliveries": deliveries})
+}
+
+func (h *Handler) TestConfigDelivery(w http.ResponseWriter, r *http.Request) {
+	cs, ok := h.svc.(ConfigService)
+	if !ok {
+		api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config service unavailable")
+		return
+	}
+	delivery, err := cs.TestDelivery(r.Context())
+	if err != nil {
+		if errors.Is(err, domain.ErrWebhookConfigNotFound) {
+			api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config unavailable")
+			return
+		}
+		api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	api.JSON(w, http.StatusOK, delivery)
 }
 
 func sign(secret, timestamp string, body []byte) string {

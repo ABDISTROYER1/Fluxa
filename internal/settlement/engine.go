@@ -178,11 +178,15 @@ func (e *Engine) SubmitTransfer(ctx context.Context, txID string) error {
 	}
 
 	var memo txnbuild.Memo
-	if tx.Reference != "" {
-		if len(tx.Reference) <= 28 {
-			memo = txnbuild.MemoText(tx.Reference)
+	memoSource := tx.Reference
+	if memoSource == "" && tx.ExternalReference != nil {
+		memoSource = *tx.ExternalReference
+	}
+	if memoSource != "" {
+		if len(memoSource) <= 28 {
+			memo = txnbuild.MemoText(memoSource)
 		} else {
-			h := sha256.Sum256([]byte(tx.Reference))
+			h := sha256.Sum256([]byte(memoSource))
 			var memoHash txnbuild.MemoHash
 			copy(memoHash[:], h[:])
 			memo = memoHash

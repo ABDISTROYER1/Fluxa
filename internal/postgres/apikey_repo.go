@@ -21,11 +21,14 @@ func (r *APIKeyRepo) Create(ctx context.Context, key *domain.APIKey) error {
 	if !key.Mode.Valid() {
 		return errors.New("api key mode must be live or test")
 	}
+	if key.Scopes == nil {
+		key.Scopes = []string{}
+	}
 	db := TxFromContext(ctx, r.db)
 	_, err := db.Exec(ctx,
-		`INSERT INTO api_keys (id, tenant_id, key_hash, prefix, mode, label, role, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		key.ID, key.TenantID, key.KeyHash, key.Prefix, key.Mode, key.Label, key.Role, key.CreatedAt,
+		`INSERT INTO api_keys (id, tenant_id, key_hash, prefix, mode, label, role, scopes, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		key.ID, key.TenantID, key.KeyHash, key.Prefix, key.Mode, key.Label, key.Role, key.Scopes, key.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert api_key: %w", err)
@@ -36,9 +39,9 @@ func (r *APIKeyRepo) Create(ctx context.Context, key *domain.APIKey) error {
 func (r *APIKeyRepo) GetByHash(ctx context.Context, hash string) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
 	err := r.db.QueryRow(ctx,
-		`SELECT id, tenant_id, key_hash, prefix, mode, label, role, last_used_at, revoked_at, created_at FROM api_keys WHERE key_hash = $1`,
+		`SELECT id, tenant_id, key_hash, prefix, mode, label, role, COALESCE(scopes, '{}'), last_used_at, revoked_at, created_at FROM api_keys WHERE key_hash = $1`,
 		hash,
-	).Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Mode, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
+	).Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Mode, &k.Label, &k.Role, &k.Scopes, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("api key not found")
@@ -53,7 +56,7 @@ func (r *APIKeyRepo) GetByHash(ctx context.Context, hash string) (*domain.APIKey
 // testnet.
 func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string, mode domain.Mode) ([]*domain.APIKey, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, tenant_id, key_hash, prefix, mode, label, role, last_used_at, revoked_at, created_at
+		`SELECT id, tenant_id, key_hash, prefix, mode, label, role, COALESCE(scopes, '{}'), last_used_at, revoked_at, created_at
 		 FROM api_keys WHERE tenant_id = $1 AND mode = $2 ORDER BY created_at DESC`,
 		tenantID, mode,
 	)
@@ -65,7 +68,7 @@ func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string, mode dom
 	var keys []*domain.APIKey
 	for rows.Next() {
 		k := &domain.APIKey{}
-		if err := rows.Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Mode, &k.Label, &k.Role, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.TenantID, &k.KeyHash, &k.Prefix, &k.Mode, &k.Label, &k.Role, &k.Scopes, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)

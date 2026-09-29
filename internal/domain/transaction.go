@@ -28,6 +28,14 @@ const (
 	TypeFunding    TransactionType = "funding"
 )
 
+type TransactionFilter struct {
+	WalletID          string
+	ExternalReference string
+	Tag               string
+	Limit             int
+	Offset            int
+}
+
 type Transaction struct {
 	ID                  string
 	TxHash              string
@@ -43,6 +51,10 @@ type Transaction struct {
 	Mode                Mode
 	BatchID             *string
 	Reference           string
+	ExternalReference   *string
+	Tags                []string
+	FailureReason       string
+	FailureMessage      string
 	CreatedAt           time.Time
 	ReconciledAt        *time.Time
 	RequeueCount        int

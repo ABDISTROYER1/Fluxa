@@ -48,6 +48,14 @@ func (f *fakeTransferSvc) GetTransaction(_ context.Context, id string) (*domain.
 	return nil, domain.ErrTransactionNotFound
 }
 
+func (f *fakeTransferSvc) InitiateTransferExt(ctx context.Context, params transfer.TransferParams) (*domain.Transaction, error) {
+	return f.InitiateTransfer(ctx, params.FromID, params.ToID, params.Asset, params.Amount)
+}
+
+func (f *fakeTransferSvc) ListTransactionsFiltered(_ context.Context, _ domain.TransactionFilter) ([]*domain.Transaction, error) {
+	return nil, nil
+}
+
 func (f *fakeTransferSvc) ListTransactions(_ context.Context, walletID string, limit, offset int) ([]*domain.Transaction, error) {
 	return nil, nil
 }
