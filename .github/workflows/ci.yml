@@ -37,6 +37,9 @@ jobs:
       - name: Run tests
         run: go test ./... -race -count=1 -timeout 90s
 
+      - name: Validate migration versions and clean database
+        run: go test ./internal/postgres -run 'TestMigrationFilesHaveUniqueVersions|TestMigrations' -count=1 -timeout 90s
+
       - name: Lint (golangci-lint)
         uses: golangci/golangci-lint-action@v6
         with:

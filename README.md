@@ -136,6 +136,15 @@ cp .env.example .env
 # Run migrations
 make migrate
 
+# Validate migration filenames and SQL without changing the database
+go test ./internal/postgres -run TestMigrationFilesHaveUniqueVersions
+
+Migration filenames use one unique numeric or timestamp version followed by a
+description, with `.up.sql` and (when reversible) `.down.sql` files sharing
+that version. Never reuse a version or edit a migration that has been applied;
+add the next migration instead. Run the filename check and the Postgres-backed
+migration test before opening a pull request.
+
 # Start the API (Terminal 1)
 make run-api
 
