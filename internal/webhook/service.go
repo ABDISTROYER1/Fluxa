@@ -800,7 +800,9 @@ func (s *service) attemptConfigDelivery(ctx context.Context, config *domain.Tena
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Fluxa-Signature", sign(config.Secret, delivery.Payload))
+	timestamp := fmt.Sprintf("%d", now.Unix())
+	req.Header.Set("X-Fluxa-Signature", sign(config.Secret, timestamp, []byte(delivery.Payload)))
+	req.Header.Set("X-Fluxa-Timestamp", timestamp)
 	req.Header.Set("X-Fluxa-Event", string(delivery.EventType))
 	req.Header.Set("X-Fluxa-Tenant-ID", delivery.TenantID)
 

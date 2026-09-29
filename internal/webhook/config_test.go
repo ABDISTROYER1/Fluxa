@@ -470,10 +470,11 @@ func TestDeliverConfig_PausedRecordsWithoutSending(t *testing.T) {
 }
 
 func TestDispatchToTenants_SendsSignedPayloadAndRecordsSuccess(t *testing.T) {
-	var gotSig, gotEvent, gotTenant string
+	var gotSig, gotTimestamp, gotEvent, gotTenant string
 	var gotBody []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSig = r.Header.Get("X-Fluxa-Signature")
+		gotTimestamp = r.Header.Get("X-Fluxa-Timestamp")
 		gotEvent = r.Header.Get("X-Fluxa-Event")
 		gotTenant = r.Header.Get("X-Fluxa-Tenant-ID")
 		gotBody, _ = io.ReadAll(r.Body)
@@ -511,7 +512,10 @@ func TestDispatchToTenants_SendsSignedPayloadAndRecordsSuccess(t *testing.T) {
 
 	// The one-time secret from creation is what signs deliveries; the config
 	// value returned to the caller is redacted.
-	if want := sign(created.Secret, deliveries[0].Payload); gotSig != want {
+	if gotTimestamp == "" {
+		t.Fatal("missing X-Fluxa-Timestamp header")
+	}
+	if want := sign(created.Secret, gotTimestamp, []byte(deliveries[0].Payload)); gotSig != want {
 		t.Fatalf("signature = %q, want %q", gotSig, want)
 	}
 	if gotEvent != string(domain.EventTransferSettled) {
