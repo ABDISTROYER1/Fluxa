@@ -12,6 +12,7 @@ import (
 	"github.com/fluxa/fluxa/internal/anchor"
 	"github.com/fluxa/fluxa/internal/apikey"
 	"github.com/fluxa/fluxa/internal/assets"
+	"github.com/fluxa/fluxa/internal/audit"
 	"github.com/fluxa/fluxa/internal/auth"
 	"github.com/fluxa/fluxa/internal/batch"
 	"github.com/fluxa/fluxa/internal/claimable"
@@ -140,6 +141,7 @@ func main() {
 	transferIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
 		TTL:                time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
 		AllowLeaseRecovery: true,
+	})
 	batchIdemMW := idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
 		Required: true,
 		TTL:      time.Duration(cfg.IdempotencyTTLHours) * time.Hour,
@@ -273,7 +275,7 @@ func main() {
 	settlementWorker := settlement.NewWorker(engine)
 
 	idx := indexer.New(walletRepo, txRepo, stellarClient)
-	indexerWorker := indexer.NewWorker(idx, *cfg)
+	indexerWorker := indexer.NewWorker(idx, cfg)
 
 	asynqSrv := asynq.NewServer(asynqOpt, asynq.Config{
 		Concurrency: 5,
@@ -340,13 +342,18 @@ func main() {
 		walletHandler = walletHandler.WithContractService(contractSvc).
 			WithGuardianGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 	}
+	auditRepo := postgres.NewAuditRepo(repoDB)
+	auditSvc := audit.NewService(auditRepo)
+	auditHandler := audit.NewHandler(auditSvc)
+	usageHandler := server.NewUsageHandler(repoDB)
+
 	transferHandler := transfer.NewHandler(transferSvc).WithIdempotency(transferIdemMW)
 	fxHandler := fx.NewHandler(fxSvc).WithIdempotency(idemMW)
 	fiatHandler := fiat.NewHandler(fiatSvc).WithIdempotency(idemMW)
 	anchorFiatHandler := fiat.NewAnchorHandler(anchorFiatSvc)
 	anchorHandler := anchor.NewHandler(anchorRegistry)
 	feeHandler := fees.NewHandler(feeSvc)
-	apikeyHandler := apikey.NewHandler(apiKeyRepo)
+	apikeyHandler := apikey.NewHandler(apiKeyRepo).WithAuditLogger(auditSvc)
 	webhookHandler := webhook.NewHandler(webhookSvc)
 	assetRegistry := assets.NewRegistry(cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer)
 	batchHandler := batch.NewHandler(batchSvc).WithIdempotency(batchIdemMW).WithAssetValidator(assetRegistry.IsSupported)
@@ -378,7 +385,7 @@ func main() {
 		anchorFiatHandler, anchorHandler,
 		feeHandler, reconcileHandler, apikeyHandler, apiKeyRepo,
 		webhookHandler, batchHandler, scheduleHandler, treasuryHandler, claimableHandler,
-		statusHandler, complianceHandler, jwtSecretBytes, cfg.Port,
+		statusHandler, complianceHandler, auditHandler, usageHandler, jwtSecretBytes, cfg.Port,
 		map[string]server.DependencyCheck{
 			"postgres": db.Ping,
 			"replica":  func(ctx context.Context) error { return repoDB.ReplicaAvailable(ctx) },

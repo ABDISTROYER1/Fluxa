@@ -14,12 +14,22 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type AuditLogger interface {
+	Log(r *http.Request, action, resourceType, resourceID string, metadata map[string]interface{})
+}
+
 type Handler struct {
-	repo *postgres.APIKeyRepo
+	repo  *postgres.APIKeyRepo
+	audit AuditLogger
 }
 
 func NewHandler(repo *postgres.APIKeyRepo) *Handler {
 	return &Handler{repo: repo}
+}
+
+func (h *Handler) WithAuditLogger(audit AuditLogger) *Handler {
+	h.audit = audit
+	return h
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -31,9 +41,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Label *string `json:"label"`
-		Role  string  `json:"role"`
-		Mode  string  `json:"mode"`
+		Label  *string  `json:"label"`
+		Role   string   `json:"role"`
+		Mode   string   `json:"mode"`
+		Scopes []string `json:"scopes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		api.BadRequest(w, "invalid request body")
@@ -46,6 +57,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Role != domain.RoleOwner && req.Role != domain.RoleAdmin && req.Role != domain.RoleDeveloper && req.Role != domain.RoleViewer {
 		api.BadRequest(w, "invalid role")
 		return
+	}
+
+	if len(req.Scopes) > 0 {
+		if err := domain.ValidateScopes(req.Scopes); err != nil {
+			api.BadRequest(w, err.Error())
+			return
+		}
 	}
 
 	requestedMode := mode
@@ -71,6 +89,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scopes := req.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
+
 	key := &domain.APIKey{
 		ID:        uuid.New().String(),
 		TenantID:  tenantID,
@@ -79,6 +102,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Mode:      requestedMode,
 		Label:     req.Label,
 		Role:      req.Role,
+		Scopes:    scopes,
 		CreatedAt: time.Now().UTC(),
 	}
 
@@ -88,6 +112,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.audit != nil {
+		h.audit.Log(r, "api_key.created", "api_key", key.ID, map[string]interface{}{
+			"prefix": key.Prefix,
+			"role":   key.Role,
+			"scopes": key.Scopes,
+			"mode":   key.Mode,
+		})
+	}
+
 	api.JSON(w, http.StatusCreated, map[string]interface{}{
 		"id":         key.ID,
 		"key":        raw, // raw key is returned exactly once
@@ -95,6 +128,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		"mode":       key.Mode,
 		"label":      key.Label,
 		"role":       key.Role,
+		"scopes":     key.Scopes,
 		"created_at": key.CreatedAt,
 	})
 }
@@ -123,6 +157,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			"mode":         k.Mode,
 			"label":        k.Label,
 			"role":         k.Role,
+			"scopes":       k.Scopes,
 			"last_used_at": k.LastUsedAt,
 			"revoked_at":   k.RevokedAt,
 			"created_at":   k.CreatedAt,
@@ -145,5 +180,12 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		api.Error(w, http.StatusNotFound, "API_KEY_NOT_FOUND", "API key not found in this environment")
 		return
 	}
+
+	if h.audit != nil {
+		h.audit.Log(r, "api_key.revoked", "api_key", id, map[string]interface{}{
+			"id": id,
+		})
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

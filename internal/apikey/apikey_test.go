@@ -180,3 +180,53 @@ func TestPrefixUniqueness(t *testing.T) {
 		}
 	}
 }
+
+func TestHasScope(t *testing.T) {
+	// Empty scopes means unrestricted access (backward compatibility)
+	if !domain.HasScope(nil, domain.ScopeTransfersWrite) {
+		t.Error("nil scopes should allow any scope")
+	}
+	if !domain.HasScope([]string{}, domain.ScopeTransfersWrite) {
+		t.Error("empty scopes should allow any scope")
+	}
+
+	// Wildcard
+	if !domain.HasScope([]string{"*"}, domain.ScopeTransfersWrite) {
+		t.Error("wildcard '*' should allow any scope")
+	}
+	if !domain.HasScope([]string{"admin"}, domain.ScopeTransfersWrite) {
+		t.Error("admin scope should allow any scope")
+	}
+
+	// Resource wildcard
+	if !domain.HasScope([]string{"transfers:*"}, domain.ScopeTransfersWrite) {
+		t.Error("resource wildcard 'transfers:*' should allow 'transfers:write'")
+	}
+	if !domain.HasScope([]string{"transfers:*"}, domain.ScopeTransfersRead) {
+		t.Error("resource wildcard 'transfers:*' should allow 'transfers:read'")
+	}
+	if domain.HasScope([]string{"transfers:*"}, domain.ScopeWalletsRead) {
+		t.Error("resource wildcard 'transfers:*' should not allow 'wallets:read'")
+	}
+
+	// Exact match
+	if !domain.HasScope([]string{"transfers:read", "wallets:read"}, domain.ScopeTransfersRead) {
+		t.Error("should allow exact matching scope")
+	}
+	if domain.HasScope([]string{"transfers:read"}, domain.ScopeTransfersWrite) {
+		t.Error("should not allow write when only read is granted")
+	}
+}
+
+func TestValidateScopes(t *testing.T) {
+	valid := []string{"transfers:read", "transfers:write", "wallets:*", "*"}
+	if err := domain.ValidateScopes(valid); err != nil {
+		t.Fatalf("expected valid scopes to pass, got: %v", err)
+	}
+
+	invalid := []string{"transfers:read", "invalid:scope"}
+	if err := domain.ValidateScopes(invalid); err == nil {
+		t.Fatal("expected invalid scope to fail validation")
+	}
+}
+

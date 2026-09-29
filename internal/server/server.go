@@ -8,6 +8,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/anchor"
 	"github.com/fluxa/fluxa/internal/apikey"
+	"github.com/fluxa/fluxa/internal/audit"
 	"github.com/fluxa/fluxa/internal/auth"
 	"github.com/fluxa/fluxa/internal/batch"
 	"github.com/fluxa/fluxa/internal/claimable"
@@ -55,6 +56,8 @@ func New(
 	claimableHandler *claimable.Handler,
 	statusHandler *status.Handler,
 	complianceHandler *compliance.Handler,
+	auditHandler *audit.Handler,
+	usageHandler *UsageHandler,
 	jwtSecret []byte,
 	port string,
 	healthChecks map[string]DependencyCheck,
@@ -103,10 +106,7 @@ func New(
 			r.Post("/refresh", authHandler.Refresh)
 		})
 		r.With(authLimiter.Limit(ExtractInviteToken)).Post("/org/invites/accept", orgHandler.AcceptInvite)
-		// Registered as a direct path (not r.Route("/webhooks", ...)) because
-		// the authenticated group below already mounts a "/webhooks"
-		// sub-router for Register/List/Delete/deliveries; chi doesn't support
-		// mounting two independent sub-routers at the same pattern.
+		// Registered as a direct path because the authenticated group mounts /webhooks
 		r.With(webhook.VerifyRateLimit()).Post("/webhooks/verify", webhookHandler.VerifySignature)
 
 		// Authenticated endpoints
@@ -116,10 +116,24 @@ func New(
 
 			// API Keys (Owner & Admin only for creation & revocation)
 			r.Route("/keys", func(r chi.Router) {
-				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Post("/", apikeyHandler.Create)
-				r.Get("/", apikeyHandler.List)
-				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Delete("/{id}", apikeyHandler.Revoke)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeKeysWrite)).Post("/", apikeyHandler.Create)
+				r.With(RequireScope(domain.ScopeKeysRead)).Get("/", apikeyHandler.List)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeKeysWrite)).Delete("/{id}", apikeyHandler.Revoke)
 			})
+
+			// Audit Log (Tenant-visible append-only audit log)
+			if auditHandler != nil {
+				r.Route("/audit", func(r chi.Router) {
+					r.Use(RequireScope(domain.ScopeAuditRead))
+					r.Get("/", auditHandler.List)
+					r.Get("/export", auditHandler.Export)
+				})
+			}
+
+			// Usage Introspection
+			if usageHandler != nil {
+				r.Get("/usage", usageHandler.GetUsage)
+			}
 
 			// Org Member Management (Owner & Admin for invite, role update, remove)
 			r.Route("/org", func(r chi.Router) {
@@ -131,10 +145,10 @@ func New(
 
 			// Webhooks (Owner & Admin for management, viewer/dev read)
 			r.Route("/webhooks", func(r chi.Router) {
-				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Post("/", webhookHandler.RegisterEndpoint)
-				r.Get("/", webhookHandler.ListEndpoints)
-				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Delete("/{id}", webhookHandler.DeleteEndpoint)
-				r.Get("/{id}/deliveries", webhookHandler.ListDeliveries)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeWebhooksWrite)).Post("/", webhookHandler.RegisterEndpoint)
+				r.With(RequireScope(domain.ScopeWebhooksRead)).Get("/", webhookHandler.ListEndpoints)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeWebhooksWrite)).Delete("/{id}", webhookHandler.DeleteEndpoint)
+				r.With(RequireScope(domain.ScopeWebhooksRead)).Get("/{id}/deliveries", webhookHandler.ListDeliveries)
 			})
 
 			// Sandbox-only escape hatch: lets a developer drive a webhook event
@@ -144,17 +158,17 @@ func New(
 			// Operational routes (Require not viewer for mutating calls)
 			r.Group(func(r chi.Router) {
 				r.Use(RequireNotViewer)
-				r.Route("/wallets", walletHandler.Routes())
+				r.With(RequireScope(domain.ScopeWalletsRead)).Route("/wallets", walletHandler.Routes())
 				r.Route("/wallets/{id}/deposit", fiatHandler.DepositRoutes())
 				r.Route("/wallets/{id}/withdraw", fiatHandler.WithdrawRoutes())
 				r.Route("/webhooks/fiat", fiatHandler.WebhookRoutes())
-				r.Route("/fiat", anchorFiatHandler.Routes())
-				r.Route("/transfers", transferHandler.Routes())
-				r.Route("/transfers/batch", batchHandler.Routes())
-				r.Route("/transactions", transferHandler.TransactionRoutes())
+				r.With(RequireScope(domain.ScopeFiatRead)).Route("/fiat", anchorFiatHandler.Routes())
+				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transfers", transferHandler.Routes())
+				r.With(RequireScope(domain.ScopeTransfersWrite)).Route("/transfers/batch", batchHandler.Routes())
+				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transactions", transferHandler.TransactionRoutes())
 				r.Route("/schedules", scheduleHandler.Routes())
-				r.Route("/fx", fxHandler.Routes())
-				r.Route("/fees", feeHandler.Routes())
+				r.With(RequireScope(domain.ScopeFXRead)).Route("/fx", fxHandler.Routes())
+				r.With(RequireScope(domain.ScopeFeesRead)).Route("/fees", feeHandler.Routes())
 				if claimableHandler != nil {
 					r.Route("/claimable-balances", claimableHandler.Routes())
 				}
@@ -170,9 +184,7 @@ func New(
 				if statusHandler != nil {
 					statusHandler.RegisterAdminRoutes(r)
 				}
-				// Mounted at /admin/compliance, not /admin: reconcileHandler
-				// already owns the bare /admin pattern above, and chi panics
-				// when two sub-routers share one.
+				// Mounted at /admin/compliance, not /admin
 				if complianceHandler != nil {
 					r.Route("/admin/compliance", complianceHandler.AdminRoutes())
 				}
@@ -189,12 +201,6 @@ func New(
 	}
 
 	return &Server{router: r, http: srv}
-}
-
-// Router exposes the underlying chi router so callers (and tests) can mount
-// additional handlers or drive requests through the full middleware stack.
-func (s *Server) Router() chi.Router {
-	return s.router
 }
 
 func (s *Server) Start() error {

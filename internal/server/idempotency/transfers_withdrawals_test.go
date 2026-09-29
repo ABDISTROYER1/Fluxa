@@ -113,10 +113,6 @@ func (m *memoryIdemRepo) DeleteExpired(_ context.Context, batchSize int) (int64,
 	return deleted, nil
 }
 
-func (m *memoryIdemRepo) DeleteExpired(_ context.Context, _ int) (int64, error) {
-	return 0, nil
-}
-
 func (m *memoryIdemRepo) expireKey(orgID, key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

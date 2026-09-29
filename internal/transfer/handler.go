@@ -35,6 +35,7 @@ func (h *Handler) Routes() func(r chi.Router) {
 			post = r.With(h.idem).Post
 		}
 		post("/", h.initiateTransfer)
+		r.Get("/", h.listTransfers)
 		r.Get("/{id}", h.getTransaction)
 	}
 }
@@ -46,49 +47,56 @@ func (h *Handler) TransactionRoutes() func(r chi.Router) {
 }
 
 type createTransferRequest struct {
-	FromWalletID string `json:"from_wallet_id" validate:"required,uuid"`
-	ToWalletID   string `json:"to_wallet_id"   validate:"required,uuid"`
-	Asset        string `json:"asset"          validate:"required"`
-	Amount       string `json:"amount"         validate:"required"`
+	FromWalletID      string   `json:"from_wallet_id" validate:"required,uuid"`
+	ToWalletID        string   `json:"to_wallet_id"   validate:"required,uuid"`
+	Asset             string   `json:"asset"          validate:"required"`
+	Amount            string   `json:"amount"         validate:"required"`
+	Reference         string   `json:"reference,omitempty"`
+	ExternalReference *string  `json:"external_reference,omitempty"`
+	Tags              []string `json:"tags,omitempty"`
 }
 
 type transferResponse struct {
-	ID         string `json:"id"`
-	TxHash     string `json:"tx_hash,omitempty"`
-	Type       string `json:"type"`
-	Status     string `json:"status"`
-	Mode       string `json:"mode"`
-	FromWallet string `json:"from_wallet_id"`
-	ToWallet   string `json:"to_wallet_id"`
-	Asset      string `json:"asset"`
-	Amount     string `json:"amount"`
-	FeeAmount  string `json:"fee_amount"`
-	NetAmount  string `json:"net_amount"`
-	FeeBps     int    `json:"fee_bps"`
-	Reference  string `json:"reference,omitempty"`
-	FailureReason  string `json:"failure_reason,omitempty"`
-	FailureMessage string `json:"failure_message,omitempty"`
-	CreatedAt  string `json:"created_at"`
+	ID                string   `json:"id"`
+	TxHash            string   `json:"tx_hash,omitempty"`
+	Type              string   `json:"type"`
+	Status            string   `json:"status"`
+	Mode              string   `json:"mode"`
+	FromWallet        string   `json:"from_wallet_id"`
+	ToWallet          string   `json:"to_wallet_id"`
+	Asset             string   `json:"asset"`
+	Amount            string   `json:"amount"`
+	FeeAmount         string   `json:"fee_amount"`
+	NetAmount         string   `json:"net_amount"`
+	FeeBps            int      `json:"fee_bps"`
+	Reference         string   `json:"reference,omitempty"`
+	ExternalReference *string  `json:"external_reference,omitempty"`
+	Tags              []string `json:"tags,omitempty"`
+	FailureReason     string   `json:"failure_reason,omitempty"`
+	FailureMessage    string   `json:"failure_message,omitempty"`
+	CreatedAt         string   `json:"created_at"`
 }
 
 func toTransferResponse(tx *domain.Transaction) transferResponse {
 	return transferResponse{
-		ID:         tx.ID,
-		TxHash:     tx.TxHash,
-		Type:       string(tx.Type),
-		Status:     string(tx.Status),
-		Mode:       string(tx.Mode),
-		FromWallet: tx.FromWallet,
-		ToWallet:   tx.ToWallet,
-		Asset:      tx.Asset,
-		Amount:     tx.Amount.StringFixed(7),
-		FeeAmount:  tx.Fee.StringFixed(7),
-		NetAmount:  tx.NetAmount().StringFixed(7),
-		FeeBps:     tx.FeeBps,
-		Reference:      tx.Reference,
-		FailureReason:  tx.FailureReason,
-		FailureMessage: tx.FailureMessage,
-		CreatedAt:  tx.CreatedAt.Format(time.RFC3339),
+		ID:                tx.ID,
+		TxHash:            tx.TxHash,
+		Type:              string(tx.Type),
+		Status:            string(tx.Status),
+		Mode:              string(tx.Mode),
+		FromWallet:        tx.FromWallet,
+		ToWallet:          tx.ToWallet,
+		Asset:             tx.Asset,
+		Amount:            tx.Amount.StringFixed(7),
+		FeeAmount:         tx.Fee.StringFixed(7),
+		NetAmount:         tx.NetAmount().StringFixed(7),
+		FeeBps:            tx.FeeBps,
+		Reference:         tx.Reference,
+		ExternalReference: tx.ExternalReference,
+		Tags:              tx.Tags,
+		FailureReason:     tx.FailureReason,
+		FailureMessage:    tx.FailureMessage,
+		CreatedAt:         tx.CreatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -113,7 +121,17 @@ func (h *Handler) initiateTransfer(w http.ResponseWriter, r *http.Request) {
 	if idempotencyKey == "" {
 		idempotencyKey = r.Header.Get("Idempotency-Key")
 	}
-	tx, err := h.svc.InitiateTransferIdempotent(r.Context(), req.FromWalletID, req.ToWalletID, req.Asset, amount, idempotencyKey)
+
+	tx, err := h.svc.InitiateTransferExt(r.Context(), TransferParams{
+		FromID:            req.FromWalletID,
+		ToID:              req.ToWalletID,
+		Asset:             req.Asset,
+		Amount:            amount,
+		Reference:         req.Reference,
+		ExternalReference: req.ExternalReference,
+		Tags:              req.Tags,
+		IdempotencyKey:    idempotencyKey,
+	})
 	if err != nil {
 		api.HandleDomainError(w, err)
 		return
@@ -132,17 +150,32 @@ func (h *Handler) getTransaction(w http.ResponseWriter, r *http.Request) {
 	api.JSON(w, http.StatusOK, toTransferResponse(tx))
 }
 
+func (h *Handler) listTransfers(w http.ResponseWriter, r *http.Request) {
+	h.listFiltered(w, r)
+}
+
 func (h *Handler) listTransactions(w http.ResponseWriter, r *http.Request) {
-	walletID := r.URL.Query().Get("wallet_id")
-	if walletID == "" {
-		api.BadRequest(w, "wallet_id query param is required")
-		return
+	h.listFiltered(w, r)
+}
+
+func (h *Handler) listFiltered(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	walletID := q.Get("wallet_id")
+	extRef := q.Get("external_reference")
+	tag := q.Get("tag")
+
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	filter := domain.TransactionFilter{
+		WalletID:          walletID,
+		ExternalReference: extRef,
+		Tag:               tag,
+		Limit:             limit,
+		Offset:            offset,
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-	txs, err := h.svc.ListTransactions(r.Context(), walletID, limit, offset)
+	txs, err := h.svc.ListTransactionsFiltered(r.Context(), filter)
 	if err != nil {
 		api.HandleDomainError(w, err)
 		return

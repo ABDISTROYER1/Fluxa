@@ -142,16 +142,16 @@ const (
 )
 
 type TenantWebhookDelivery struct {
-	ID           string
-	TenantID     string
-	EventType    EventType
-	Payload      []byte
-	Status       DeliveryStatus
-	ResponseCode *int
-	AttemptCount int
-	LastAttempt  *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID           string         `json:"id"`
+	TenantID     string         `json:"tenant_id"`
+	EventType    EventType      `json:"event_type"`
+	Payload      []byte         `json:"payload"`
+	Status       DeliveryStatus `json:"status"`
+	ResponseCode *int           `json:"response_code,omitempty"`
+	AttemptCount int            `json:"attempt_count"`
+	LastAttempt  *time.Time     `json:"last_attempt,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 // WebhookConfigUpdate is a partial update: every field is a pointer so callers
@@ -159,12 +159,12 @@ type TenantWebhookDelivery struct {
 // *[]string for the same reason — an explicit empty list clears subscriptions,
 // while omitting it leaves the current list untouched.
 type WebhookConfigUpdate struct {
-	Enabled      *bool
-	URL          *string
-	Events       *[]string
-	Paused       *bool
-	ResumeAt     *time.Time
-	RotateSecret bool
+	Enabled      *bool      `json:"enabled,omitempty"`
+	URL          *string    `json:"url,omitempty"`
+	Events       *[]string  `json:"events,omitempty"`
+	Paused       *bool      `json:"paused,omitempty"`
+	ResumeAt     *time.Time `json:"resume_at,omitempty"`
+	RotateSecret bool       `json:"rotate_secret,omitempty"`
 }
 
 type WebhookConfigResult struct {

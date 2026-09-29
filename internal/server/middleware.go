@@ -191,12 +191,27 @@ func AuthMiddleware(repo *postgres.APIKeyRepo, jwtSecret []byte, validator Membe
 			ctx := tenant.WithID(r.Context(), key.TenantID)
 			ctx = tenant.WithMode(ctx, key.Mode)
 			ctx = tenant.WithUser(ctx, "", key.Role)
+			ctx = tenant.WithScopes(ctx, key.Scopes)
+			ctx = tenant.WithAPIKeyID(ctx, key.ID)
 			requestLogger := zerolog.Ctx(ctx).With().
 				Str("tenant_id", key.TenantID).
 				Str("mode", string(key.Mode)).
 				Logger()
 			ctx = requestLogger.WithContext(ctx)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func RequireScope(requiredScope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			scopes, hasScopes := tenant.ScopesFromContext(r.Context())
+			if hasScopes && !domain.HasScope(scopes, requiredScope) {
+				api.Error(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "API key does not have the required scope: "+requiredScope)
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

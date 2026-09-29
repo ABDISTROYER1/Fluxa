@@ -49,6 +49,18 @@ type ReconcileResult struct {
 	Drift    decimal.Decimal
 }
 
+type TransferParams struct {
+	FromID            string
+	ToID              string
+	Asset             string
+	Amount            decimal.Decimal
+	BatchID           string
+	Reference         string
+	ExternalReference *string
+	Tags              []string
+	IdempotencyKey    string
+}
+
 type Service interface {
 	InitiateTransfer(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal) (*domain.Transaction, error)
 	// InitiateTransferIdempotent behaves like InitiateTransfer, but first
@@ -59,8 +71,10 @@ type Service interface {
 	// using InitiateTransfer directly.
 	InitiateTransferIdempotent(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, idempotencyKey string) (*domain.Transaction, error)
 	InitiateBatchTransfer(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, batchID, reference string) (*domain.Transaction, error)
+	InitiateTransferExt(ctx context.Context, params TransferParams) (*domain.Transaction, error)
 	GetTransaction(ctx context.Context, id string) (*domain.Transaction, error)
 	ListTransactions(ctx context.Context, walletID string, limit, offset int) ([]*domain.Transaction, error)
+	ListTransactionsFiltered(ctx context.Context, filter domain.TransactionFilter) ([]*domain.Transaction, error)
 	WithStellarClient(stellarClient stellar.Client) Service
 	// WithScreener enables compliance screening. It is optional so the
 	// worker's screener-less wiring still compiles; when unset, transfers
@@ -136,11 +150,37 @@ func (s *service) WithAuditLogger(audit AuditLogger) Service {
 }
 
 func (s *service) InitiateTransfer(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal) (*domain.Transaction, error) {
-	return s.initiate(ctx, fromID, toID, asset, amount, "", "", "")
+	return s.initiate(ctx, TransferParams{
+		FromID: fromID,
+		ToID:   toID,
+		Asset:  asset,
+		Amount: amount,
+	})
 }
 
 func (s *service) InitiateTransferIdempotent(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, idempotencyKey string) (*domain.Transaction, error) {
-	if idempotencyKey != "" {
+	return s.InitiateTransferExt(ctx, TransferParams{
+		FromID:         fromID,
+		ToID:           toID,
+		Asset:          asset,
+		Amount:         amount,
+		IdempotencyKey: idempotencyKey,
+	})
+}
+
+func (s *service) InitiateBatchTransfer(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, batchID, reference string) (*domain.Transaction, error) {
+	return s.initiate(ctx, TransferParams{
+		FromID:    fromID,
+		ToID:      toID,
+		Asset:     asset,
+		Amount:    amount,
+		BatchID:   batchID,
+		Reference: reference,
+	})
+}
+
+func (s *service) InitiateTransferExt(ctx context.Context, params TransferParams) (*domain.Transaction, error) {
+	if params.IdempotencyKey != "" {
 		if recordRepo, ok := s.repo.(IdempotencyRecordRepository); ok {
 			if recordID := idempotency.RecordIDFromContext(ctx); recordID != "" {
 				if existing, err := recordRepo.GetByIdempotencyRecordID(ctx, recordID); err == nil {
@@ -150,20 +190,24 @@ func (s *service) InitiateTransferIdempotent(ctx context.Context, fromID, toID, 
 				}
 			}
 		}
-		if existing, err := s.repo.GetByIdempotencyKey(ctx, tenant.IDFromContext(ctx), idempotencyKey); err == nil {
+		if existing, err := s.repo.GetByIdempotencyKey(ctx, tenant.IDFromContext(ctx), params.IdempotencyKey); err == nil {
 			return existing, nil
 		} else if !errors.Is(err, domain.ErrTransactionNotFound) {
 			return nil, fmt.Errorf("check idempotency key: %w", err)
 		}
 	}
-	return s.initiate(ctx, fromID, toID, asset, amount, "", "", idempotencyKey)
+	return s.initiate(ctx, params)
 }
 
-func (s *service) InitiateBatchTransfer(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, batchID, reference string) (*domain.Transaction, error) {
-	return s.initiate(ctx, fromID, toID, asset, amount, batchID, reference, "")
-}
+func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.Transaction, error) {
+	fromID := params.FromID
+	toID := params.ToID
+	asset := params.Asset
+	amount := params.Amount
+	batchID := params.BatchID
+	reference := params.Reference
+	idempotencyKey := params.IdempotencyKey
 
-func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, batchID, reference, idempotencyKey string) (*domain.Transaction, error) {
 	if fromID == toID {
 		return nil, domain.ErrSelfTransfer
 	}
@@ -194,9 +238,6 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 		}
 	}
 
-	// Screening runs here rather than in the handler so that batch transfers
-	// and scheduled payouts, which both funnel through initiate(), are covered
-	// by the same call.
 	status := domain.StatusPending
 	var decision *domain.ScreeningDecision
 	if s.screener != nil {
@@ -210,9 +251,6 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 			Amount:        amount,
 		})
 		if err != nil || decision == nil {
-			// Fail closed. A screening failure must never become a pass, so an
-			// unusable result is treated as a hold rather than propagated as a
-			// 500 that a client would simply retry.
 			decision = &domain.ScreeningDecision{
 				Status:     domain.ScreeningHold,
 				RulesFired: []string{"screener_error"},
@@ -223,8 +261,6 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 
 		switch decision.Status {
 		case domain.ScreeningBlocked:
-			// No transaction row is written: the compliance_blocks row the
-			// screener already persisted is the record of this attempt.
 			return nil, domain.ErrTransferBlockedSanctions
 		case domain.ScreeningHold:
 			status = domain.StatusComplianceHold
@@ -246,22 +282,29 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 		batchPtr = &batchID
 	}
 
+	tags := params.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
 	tx := &domain.Transaction{
-		ID:             uuid.New().String(),
-		Type:           domain.TypeTransfer,
-		Status:         status,
-		FromWallet:     fromID,
-		ToWallet:       toID,
-		Asset:          asset,
-		Amount:         amount,
-		Fee:            feeResult.FeeAmount,
-		FeeBps:         feeResult.FeeBps,
-		TenantID:       tenantPtr,
-		Mode:           mode,
-		BatchID:        batchPtr,
-		Reference:      reference,
-		CreatedAt:      time.Now().UTC(),
-		IdempotencyKey: idempotencyKey,
+		ID:                uuid.New().String(),
+		Type:              domain.TypeTransfer,
+		Status:            status,
+		FromWallet:        fromID,
+		ToWallet:          toID,
+		Asset:             asset,
+		Amount:            amount,
+		Fee:               feeResult.FeeAmount,
+		FeeBps:            feeResult.FeeBps,
+		TenantID:          tenantPtr,
+		Mode:              mode,
+		BatchID:           batchPtr,
+		Reference:         reference,
+		ExternalReference: params.ExternalReference,
+		Tags:              tags,
+		CreatedAt:         time.Now().UTC(),
+		IdempotencyKey:    idempotencyKey,
 	}
 	if recordID := idempotency.RecordIDFromContext(ctx); recordID != "" && idempotencyKey != "" {
 		tx.IdempotencyRecordID = &recordID
@@ -285,10 +328,15 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 		return nil, createErr
 	}
 
+	actor := "system"
+	if uID := tenant.UserIDFromContext(ctx); uID != "" {
+		actor = uID
+	} else if kID := tenant.APIKeyIDFromContext(ctx); kID != "" {
+		actor = kID
+	}
+	s.recordAudit(ctx, actor, "transfer.created", tx.ID)
+
 	if tx.Status == domain.StatusComplianceHold {
-		// Deliberately not enqueued. The transfer stays parked until a
-		// compliance officer approves it, which resets the row to pending and
-		// enqueues it then.
 		if err := s.screener.RecordHold(ctx, tx, decision); err != nil {
 			return nil, fmt.Errorf("record compliance hold: %w", err)
 		}
@@ -297,8 +345,6 @@ func (s *service) initiate(ctx context.Context, fromID, toID, asset string, amou
 
 	if s.queue != nil {
 		if err := s.queue.EnqueueTransfer(ctx, tx.ID); err != nil {
-			// Transaction is persisted ΓÇö worker will not run, but it can be retried.
-			// Log this but don't fail the request.
 			_ = err
 		}
 	}
@@ -329,7 +375,6 @@ func (s *service) validateTrustline(ctx context.Context, walletID, publicKey, as
 		}
 	}
 
-	// Fallback check in DB cached balances
 	cached, err := s.walletRepo.GetBalances(ctx, walletID)
 	if err == nil {
 		for _, b := range cached {
@@ -356,6 +401,19 @@ func (s *service) ListTransactions(ctx context.Context, walletID string, limit, 
 		limit = 20
 	}
 	return s.repo.ListByWallet(ctx, walletID, limit, offset)
+}
+
+func (s *service) ListTransactionsFiltered(ctx context.Context, filter domain.TransactionFilter) ([]*domain.Transaction, error) {
+	if filter.Limit <= 0 || filter.Limit > 100 {
+		filter.Limit = 20
+	}
+	if filterRepo, ok := s.repo.(FilterableRepository); ok {
+		return filterRepo.ListWithFilter(ctx, filter)
+	}
+	if filter.WalletID != "" {
+		return s.repo.ListByWallet(ctx, filter.WalletID, filter.Limit, filter.Offset)
+	}
+	return nil, nil
 }
 
 func (s *service) ForceSettleTransfer(ctx context.Context, id, actor string) (*domain.Transaction, error) {

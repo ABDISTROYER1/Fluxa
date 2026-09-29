@@ -89,9 +89,11 @@ func newAuthzTestServerWithValidator(t *testing.T, validator MembershipValidator
 		batch.NewHandler(nil),
 		schedule.NewHandler(nil),
 		treasuryHandler,
-		nil,
+		nil, // claimableHandler
 		statusHandler,
-		nil,
+		nil, // complianceHandler
+		nil, // auditHandler
+		nil, // usageHandler
 		authzJWTSecret,
 		"0",
 		nil,

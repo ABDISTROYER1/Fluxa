@@ -87,8 +87,11 @@ func setupTestServerWithRateLimit(cfg server.AuthRateLimitConfig) *chi.Mux {
 		batch.NewHandler(nil),
 		schedule.NewHandler(nil),
 		treasuryH,
-		nil,
-		nil,
+		nil, // claimableHandler
+		nil, // statusHandler
+		nil, // complianceHandler
+		nil, // auditHandler
+		nil, // usageHandler
 		[]byte("test-jwt-secret-key-32-bytes-long!"),
 		"0",
 		nil,

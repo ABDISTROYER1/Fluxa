@@ -10,6 +10,8 @@ type contextKey struct{}
 type userIDKey struct{}
 type roleKey struct{}
 type modeKey struct{}
+type scopesKey struct{}
+type apiKeyIDKey struct{}
 
 // WithID attaches a tenant ID to the context.
 func WithID(ctx context.Context, tenantID string) context.Context {
@@ -60,4 +62,26 @@ func UserIDFromContext(ctx context.Context) string {
 func RoleFromContext(ctx context.Context) string {
 	role, _ := ctx.Value(roleKey{}).(string)
 	return role
+}
+
+// WithScopes attaches API key scopes to the context.
+func WithScopes(ctx context.Context, scopes []string) context.Context {
+	return context.WithValue(ctx, scopesKey{}, scopes)
+}
+
+// ScopesFromContext returns the scopes attached to the context, and whether they were set.
+func ScopesFromContext(ctx context.Context) ([]string, bool) {
+	scopes, ok := ctx.Value(scopesKey{}).([]string)
+	return scopes, ok
+}
+
+// WithAPIKeyID attaches an API key ID to context.
+func WithAPIKeyID(ctx context.Context, keyID string) context.Context {
+	return context.WithValue(ctx, apiKeyIDKey{}, keyID)
+}
+
+// APIKeyIDFromContext returns the API key ID from context, or empty if unset.
+func APIKeyIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(apiKeyIDKey{}).(string)
+	return id
 }

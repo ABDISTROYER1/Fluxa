@@ -243,6 +243,15 @@ func (f *idempTransferSvc) ForceSettleTransfer(_ context.Context, _, _ string) (
 func (f *idempTransferSvc) ReconcileWallet(_ context.Context, _, _ string) (*transfer.ReconcileResult, error) {
 	return nil, nil
 }
+func (f *idempTransferSvc) InitiateTransferExt(ctx context.Context, params transfer.TransferParams) (*domain.Transaction, error) {
+	if params.IdempotencyKey != "" {
+		return f.InitiateTransferIdempotent(ctx, params.FromID, params.ToID, params.Asset, params.Amount, params.IdempotencyKey)
+	}
+	return f.InitiateTransfer(ctx, params.FromID, params.ToID, params.Asset, params.Amount)
+}
+func (f *idempTransferSvc) ListTransactionsFiltered(_ context.Context, _ domain.TransactionFilter) ([]*domain.Transaction, error) {
+	return nil, nil
+}
 func (f *idempTransferSvc) WithAuditLogger(_ transfer.AuditLogger) transfer.Service { return f }
 
 func (f *idempTransferSvc) callCount() int {
