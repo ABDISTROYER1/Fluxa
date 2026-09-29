@@ -255,8 +255,10 @@ curl http://localhost:3000/v1/beneficiaries \
 Use `POST /v1/beneficiaries/{id}/activate` after the cooling-off timestamp and
 `DELETE /v1/beneficiaries/{id}` to revoke one. Mutation calls require an owner
 or admin role and the `beneficiaries:write` API-key scope; reads require
-`beneficiaries:read`. Duplicate accounts are rejected per tenant and
-environment, including concurrent requests.
+`beneficiaries:read`. Once a tenant has at least one beneficiary, transfers to
+any account that is not active in that tenant/environment are rejected.
+Duplicate accounts are rejected per tenant and environment, including
+concurrent requests.
 
 ---
 

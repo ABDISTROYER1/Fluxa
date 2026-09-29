@@ -102,6 +102,7 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrInviteNotFound), errors.Is(err, domain.ErrClaimableBalanceNotFound):
 		NotFound(w, err.Error())
 	case errors.Is(err, domain.ErrSelfTransfer), errors.Is(err, domain.ErrInvalidAsset),
+		errors.Is(err, domain.ErrBeneficiaryNotAllowed),
 		errors.Is(err, domain.ErrInsufficientBalance), errors.Is(err, domain.ErrSlippageExceeded),
 		errors.Is(err, domain.ErrFeeScheduleNotFound), errors.Is(err, domain.ErrBatchTooLarge),
 		errors.Is(err, domain.ErrBatchEmpty), errors.Is(err, domain.ErrWalletLimitReached),

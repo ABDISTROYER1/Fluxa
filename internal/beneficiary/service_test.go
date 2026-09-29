@@ -40,6 +40,14 @@ func (f *fakeRepo) List(context.Context) ([]*domain.Beneficiary, error) {
 	}
 	return items, nil
 }
+func (f *fakeRepo) Check(_ context.Context, account string) (bool, bool, error) {
+	for _, b := range f.items {
+		if b.Account == account {
+			return true, b.Status == domain.BeneficiaryActive, nil
+		}
+	}
+	return len(f.items) > 0, false, nil
+}
 func (f *fakeRepo) Activate(_ context.Context, id string, now time.Time) (*domain.Beneficiary, error) {
 	b, err := f.Get(context.Background(), id)
 	if err != nil {

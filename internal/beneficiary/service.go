@@ -33,6 +33,7 @@ type Service interface {
 	List(ctx context.Context) ([]*domain.Beneficiary, error)
 	Activate(ctx context.Context, id string) (*domain.Beneficiary, error)
 	Revoke(ctx context.Context, id string) error
+	Check(ctx context.Context, account string) (configured, active bool, err error)
 }
 
 type service struct {
@@ -79,6 +80,13 @@ func (s *service) Get(ctx context.Context, id string) (*domain.Beneficiary, erro
 }
 
 func (s *service) List(ctx context.Context) ([]*domain.Beneficiary, error) { return s.repo.List(ctx) }
+
+// Check returns whether this tenant has configured an allowlist and whether
+// the requested account is currently active. An empty list preserves existing
+// tenants' behaviour until they opt into beneficiary enforcement.
+func (s *service) Check(ctx context.Context, account string) (bool, bool, error) {
+	return s.repo.Check(ctx, account)
+}
 
 func (s *service) Activate(ctx context.Context, id string) (*domain.Beneficiary, error) {
 	b, err := s.repo.Get(ctx, id)

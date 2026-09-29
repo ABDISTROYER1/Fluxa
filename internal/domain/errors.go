@@ -66,6 +66,7 @@ var (
 	ErrSourceWalletRequired       = errors.New("a source wallet is required to fund a claimable balance")
 	ErrSponsorNotCustodied        = errors.New("sponsor account is not a wallet custodied by Fluxa")
 	ErrInvalidAmount              = errors.New("amount must be a positive number")
+	ErrBeneficiaryNotAllowed      = errors.New("destination is not an active beneficiary")
 )
 
 // Organization membership. Kept in its own block: appending to the var block
