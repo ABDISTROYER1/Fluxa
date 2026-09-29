@@ -1,0 +1,15 @@
+package beneficiary
+
+import (
+	"context"
+	"github.com/fluxa/fluxa/internal/domain"
+	"time"
+)
+
+type Repository interface {
+	Create(ctx context.Context, beneficiary *domain.Beneficiary) error
+	Get(ctx context.Context, id string) (*domain.Beneficiary, error)
+	List(ctx context.Context) ([]*domain.Beneficiary, error)
+	Activate(ctx context.Context, id string, now time.Time) (*domain.Beneficiary, error)
+	Revoke(ctx context.Context, id string) error
+}

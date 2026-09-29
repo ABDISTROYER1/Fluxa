@@ -27,6 +27,8 @@ tags:
     description: "Tenant registration, login and API key management"
   - name: "Wallets"
     description: "Stellar wallet creation, balances, and fiat deposits/withdrawals"
+  - name: "Beneficiaries"
+    description: "Tenant-scoped beneficiary allowlists with cooling-off approval"
   - name: "Transfers"
     description: "Single and batch transfers between wallets"
   - name: "Transactions"
@@ -353,6 +355,85 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalServerError"
+
+  /v1/beneficiaries:
+    get:
+      operationId: listBeneficiaries
+      summary: "List beneficiaries"
+      tags: ["Beneficiaries"]
+      responses:
+        "200":
+          description: "Tenant beneficiaries"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  beneficiaries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Beneficiary"
+    post:
+      operationId: createBeneficiary
+      summary: "Create a beneficiary"
+      description: "Creates a pending beneficiary. Activation is blocked until the 24-hour cooling-off period ends."
+      tags: ["Beneficiaries"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBeneficiaryRequest"
+      responses:
+        "201":
+          description: "Beneficiary created"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Beneficiary"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: "Duplicate beneficiary" }
+
+  /v1/beneficiaries/{id}:
+    get:
+      operationId: getBeneficiary
+      summary: "Get a beneficiary"
+      tags: ["Beneficiaries"]
+      parameters:
+        - $ref: "#/components/parameters/BeneficiaryID"
+      responses:
+        "200":
+          description: "Beneficiary"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Beneficiary"
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: revokeBeneficiary
+      summary: "Revoke a beneficiary"
+      tags: ["Beneficiaries"]
+      parameters:
+        - $ref: "#/components/parameters/BeneficiaryID"
+      responses:
+        "204": { description: "Beneficiary revoked" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/beneficiaries/{id}/activate:
+    post:
+      operationId: activateBeneficiary
+      summary: "Activate a beneficiary after its cooling-off period"
+      tags: ["Beneficiaries"]
+      parameters:
+        - $ref: "#/components/parameters/BeneficiaryID"
+      responses:
+        "200":
+          description: "Beneficiary activated"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Beneficiary"
+        "409": { description: "Cooling-off period has not elapsed" }
 
   /v1/wallets/{id}:
     get:
@@ -2179,6 +2260,14 @@ components:
       description: |
         Stellar claimable balance ID: the hex-encoded XDR of the balance ID
         (a 4-byte V0 type discriminant followed by a 32-byte hash).
+    BeneficiaryID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: "Beneficiary ID"
 
   # ── Reusable Responses ──────────────────────────────────────────────────
 
@@ -2256,6 +2345,23 @@ components:
 
   # ── Schemas ─────────────────────────────────────────────────────────────
   schemas:
+    Beneficiary:
+      type: object
+      required: [id, account, status, cooldown_until, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        account: { type: string, description: "Stellar account public key" }
+        label: { type: string }
+        status: { type: string, enum: [pending, active, revoked] }
+        cooldown_until: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateBeneficiaryRequest:
+      type: object
+      required: [account]
+      properties:
+        account: { type: string, description: "Stellar account public key" }
+        label: { type: string, maxLength: 200 }
     ComplianceReview:
       type: object
       properties:
