@@ -35,6 +35,9 @@ const (
 	EventClaimableBalanceExpired = "claimable_balance.expired"
 	EventClaimableBalanceRevoked = "claimable_balance.revoked"
 
+	EventAPIKeyRotationReminder = "api_key.rotation_reminder"
+	EventAPIKeyExpired          = "api_key.expired"
+
 	DeliveryStatusPending   = "pending"
 	DeliveryStatusDelivered = "delivered"
 	DeliveryStatusFailed    = "failed"
@@ -49,6 +52,8 @@ var SupportedEventTypes = []string{
 	EventTypeFxQuoteCreated,
 	EventTypeSettlementCompleted,
 	EventTypeBatchCompleted,
+	EventAPIKeyRotationReminder,
+	EventAPIKeyExpired,
 }
 
 type WebhookEndpoint struct {

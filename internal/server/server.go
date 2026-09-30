@@ -123,11 +123,13 @@ func New(
 			r.Use(AuthMiddleware(apiKeyRepo, jwtSecret, membershipValidator))
 			r.Use(RateLimit(100, 200))
 
-			// API Keys (Owner & Admin only for creation & revocation)
+			// API Keys (Owner & Admin only for creation, expiry update, rotation & revocation)
 			r.Route("/keys", func(r chi.Router) {
 				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeKeysWrite)).Post("/", apikeyHandler.Create)
 				r.With(RequireScope(domain.ScopeKeysRead)).Get("/", apikeyHandler.List)
 				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeKeysWrite)).Delete("/{id}", apikeyHandler.Revoke)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeKeysWrite)).Patch("/{id}/expiry", apikeyHandler.UpdateExpiry)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeKeysWrite)).Post("/{id}/rotate", apikeyHandler.Rotate)
 			})
 
 			// Audit Log (Tenant-visible append-only audit log)
@@ -229,4 +231,8 @@ func (s *Server) Start() error {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
+}
+
+func (s *Server) Router() *chi.Mux {
+	return s.router
 }

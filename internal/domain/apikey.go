@@ -62,17 +62,49 @@ var ValidScopes = map[string]bool{
 }
 
 type APIKey struct {
-	ID         string
-	TenantID   string
-	KeyHash    string
-	Prefix     string
-	Mode       Mode
-	Label      *string
-	Role       string
-	Scopes     []string
-	LastUsedAt *time.Time
-	RevokedAt  *time.Time
-	CreatedAt  time.Time
+	ID                     string
+	TenantID               string
+	KeyHash                string
+	Prefix                 string
+	Mode                   Mode
+	Label                  *string
+	Role                   string
+	Scopes                 []string
+	LastUsedAt             *time.Time
+	RevokedAt              *time.Time
+	ExpiresAt              *time.Time
+	RotationReminderDays   int
+	LastRotationRemindedAt *time.Time
+	CreatedAt              time.Time
+}
+
+// IsExpired returns true if the key has an expiry set and the given time is after it.
+func (k *APIKey) IsExpired(at time.Time) bool {
+	if k.ExpiresAt == nil {
+		return false
+	}
+	return at.After(*k.ExpiresAt)
+}
+
+// NeedsRotationReminder returns true if an unrevoked, unexpired key is within
+// its rotation reminder window and has not yet been reminded within that window.
+func (k *APIKey) NeedsRotationReminder(now time.Time) bool {
+	if k.RevokedAt != nil || k.ExpiresAt == nil || k.IsExpired(now) {
+		return false
+	}
+	reminderDays := k.RotationReminderDays
+	if reminderDays <= 0 {
+		reminderDays = 7
+	}
+	reminderThreshold := k.ExpiresAt.AddDate(0, 0, -reminderDays)
+	if now.Before(reminderThreshold) {
+		return false
+	}
+	// If already reminded after the threshold began, no need to spam.
+	if k.LastRotationRemindedAt != nil && !k.LastRotationRemindedAt.Before(reminderThreshold) {
+		return false
+	}
+	return true
 }
 
 // HasScope checks if grantedScopes satisfy requiredScope.

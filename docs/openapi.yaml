@@ -2882,6 +2882,12 @@ components:
           type: array
           items:
             type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        rotation_reminder_days:
+          type: integer
         created_at:
           type: string
           format: date-time
@@ -2899,6 +2905,14 @@ components:
           type: array
           items:
             type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        rotation_reminder_days:
+          type: integer
+        is_expired:
+          type: boolean
         last_used_at:
           type: string
           format: date-time
