@@ -349,6 +349,7 @@ func main() {
 	}
 	auditRepo := postgres.NewAuditRepo(repoDB)
 	auditSvc := audit.NewService(auditRepo)
+	reconcileHandler = reconcileHandler.WithAuditLogger(auditSvc)
 	auditHandler := audit.NewHandler(auditSvc)
 	usageHandler := server.NewUsageHandler(repoDB)
 	beneficiarySvc := beneficiary.NewService(postgres.NewBeneficiaryRepo(repoDB), auditSvc)

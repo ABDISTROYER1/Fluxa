@@ -262,6 +262,40 @@ func (r *TransactionRepo) ClaimForSubmission(ctx context.Context, id string) err
 	return nil
 }
 
+// RetryFailedTransaction atomically reopens only a definitively failed
+// transfer, scoped to the authenticated tenant and environment. Clearing the
+// prior hash prevents a rejected attempt from being mistaken for this retry.
+func (r *TransactionRepo) RetryFailedTransaction(ctx context.Context, id string) error {
+	tenantID := tenant.IDFromContext(ctx)
+	if tenantID == "" {
+		return domain.ErrForbidden
+	}
+	mode, ok := tenant.ModeFromContext(ctx)
+	if !ok {
+		return domain.ErrForbidden
+	}
+	tx, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if tx.Status != domain.StatusFailed {
+		return fmt.Errorf("retry failed transaction: %w", domain.ErrConcurrentUpdate)
+	}
+	tag, err := r.db.Exec(ctx,
+		`UPDATE transactions
+		 SET status = 'pending', tx_hash = NULL, failure_reason = '', failure_message = ''
+		 WHERE id = $1 AND tenant_id = $2 AND mode = $3 AND status = 'failed'`,
+		id, tenantID, mode,
+	)
+	if err != nil {
+		return fmt.Errorf("retry failed transaction: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("retry failed transaction: %w", domain.ErrConcurrentUpdate)
+	}
+	return nil
+}
+
 // ResetStuckSubmittedToPending recovers a transaction that was claimed
 // (status=submitted) but never got a tx_hash recorded.
 func (r *TransactionRepo) ResetStuckSubmittedToPending(ctx context.Context, id string, olderThan time.Duration) error {

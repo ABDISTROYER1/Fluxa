@@ -2073,6 +2073,57 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /v1/admin/transfers/{transferID}/force-settle:
+    post:
+      operationId: retryFailedSettlement
+      summary: "Retry a failed settlement"
+      description: |
+        Requeues a transaction that is currently `failed` for settlement.
+        Only transfers in the authenticated tenant and environment can be
+        retried. The status transition is atomic; a repeated request or a
+        transfer in any other state returns `409 CONFLICT`. Requires an
+        Owner or Admin role. The response means the retry was queued, not
+        that Stellar has confirmed it.
+      tags: ["Admin"]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: transferID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: "Failed settlement retry queued"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, transfer_id]
+                properties:
+                  status:
+                    type: string
+                    enum: [retry_queued]
+                  transfer_id:
+                    type: string
+                    format: uuid
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Transfer is not failed or a retry is already in progress"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /v1/admin/compliance/reviews:
     get:
       operationId: listComplianceReviews
