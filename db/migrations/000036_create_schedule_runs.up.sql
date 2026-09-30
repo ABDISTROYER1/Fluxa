@@ -1,8 +1,3 @@
--- Add missing schedule_status values that exist in the domain layer but were
--- not present in the original migration 000013.
-ALTER TYPE schedule_status ADD VALUE IF NOT EXISTS 'processing';
-ALTER TYPE schedule_status ADD VALUE IF NOT EXISTS 'failed';
-
 -- ---------------------------------------------------------------------------
 -- schedule_run_status enum
 -- Possible outcomes for a single scheduled-payout occurrence:
