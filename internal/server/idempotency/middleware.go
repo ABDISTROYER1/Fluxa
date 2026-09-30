@@ -287,7 +287,8 @@ func DeterministicKey(raw string) string {
 	return u.String()
 }
 
-func requestHash(method, path string, body []byte) string {
+// RequestHash computes the canonical SHA-256 fingerprint for a request: SHA-256(method + "\x00" + path + "\x00" + body).
+func RequestHash(method, path string, body []byte) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(method))
 	_, _ = h.Write([]byte{0})
@@ -295,6 +296,10 @@ func requestHash(method, path string, body []byte) string {
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func requestHash(method, path string, body []byte) string {
+	return RequestHash(method, path, body)
 }
 
 type recordIDContextKey struct{}

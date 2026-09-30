@@ -27,6 +27,7 @@ routes:
   - "GET /v1/claimable-balances/{id}"
   - GET /v1/fees
   - GET /v1/fx/rates
+  - "GET /v1/idempotency/{key}"
   - GET /v1/keys
   - GET /v1/schedules
   - GET /v1/transfers

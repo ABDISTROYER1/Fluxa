@@ -50,15 +50,74 @@ Generate the key **once** when the operation is first attempted, and reuse
 that same key for every retry of that operation — never generate a new one
 per HTTP attempt.
 
-## Retry strategy
+## Retry strategy & recommendation: inspect rather than re-key
 
-- Use exponential backoff with jitter between retries (e.g. `base * 2^attempt + random_jitter`).
-- Cap retries at **5 attempts**.
-- **Never rotate the idempotency key on retry.** Rotating it defeats the
-  entire mechanism — the server will see it as a brand-new operation and
-  execute it again.
-- If a retry returns `409 REQUEST_IN_PROGRESS`, back off and retry the same
-  key later — the original request is still being processed.
+When a client encounters a network partition, client-side timeout, deploy interruption, or dropped connection, **inspect the key rather than generating a new key**. Generating a new key risks duplicating a transfer or mutating state, while giving up forces manual reconciliation.
+
+- **Inspect first**: Call `GET /v1/idempotency/{key}` to check whether the original request is `processing`, `completed`, `failed`, or `unknown`.
+- If `completed` or `failed`, the original response body and status code are faithfully recovered without re-executing the operation.
+- If `processing`, back off using the provided `retry_after_seconds` (or `Retry-After` header) and retry or re-inspect later.
+- If `unknown`, the operation never reached the platform or has expired past its retention TTL; it is safe to proceed.
+- **Never rotate the idempotency key on retry.** Rotating it defeats deduplication — the server will see it as a brand-new operation and execute it again.
+- Use exponential backoff with jitter between retries (e.g. `base * 2^attempt + random_jitter`), capped at **5 attempts**.
+
+## Key inspection endpoint (`GET /v1/idempotency/{key}`)
+
+Clients can query any previously used idempotency key:
+
+```bash
+curl -X GET https://api.fluxa.example/v1/idempotency/tx_order_987213 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Response format
+
+```json
+{
+  "key": "b477c770-4f51-40be-a006-03daef194d30",
+  "status": "completed",
+  "created_at": "2026-09-30T00:15:00Z",
+  "expires_at": "2026-10-01T00:15:00Z",
+  "request_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": ["application/json"]
+    },
+    "body": {
+      "id": "tr_9a8b7c6d",
+      "status": "completed"
+    },
+    "body_truncated": false,
+    "body_size_bytes": 48
+  }
+}
+```
+
+### Key states
+
+| Status | Meaning |
+| ------ | ------- |
+| `completed` | The operation finished successfully (`status < 400`). Cached response status, headers, and body are faithfully returned. |
+| `failed` | The operation completed with an error (`status >= 400`). Cached error response is returned without re-execution. |
+| `processing` | The request is currently being handled. The response includes `retry_after_seconds`, `retry_hint`, and a `Retry-After` HTTP header. |
+| `unknown` | The key was never seen for this organization or its retention TTL has elapsed. |
+
+### Request hash verification
+
+Clients can pass `?request_hash=<hash>` (or `X-Request-Hash` header) to verify that an existing key corresponds to a specific request body:
+- If the hash matches, the record is returned with status 200.
+- If the hash mismatches, the endpoint returns `422 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY`, confirming that the key was previously used for a different payload.
+
+### Guarantees
+
+- **Tenant-scoped**: Keys are strictly isolated per organization and mode (live/test). Looking up another tenant's key returns `status: "unknown"` with HTTP 200, preventing cross-tenant existence oracles.
+- **Read-only**: Inspection never acquires locks or leases, never mutates state, and never completes in-flight requests.
+- **Rate limited**: Subject to standard tenant rate limits.
+- **Size bounded**: Stored response bodies are capped at **64 KB** in the inspection payload; larger responses are safely truncated with `body_truncated: true` and `body_size_bytes` indicating total size.
+- **Retention**: Records match the platform's configured TTL (`IDEMPOTENCY_TTL_HOURS`, default 24h). Expired records return `status: "unknown"`.
+
+
 
 ## Example
 

@@ -245,3 +245,64 @@ func (r *IdempotencyRepo) DeleteExpired(ctx context.Context, batchSize int) (int
 	}
 	return tag.RowsAffected(), nil
 }
+
+// Lookup returns the current state of a single idempotency record for the
+// (orgID, mode, key) triple without acquiring any lease or touching any row.
+// A record whose expires_at is in the past is reported as not found, matching
+// the client-visible retention window even if the background cleanup job has
+// not yet run.
+func (r *IdempotencyRepo) Lookup(ctx context.Context, orgID string, mode domain.Mode, key string) (idempotency.LookupResult, error) {
+	rec := idempotency.Record{OrgID: orgID, Mode: mode, Key: key}
+	var responseStatus *int
+	var responseHeaders []byte
+	var leaseToken *string
+	var leaseExpiresAt *time.Time
+	var recordExpiresAt time.Time
+	var createdAt time.Time
+
+	err := r.db.QueryRow(ctx,
+		`SELECT id, mode, request_hash, status, response_status, response_headers,
+		        response_body_bytes, lease_token, lease_expires_at, expires_at, created_at
+		 FROM idempotency_records
+		 WHERE org_id = $1 AND mode = $2 AND key = $3
+		   AND expires_at > NOW()`,
+		orgID, mode, key,
+	).Scan(
+		&rec.ID,
+		&rec.Mode,
+		&rec.RequestHash,
+		&rec.Status,
+		&responseStatus,
+		&responseHeaders,
+		&rec.ResponseBody,
+		&leaseToken,
+		&leaseExpiresAt,
+		&recordExpiresAt,
+		&createdAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return idempotency.LookupResult{Found: false}, nil
+	}
+	if err != nil {
+		return idempotency.LookupResult{}, fmt.Errorf("lookup idempotency record: %w", err)
+	}
+	rec.CreatedAt = createdAt.UTC()
+	if leaseToken != nil {
+		rec.LeaseToken = *leaseToken
+	}
+	if leaseExpiresAt != nil {
+		rec.LeaseExpiresAt = leaseExpiresAt.UTC()
+	}
+	rec.ExpiresAt = recordExpiresAt.UTC()
+	if responseStatus != nil {
+		rec.ResponseStatus = *responseStatus
+	}
+	if len(responseHeaders) > 0 {
+		rec.ResponseHeaders = make(http.Header)
+		if err := json.Unmarshal(responseHeaders, &rec.ResponseHeaders); err != nil {
+			return idempotency.LookupResult{}, fmt.Errorf("decode idempotency response headers for lookup: %w", err)
+		}
+	}
+	return idempotency.LookupResult{Found: true, Record: rec}, nil
+}
+

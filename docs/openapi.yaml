@@ -49,6 +49,8 @@ tags:
     description: "Claimable balance lookup and claiming"
   - name: "Audit"
     description: "Append-only tenant audit events and export"
+  - name: "Idempotency"
+    description: "Inspection and recovery of idempotent operations"
 
 security:
   - BearerAuth: []
@@ -1811,6 +1813,45 @@ paths:
                 $ref: "#/components/schemas/UsageResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Idempotency ───────────────────────────────────────────────────────────
+  /v1/idempotency/{key}:
+    get:
+      operationId: inspectIdempotencyKey
+      summary: "Inspect idempotency key state"
+      description: |
+        Returns the durable state of an idempotency key: processing, completed, failed, or unknown.
+        On completed requests, the stored response body and status code are faithfully reproduced without re-execution.
+        Clients should inspect existing keys rather than generating new keys following timeouts or network partitions.
+      tags: ["Idempotency"]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: "Idempotency key (UUID or client reference string)"
+          schema:
+            type: string
+        - name: request_hash
+          in: query
+          required: false
+          description: "Expected SHA-256 request hash. If provided and mismatched, returns 422 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY."
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Idempotency key state"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdempotencyInspectionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -3590,3 +3631,73 @@ components:
         not_found:
           type: integer
           description: "Transactions not found on Stellar"
+
+    # ── Idempotency ─────────────────────────────────────────────────────────
+    IdempotencyInspectionResponse:
+      type: object
+      required:
+        - key
+        - status
+      properties:
+        key:
+          type: string
+          description: "Normalized idempotency key"
+          example: "b477c770-4f51-40be-a006-03daef194d30"
+        status:
+          type: string
+          enum: ["processing", "completed", "failed", "unknown"]
+          description: "Current lifecycle state of the key"
+          example: "completed"
+        created_at:
+          type: string
+          format: date-time
+          description: "When the key was first registered"
+        expires_at:
+          type: string
+          format: date-time
+          description: "When the key retention window elapses"
+        request_hash:
+          type: string
+          description: "SHA-256 digest of method, path, and request body"
+          example: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        retry_after_seconds:
+          type: integer
+          description: "Suggested wait duration in seconds before retrying (when status is processing)"
+          example: 2
+        retry_hint:
+          type: string
+          description: "Human-readable retry instructions (when status is processing)"
+        response:
+          $ref: "#/components/schemas/IdempotencyStoredResponse"
+
+    IdempotencyStoredResponse:
+      type: object
+      required:
+        - status
+        - body_truncated
+        - body_size_bytes
+      properties:
+        status:
+          type: integer
+          description: "Original HTTP status code"
+          example: 200
+        headers:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: "Replayable HTTP response headers"
+        body:
+          description: "Original HTTP response body"
+        body_text:
+          type: string
+          description: "Raw or truncated response body text"
+        body_truncated:
+          type: boolean
+          description: "True if the original response body exceeded the 64 KB inspection size bound"
+          example: false
+        body_size_bytes:
+          type: integer
+          description: "Total size in bytes of the original response body"
+          example: 48

@@ -43,6 +43,7 @@ type Record struct {
 	Status          string
 	LeaseToken      string
 	LeaseExpiresAt  time.Time
+	CreatedAt       time.Time
 	ExpiresAt       time.Time
 	ResponseStatus  int
 	ResponseHeaders http.Header
@@ -62,6 +63,14 @@ type Response struct {
 	Body    []byte
 }
 
+// LookupResult is returned by Repository.Lookup.
+type LookupResult struct {
+	// Found is true when a non-expired record exists for the (orgID, mode, key)
+	// triple. When false, all other fields are zero-valued.
+	Found bool
+	Record Record
+}
+
 // Repository persists idempotency records scoped by (orgID, mode, key).
 type Repository interface {
 	// Acquire atomically inserts a processing record, replays a completed
@@ -75,4 +84,9 @@ type Repository interface {
 	// batched to avoid long-held locks; the caller controls batch size.
 	// Returns the number of rows deleted.
 	DeleteExpired(ctx context.Context, batchSize int) (int64, error)
+	// Lookup returns the current state of a single (orgID, mode, key) record
+	// without acquiring any lease or mutating any row. A record whose
+	// expires_at has passed is treated as not found, matching client-visible
+	// retention semantics. It is safe to call from a read-only API path.
+	Lookup(ctx context.Context, orgID string, mode domain.Mode, key string) (LookupResult, error)
 }

@@ -113,6 +113,23 @@ func (m *memoryIdemRepo) DeleteExpired(_ context.Context, batchSize int) (int64,
 	return deleted, nil
 }
 
+func (m *memoryIdemRepo) Lookup(_ context.Context, orgID string, mode domain.Mode, key string) (idempotency.LookupResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := orgID + ":" + key
+	if rec, ok := m.records[k]; ok {
+		if !rec.ExpiresAt.IsZero() && time.Now().After(rec.ExpiresAt) {
+			return idempotency.LookupResult{Found: false}, nil
+		}
+		if rec.Mode != "" && mode != "" && rec.Mode != mode {
+			return idempotency.LookupResult{Found: false}, nil
+		}
+		cp := *rec
+		return idempotency.LookupResult{Found: true, Record: cp}, nil
+	}
+	return idempotency.LookupResult{Found: false}, nil
+}
+
 func (m *memoryIdemRepo) expireKey(orgID, key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
