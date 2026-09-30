@@ -25,7 +25,7 @@ type mockRepo struct {
 	updateConfirmedErr  error
 	updateFailedErr     error
 	updateConfStatusErr error
-	auditLogs           []*AuditLogEntry
+	auditLogs           []*domain.AuditLogEntry
 }
 
 func (m *mockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
@@ -56,17 +56,17 @@ func (m *mockRepo) IncrementRequeueCount(_ context.Context, _ string) (int, erro
 func (m *mockRepo) UpdateReconciledAt(_ context.Context, _ string) error {
 	return nil
 }
-func (m *mockRepo) WriteAuditLog(_ context.Context, entry *AuditLogEntry) error {
+func (m *mockRepo) WriteAuditLog(_ context.Context, entry *domain.AuditLogEntry) error {
 	m.auditLogs = append(m.auditLogs, entry)
 	return nil
 }
-func (m *mockRepo) GetDailyReconciliationSummary(_ context.Context, _ int) ([]DailySummaryRow, error) {
+func (m *mockRepo) GetDailyReconciliationSummary(_ context.Context, _ int) ([]domain.DailySummaryRow, error) {
 	return nil, nil
 }
 func (m *mockRepo) GetPendingStuckCount(_ context.Context, _ time.Duration) (int, error) {
 	return 0, nil
 }
-func (m *mockRepo) WriteReconciliationRun(_ context.Context, _ *ReconciliationRun) error {
+func (m *mockRepo) WriteReconciliationRun(_ context.Context, _ *domain.ReconciliationRun) error {
 	return nil
 }
 
@@ -480,7 +480,7 @@ type smartMockRepo struct {
 	txes          []*domain.Transaction
 	confirmedErrs map[string]error
 	failedErrs    map[string]error
-	auditLogs     []*AuditLogEntry
+	auditLogs     []*domain.AuditLogEntry
 }
 
 func (m *smartMockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
@@ -517,17 +517,17 @@ func (m *smartMockRepo) IncrementRequeueCount(_ context.Context, _ string) (int,
 func (m *smartMockRepo) UpdateReconciledAt(_ context.Context, _ string) error {
 	return nil
 }
-func (m *smartMockRepo) WriteAuditLog(_ context.Context, entry *AuditLogEntry) error {
+func (m *smartMockRepo) WriteAuditLog(_ context.Context, entry *domain.AuditLogEntry) error {
 	m.auditLogs = append(m.auditLogs, entry)
 	return nil
 }
-func (m *smartMockRepo) GetDailyReconciliationSummary(_ context.Context, _ int) ([]DailySummaryRow, error) {
+func (m *smartMockRepo) GetDailyReconciliationSummary(_ context.Context, _ int) ([]domain.DailySummaryRow, error) {
 	return nil, nil
 }
 func (m *smartMockRepo) GetPendingStuckCount(_ context.Context, _ time.Duration) (int, error) {
 	return 0, nil
 }
-func (m *smartMockRepo) WriteReconciliationRun(_ context.Context, _ *ReconciliationRun) error {
+func (m *smartMockRepo) WriteReconciliationRun(_ context.Context, _ *domain.ReconciliationRun) error {
 	return nil
 }
 

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fluxa/fluxa/internal/claimable"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -67,7 +66,7 @@ func (r *ClaimableBalanceRepo) GetByID(ctx context.Context, id string) (*domain.
 	return balance, nil
 }
 
-func (r *ClaimableBalanceRepo) List(ctx context.Context, f claimable.Filter) ([]*domain.ClaimableBalance, error) {
+func (r *ClaimableBalanceRepo) List(ctx context.Context, f domain.ClaimableFilter) ([]*domain.ClaimableBalance, error) {
 	conditions := []string{}
 	args := []interface{}{}
 

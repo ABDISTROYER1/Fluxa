@@ -21,26 +21,15 @@ import (
 // the creator, or by the sponsor when the creation is sponsored.
 var EntryReserve = decimal.RequireFromString("0.5")
 
-// SourceWallet is a Fluxa-custodied Stellar account usable as the funding or
-// sponsor account for a claimable balance.
-type SourceWallet struct {
-	ID string
-	// PublicKey is the Stellar account ID (G...).
-	PublicKey string
-	// EncryptedSecret is the hex-encoded AES-GCM envelope of the account seed,
-	// exactly as stored on domain.Wallet.
-	EncryptedSecret string
-}
-
 // WalletResolver looks up Fluxa-custodied wallets. It is declared here, and
 // exchanges only plain values, so this package does not depend on
 // internal/wallet.
 type WalletResolver interface {
-	GetByID(ctx context.Context, walletID string) (*SourceWallet, error)
+	GetByID(ctx context.Context, walletID string) (*domain.SourceWallet, error)
 	// GetByPublicKey resolves a Fluxa-custodied wallet from its Stellar account
 	// ID, which is how a claimant or sponsor named by public key is turned into
 	// something Fluxa can sign for.
-	GetByPublicKey(ctx context.Context, publicKey string) (*SourceWallet, error)
+	GetByPublicKey(ctx context.Context, publicKey string) (*domain.SourceWallet, error)
 }
 
 // WebhookDispatcher is the narrow view of internal/webhook this service needs.
@@ -114,7 +103,7 @@ type ExpiryReport struct {
 // Service is Fluxa's claimable balance management layer.
 type Service interface {
 	Create(ctx context.Context, in CreateInput) (*CreateResult, error)
-	List(ctx context.Context, f Filter) ([]*domain.ClaimableBalance, error)
+	List(ctx context.Context, f domain.ClaimableFilter) ([]*domain.ClaimableBalance, error)
 	Get(ctx context.Context, id string) (*LiveStatus, error)
 	Claim(ctx context.Context, id, claimantAccount string) (*ClaimResult, error)
 	// ProcessExpired is the background expiry tracker's entry point.
@@ -309,7 +298,7 @@ func (s *service) Create(ctx context.Context, in CreateInput) (*CreateResult, er
 	}, nil
 }
 
-func (s *service) List(ctx context.Context, f Filter) ([]*domain.ClaimableBalance, error) {
+func (s *service) List(ctx context.Context, f domain.ClaimableFilter) ([]*domain.ClaimableBalance, error) {
 	if f.Limit <= 0 || f.Limit > 100 {
 		f.Limit = 20
 	}

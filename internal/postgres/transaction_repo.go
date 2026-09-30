@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
-	"github.com/fluxa/fluxa/internal/reconcile"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -78,7 +77,24 @@ func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) er
 		nullableStringPtr(tx.ExternalReference), tx.Tags,
 		nullableString(tx.IdempotencyKey),
 		nullableString(tx.FailureReason), nullableString(tx.FailureMessage),
-	)
+		nullableUUID(tx.IdempotencyRecordID),
+	}
+	query := fmt.Sprintf(`INSERT INTO transactions (%s) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`, txInsertColumns)
+	if conflict != "" {
+		query += " " + conflict
+	}
+	return db.Exec(ctx, query, args...)
+}
+
+func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) error {
+	if tx.Mode == "" {
+		tx.Mode = transactionMode(ctx)
+	}
+	tID := tenant.IDFromContext(ctx)
+	if tID != "" {
+		tx.TenantID = &tID
+	}
+	_, err := insertTx(ctx, r.db, tx, "")
 	if err != nil {
 		return fmt.Errorf("insert transaction: %w", mapTransactionInsertError(err))
 	}
@@ -638,7 +654,7 @@ func (r *TransactionRepo) UpdateReconciledAt(ctx context.Context, id string) err
 }
 
 // WriteAuditLog inserts a row into the ledger_audit_log table.
-func (r *TransactionRepo) WriteAuditLog(ctx context.Context, entry *reconcile.AuditLogEntry) error {
+func (r *TransactionRepo) WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO ledger_audit_log (id, tx_id, stellar_hash, checked_at, horizon_status, amount_verified, asset_verified, fee_verified, outcome, details)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -653,7 +669,7 @@ func (r *TransactionRepo) WriteAuditLog(ctx context.Context, entry *reconcile.Au
 }
 
 // GetDailyReconciliationSummary returns counts grouped by day for the last 7 days.
-func (r *TransactionRepo) GetDailyReconciliationSummary(ctx context.Context, days int) ([]reconcile.DailySummaryRow, error) {
+func (r *TransactionRepo) GetDailyReconciliationSummary(ctx context.Context, days int) ([]domain.DailySummaryRow, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT d::date AS date,
 		        COALESCE(SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END), 0) AS ok_count,
@@ -670,9 +686,9 @@ func (r *TransactionRepo) GetDailyReconciliationSummary(ctx context.Context, day
 	}
 	defer rows.Close()
 
-	var summary []reconcile.DailySummaryRow
+	var summary []domain.DailySummaryRow
 	for rows.Next() {
-		var row reconcile.DailySummaryRow
+		var row domain.DailySummaryRow
 		if err := rows.Scan(&row.Date, &row.OKCount, &row.MismatchCount, &row.NotFoundCount); err != nil {
 			return nil, err
 		}
@@ -812,7 +828,7 @@ func (r *TransactionRepo) UpdateTxFailed(ctx context.Context, id string) error {
 }
 
 // WriteReconciliationRun persists a record of a completed reconciliation pass.
-func (r *TransactionRepo) WriteReconciliationRun(ctx context.Context, run *reconcile.ReconciliationRun) error {
+func (r *TransactionRepo) WriteReconciliationRun(ctx context.Context, run *domain.ReconciliationRun) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO reconciliation_runs (id, started_at, completed_at, txs_checked, discrepancies_found, corrections_made)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,

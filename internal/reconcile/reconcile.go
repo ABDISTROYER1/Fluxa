@@ -30,44 +30,6 @@ const (
 	pageSize              = 100
 )
 
-type AuditOutcome string
-
-const (
-	AuditOK       AuditOutcome = "ok"
-	AuditMismatch AuditOutcome = "mismatch"
-	AuditNotFound AuditOutcome = "not_found"
-)
-
-type AuditLogEntry struct {
-	ID             string
-	TxID           string
-	StellarHash    string
-	CheckedAt      time.Time
-	HorizonStatus  string
-	AmountVerified bool
-	AssetVerified  bool
-	FeeVerified    bool
-	Outcome        AuditOutcome
-	Details        string
-}
-
-type DailySummaryRow struct {
-	Date          string `json:"date"`
-	OKCount       int    `json:"ok"`
-	MismatchCount int    `json:"mismatch"`
-	NotFoundCount int    `json:"not_found"`
-}
-
-// ReconciliationRun records the outcome of a single reconciliation pass.
-type ReconciliationRun struct {
-	ID                 string
-	StartedAt          time.Time
-	CompletedAt        time.Time
-	TxsChecked         int
-	DiscrepanciesFound int
-	CorrectionsMade    int
-}
-
 // BalanceDiscrepancy records a wallet whose DB balance diverges from Horizon.
 type BalanceDiscrepancy struct {
 	ID             string
@@ -110,10 +72,10 @@ type Repository interface {
 	UpdateTxFailed(ctx context.Context, id string) error
 	IncrementRequeueCount(ctx context.Context, id string) (int, error)
 	UpdateReconciledAt(ctx context.Context, id string) error
-	WriteAuditLog(ctx context.Context, entry *AuditLogEntry) error
-	GetDailyReconciliationSummary(ctx context.Context, days int) ([]DailySummaryRow, error)
+	WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error
+	GetDailyReconciliationSummary(ctx context.Context, days int) ([]domain.DailySummaryRow, error)
 	GetPendingStuckCount(ctx context.Context, olderThan time.Duration) (int, error)
-	WriteReconciliationRun(ctx context.Context, run *ReconciliationRun) error
+	WriteReconciliationRun(ctx context.Context, run *domain.ReconciliationRun) error
 }
 
 // WalletRepository is implemented by postgres.ReconcileRepo and covers balance
@@ -246,7 +208,7 @@ func (s *Service) RunAll(ctx context.Context) error {
 		log.Error().Err(err).Msg("reconcile: pending recovery pass failed")
 	}
 
-	run := &ReconciliationRun{
+	run := &domain.ReconciliationRun{
 		ID:                 uuid.New().String(),
 		StartedAt:          startedAt,
 		CompletedAt:        time.Now().UTC(),
@@ -995,15 +957,15 @@ func (s *Service) GetSummary(ctx context.Context, days int) (*SummaryResponse, e
 }
 
 type SummaryResponse struct {
-	Days          []DailySummaryRow `json:"days"`
+	Days          []domain.DailySummaryRow `json:"days"`
 	TotalOK       int               `json:"total_ok"`
 	TotalMismatch int               `json:"total_mismatch"`
 	TotalNotFound int               `json:"total_not_found"`
 	PendingStuck  int               `json:"pending_stuck"`
 }
 
-func (s *Service) writeAudit(ctx context.Context, tx *domain.Transaction, horizonStatus string, amountOK, assetOK, feeOK bool, outcome AuditOutcome, details string) {
-	entry := &AuditLogEntry{
+func (s *Service) writeAudit(ctx context.Context, tx *domain.Transaction, horizonStatus string, amountOK, assetOK, feeOK bool, outcome domain.AuditOutcome, details string) {
+	entry := &domain.AuditLogEntry{
 		ID:             uuid.New().String(),
 		TxID:           tx.ID,
 		StellarHash:    tx.TxHash,

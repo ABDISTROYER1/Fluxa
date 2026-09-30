@@ -53,7 +53,7 @@ type Record struct {
 // Acquisition is the result of atomically acquiring an idempotency key.
 type Acquisition struct {
 	State  AcquisitionState
-	Record Record
+	Record domain.IdempotencyRecord
 }
 
 // Response is the durable HTTP response returned by the original request.

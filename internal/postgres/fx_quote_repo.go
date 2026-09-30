@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fluxa/fluxa/internal/fx"
+	"github.com/fluxa/fluxa/internal/domain"
 )
 
 // FXQuoteRepo writes FX quote audit records to Postgres.
@@ -19,7 +19,7 @@ func NewFXQuoteRepo(db DB) *FXQuoteRepo {
 }
 
 // CreateQuote inserts a new quote snapshot into the audit table.
-func (r *FXQuoteRepo) CreateQuote(ctx context.Context, q *fx.Quote) error {
+func (r *FXQuoteRepo) CreateQuote(ctx context.Context, q *domain.Quote) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO fx_quotes
 		 (id, org_id, from_asset, to_asset, from_amount, to_amount, rate, fee, expires_at, used, created_at)

@@ -228,7 +228,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
-	filter := Filter{
+	filter := domain.ClaimableFilter{
 		Asset:    query.Get("asset"),
 		Claimant: query.Get("claimant"),
 		Status:   domain.ClaimableBalanceStatus(query.Get("status")),
