@@ -11,6 +11,7 @@ import (
 type (
 	DepositRequest struct {
 		WalletID      string
+		PaymentLinkID string
 		Reference     string
 		FiatAmount    decimal.Decimal
 		FiatCurrency  string

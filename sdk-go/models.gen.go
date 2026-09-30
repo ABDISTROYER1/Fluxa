@@ -155,6 +155,55 @@ type FiatDepositRequest struct {
 	Name     string `json:"name"`
 }
 
+type CreatePaymentLinkRequest struct {
+	WalletId  string `json:"wallet_id"`
+	Amount    string `json:"amount"`
+	Currency  string `json:"currency"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+type PaymentLinksResponse struct {
+	PaymentLinks []PaymentLink `json:"payment_links"`
+}
+
+type PaymentLink struct {
+	Id          string  `json:"id"`
+	Token       string  `json:"token"`
+	WalletId    string  `json:"wallet_id"`
+	Amount      string  `json:"amount"`
+	Currency    string  `json:"currency"`
+	Status      string  `json:"status"`
+	CheckoutUrl string  `json:"checkout_url"`
+	ExpiresAt   string  `json:"expires_at"`
+	CreatedAt   *string `json:"created_at,omitempty"`
+}
+
+type PublicPaymentLink struct {
+	Amount    string `json:"amount"`
+	Currency  string `json:"currency"`
+	Status    string `json:"status"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+type Refund struct {
+	Id                    string  `json:"id"`
+	OriginalTransactionId string  `json:"original_transaction_id"`
+	TransactionId         *string `json:"transaction_id,omitempty"`
+	Amount                string  `json:"amount"`
+	Reason                *string `json:"reason,omitempty"`
+	Status                string  `json:"status"`
+}
+
+type CreateRefundRequest struct {
+	OriginalTransactionId string  `json:"original_transaction_id"`
+	Amount                string  `json:"amount"`
+	Reason                *string `json:"reason,omitempty"`
+}
+
+type RefundsResponse struct {
+	Refunds []Refund `json:"refunds"`
+}
+
 type DepositResponse struct {
 	PaymentLink *string `json:"payment_link,omitempty"`
 	Reference   *string `json:"reference,omitempty"`

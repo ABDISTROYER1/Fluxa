@@ -10,6 +10,7 @@
 routes:
   - "DELETE /v1/beneficiaries/{id}"
   - "DELETE /v1/keys/{id}"
+  - "DELETE /v1/payment-links/{id}"
   - "DELETE /v1/schedules/{id}"
   - "DELETE /v1/webhooks/{id}"
   - GET /
@@ -35,6 +36,11 @@ routes:
   - GET /v1/fx/rates
   - "GET /v1/idempotency/{key}"
   - GET /v1/keys
+  - GET /v1/payment-links
+  - "GET /v1/payment-links/{id}"
+  - "GET /v1/public/payment-links/{token}"
+  - GET /v1/refunds
+  - "GET /v1/refunds/{id}"
   - GET /v1/schedules
   - "GET /v1/schedules/{id}/runs"
   - GET /v1/transfers

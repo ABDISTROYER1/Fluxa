@@ -136,6 +136,48 @@ class FiatDepositRequest(TypedDict, total=False):
     email: Required[str]
     name: Required[str]
 
+class CreatePaymentLinkRequest(TypedDict, total=False):
+    wallet_id: Required[str]
+    amount: Required[str]
+    currency: Required[str]
+    expires_at: Required[str]
+
+class PaymentLinksResponse(TypedDict, total=False):
+    payment_links: Required[list[PaymentLink]]
+
+class PaymentLink(TypedDict, total=False):
+    id: Required[str]
+    token: Required[str]
+    wallet_id: Required[str]
+    amount: Required[str]
+    currency: Required[str]
+    status: Required[str]
+    checkout_url: Required[str]
+    expires_at: Required[str]
+    created_at: str
+
+class PublicPaymentLink(TypedDict, total=False):
+    amount: Required[str]
+    currency: Required[str]
+    status: Required[str]
+    expires_at: Required[str]
+
+class Refund(TypedDict, total=False):
+    id: Required[str]
+    original_transaction_id: Required[str]
+    transaction_id: str
+    amount: Required[str]
+    reason: str
+    status: Required[str]
+
+class CreateRefundRequest(TypedDict, total=False):
+    original_transaction_id: Required[str]
+    amount: Required[str]
+    reason: str
+
+class RefundsResponse(TypedDict, total=False):
+    refunds: Required[list[Refund]]
+
 class DepositResponse(TypedDict, total=False):
     payment_link: str
     reference: str

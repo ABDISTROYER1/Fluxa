@@ -40,14 +40,16 @@ type Client struct {
 	maxRetries int
 	retryDelay time.Duration
 
-	Wallets   *WalletsResource
-	Transfers *TransfersResource
-	FX        *FXResource
-	Schedules *SchedulesResource
-	Webhooks  *WebhooksResource
-	Fees      *FeesResource
-	Keys      *KeysResource
-	Fiat      *FiatResource
+	Wallets      *WalletsResource
+	Transfers    *TransfersResource
+	FX           *FXResource
+	Schedules    *SchedulesResource
+	Webhooks     *WebhooksResource
+	Fees         *FeesResource
+	Keys         *KeysResource
+	Fiat         *FiatResource
+	PaymentLinks *PaymentLinksResource
+	Refunds      *RefundsResource
 }
 
 func NewClient(config Config) (*Client, error) {
@@ -85,6 +87,8 @@ func NewClient(config Config) (*Client, error) {
 	c.Fees = &FeesResource{client: c}
 	c.Keys = &KeysResource{client: c}
 	c.Fiat = &FiatResource{client: c}
+	c.PaymentLinks = &PaymentLinksResource{client: c}
+	c.Refunds = &RefundsResource{client: c}
 	return c, nil
 }
 
@@ -224,7 +228,7 @@ func (c *Client) wait(ctx context.Context, delay time.Duration) error {
 }
 
 func idempotencyRequired(path string) bool {
-	if path == "/wallets" || path == "/transfers" || path == "/transfers/batch" || path == "/withdrawals" || path == "/fx/convert" || path == "/schedules" || path == "/claimable-balances" {
+	if path == "/wallets" || path == "/transfers" || path == "/transfers/batch" || path == "/withdrawals" || path == "/fx/convert" || path == "/schedules" || path == "/claimable-balances" || path == "/payment-links" || path == "/refunds" {
 		return true
 	}
 	return strings.HasPrefix(path, "/wallets/") && (strings.HasSuffix(path, "/deposit/fiat") || strings.HasSuffix(path, "/withdraw/fiat") || strings.HasSuffix(path, "/trustlines")) || strings.HasPrefix(path, "/claimable-balances/") && strings.HasSuffix(path, "/claim")

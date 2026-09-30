@@ -70,5 +70,7 @@ Retries are opt-in. Reads may be retried when enabled; mutations are retried onl
 | `fees` | `get`, `list_collected` |
 | `keys` | `create`, `list`, `delete` |
 | `fiat` | `deposit`, `withdraw` |
+| `payment_links` | `create`, `list`, `get`, `cancel` |
+| `refunds` | `create`, `get`, `list` |
 
 All resource methods return typed dictionaries generated from `docs/openapi.yaml`. Errors are `FluxaError` instances with `code`, `message`, `http_status`, and `details`; common HTTP failures have specialized subclasses.

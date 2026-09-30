@@ -10,6 +10,8 @@ from .models import (
     ConversionResponse,
     CreateBatchRequest,
     CreateKeyRequest,
+    CreatePaymentLinkRequest,
+    CreateRefundRequest,
     CreateScheduleRequest,
     CreateTransferRequest,
     CreateTrustlineRequest,
@@ -17,11 +19,13 @@ from .models import (
     FeeScheduleResponse,
     FiatDepositRequest,
     FiatWithdrawalRequest,
+    PaymentLink,
     HealthResponse,
     Quote,
     QuoteRequest,
     RateResponse,
     RegisterWebhookRequest,
+    Refund,
     ScheduleResponse,
     TransferResponse,
     UpdateScheduleRequest,
@@ -65,3 +69,11 @@ class ListDeliveriesResponse(TypedDict):
 
 class ListCollectedResponse(TypedDict):
     summary: list[FeeCollectionSummary]
+
+
+class ListPaymentLinksResponse(TypedDict):
+    payment_links: list[PaymentLink]
+
+
+class ListRefundsResponse(TypedDict):
+    refunds: list[Refund]

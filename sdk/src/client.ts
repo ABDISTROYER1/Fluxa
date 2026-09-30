@@ -7,6 +7,8 @@ import { WebhooksResource } from './resources/webhooks';
 import { FeesResource } from './resources/fees';
 import { KeysResource } from './resources/keys';
 import { FiatResource } from './resources/fiat';
+import { PaymentLinksResource } from './resources/payment_links';
+import { RefundsResource } from './resources/refunds';
 
 export interface FluxaClientConfig {
   apiKey: string;
@@ -30,6 +32,8 @@ export class FluxaClient {
   readonly fees: FeesResource;
   readonly keys: KeysResource;
   readonly fiat: FiatResource;
+  readonly paymentLinks: PaymentLinksResource;
+  readonly refunds: RefundsResource;
 
   private http: HttpClient;
 
@@ -55,6 +59,8 @@ export class FluxaClient {
     this.fees = new FeesResource(this.http);
     this.keys = new KeysResource(this.http);
     this.fiat = new FiatResource(this.http);
+    this.paymentLinks = new PaymentLinksResource(this.http);
+    this.refunds = new RefundsResource(this.http);
   }
 
   async health(options?: { signal?: AbortSignal }): Promise<{
