@@ -177,6 +177,10 @@ func AuthMiddleware(repo *postgres.APIKeyRepo, jwtSecret []byte, validator Membe
 				http.Error(w, "revoked api key", http.StatusUnauthorized)
 				return
 			}
+			if key.IsExpired(time.Now().UTC()) {
+				http.Error(w, "expired api key", http.StatusUnauthorized)
+				return
+			}
 			// The environment is a property of the credential, not of the
 			// request, so a key minted for one environment can never reach the
 			// other even if the raw key collides with a persisted record.

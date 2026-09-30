@@ -335,6 +335,65 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /v1/keys/{id}/expiry:
+    patch:
+      operationId: updateAPIKeyExpiry
+      summary: "Update API key expiry policy"
+      description: "Updates expiration date and rotation reminder days for an existing API key."
+      tags: ["Auth"]
+      parameters:
+        - $ref: "#/components/parameters/KeyID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKeyExpiryRequest"
+      responses:
+        "200":
+          description: "Expiry policy updated"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeySummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/keys/{id}/rotate:
+    post:
+      operationId: rotateAPIKey
+      summary: "Rotate an API key"
+      description: "Atomically creates a new API key with identical permissions, revokes the current key, and returns the new secret."
+      tags: ["Auth"]
+      parameters:
+        - $ref: "#/components/parameters/KeyID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateKeyRequest"
+      responses:
+        "201":
+          description: "API key rotated successfully"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   # ── Wallets ───────────────────────────────────────────────────────────────
   /v1/wallets:
     post:
@@ -2710,6 +2769,40 @@ components:
           items:
             type: string
           description: "Granular permission scopes for the API key (e.g. transfers:read, transfers:write, wallets:read, wallets:write)"
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Optional expiration date-time"
+        rotation_reminder_days:
+          type: integer
+          description: "Days before expiration to send rotation reminders"
+
+    UpdateKeyExpiryRequest:
+      type: object
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "New expiration timestamp. Pass null to remove expiration."
+        rotation_reminder_days:
+          type: integer
+          description: "Days before expiration to trigger rotation reminders."
+
+    RotateKeyRequest:
+      type: object
+      properties:
+        expires_in_days:
+          type: integer
+          description: "Number of days until the replacement key expires."
+        expires_at:
+          type: string
+          format: date-time
+          description: "Explicit replacement key expiration timestamp."
+        rotation_reminder_days:
+          type: integer
+          description: "Reminder window in days for replacement key."
 
     APIKeyCreated:
       type: object
@@ -2729,6 +2822,12 @@ components:
           type: array
           items:
             type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        rotation_reminder_days:
+          type: integer
         created_at:
           type: string
           format: date-time
@@ -2747,6 +2846,14 @@ components:
           type: array
           items:
             type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        rotation_reminder_days:
+          type: integer
+        is_expired:
+          type: boolean
         last_used_at:
           type: string
           format: date-time

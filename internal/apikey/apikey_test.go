@@ -229,4 +229,3 @@ func TestValidateScopes(t *testing.T) {
 		t.Fatal("expected invalid scope to fail validation")
 	}
 }
-

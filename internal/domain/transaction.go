@@ -22,7 +22,7 @@ const (
 	// must reset it to StatusPending first, because settlement.Engine
 	// silently no-ops on any status other than pending.
 	StatusComplianceHold TransactionStatus = "compliance_hold"
-	StatusCancelled TransactionStatus = "cancelled"
+	StatusCancelled      TransactionStatus = "cancelled"
 
 	TypeTransfer   TransactionType = "transfer"
 	TypeConversion TransactionType = "conversion"
@@ -72,8 +72,7 @@ type Transaction struct {
 	LocalAmount     *decimal.Decimal
 
 	// Cancellation support
-	FailureReason  string
-	FailureMessage string
+	CancelledAt *time.Time
 }
 
 func (t *Transaction) NetAmount() decimal.Decimal {

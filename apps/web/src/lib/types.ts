@@ -104,6 +104,10 @@ export interface APIKey {
   prefix: string;
   label?: string;
   mode?: 'live' | 'test';
+  scopes?: string[];
+  expires_at?: string;
+  rotation_reminder_days?: number;
+  is_expired?: boolean;
   last_used_at?: string;
   revoked_at?: string;
   created_at: string;
@@ -114,6 +118,9 @@ export interface CreateAPIKeyResponse {
   key: string;
   prefix: string;
   label?: string;
+  scopes?: string[];
+  expires_at?: string;
+  rotation_reminder_days?: number;
   created_at: string;
 }
 
