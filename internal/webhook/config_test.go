@@ -470,10 +470,11 @@ func TestDeliverConfig_PausedRecordsWithoutSending(t *testing.T) {
 }
 
 func TestDispatchToTenants_SendsSignedPayloadAndRecordsSuccess(t *testing.T) {
-	var gotSig, gotEvent, gotTenant string
+	var gotSig, gotTimestamp, gotEvent, gotTenant string
 	var gotBody []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSig = r.Header.Get("X-Fluxa-Signature")
+		gotTimestamp = r.Header.Get("X-Fluxa-Timestamp")
 		gotEvent = r.Header.Get("X-Fluxa-Event")
 		gotTenant = r.Header.Get("X-Fluxa-Tenant-ID")
 		gotBody, _ = io.ReadAll(r.Body)
