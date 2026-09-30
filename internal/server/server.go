@@ -22,6 +22,7 @@ import (
 	"github.com/fluxa/fluxa/internal/postgres"
 	"github.com/fluxa/fluxa/internal/reconcile"
 	"github.com/fluxa/fluxa/internal/schedule"
+	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/status"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/fluxa/fluxa/internal/treasury"
@@ -58,6 +59,7 @@ func New(
 	complianceHandler *compliance.Handler,
 	auditHandler *audit.Handler,
 	usageHandler *UsageHandler,
+	idempotencyHandler *idempotency.Handler,
 	jwtSecret []byte,
 	port string,
 	healthChecks map[string]DependencyCheck,
@@ -133,6 +135,11 @@ func New(
 			// Usage Introspection
 			if usageHandler != nil {
 				r.Get("/usage", usageHandler.GetUsage)
+			}
+
+			// Idempotency Key Inspection
+			if idempotencyHandler != nil {
+				r.Route("/idempotency", idempotencyHandler.Routes())
 			}
 
 			// Org Member Management (Owner & Admin for invite, role update, remove)
