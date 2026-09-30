@@ -75,6 +75,10 @@ const (
 type Provider interface {
 	Name() string
 	SupportedCountries() []string
+	// SupportedCurrencies lists the ISO 4217 fiat currency codes (upper case)
+	// this provider can settle. The fiat service validates requests against it
+	// before pricing them.
+	SupportedCurrencies() []string
 	GetQuote(ctx context.Context, req QuoteRequest) (*FiatQuote, error)
 	InitiateDeposit(ctx context.Context, req DepositRequest) (*DepositInstruction, error)
 	InitiateWithdrawal(ctx context.Context, req WithdrawalRequest) (*WithdrawalResult, error)

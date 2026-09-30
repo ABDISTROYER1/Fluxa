@@ -39,6 +39,8 @@ type (
 )
 
 type Rail interface {
+	// SupportedCurrencies lists the fiat currency codes (upper case) the rail can settle.
+	SupportedCurrencies() []string
 	GetQuote(ctx context.Context, req QuoteRequest) (*FiatQuote, error)
 	Deposit(ctx context.Context, req DepositRequest) (*DepositResponse, error)
 	Withdraw(ctx context.Context, req WithdrawRequest) (*WithdrawResponse, error)
@@ -51,6 +53,10 @@ type RailAdapter struct {
 
 func NewRailAdapter(p Provider) *RailAdapter {
 	return &RailAdapter{provider: p}
+}
+
+func (a *RailAdapter) SupportedCurrencies() []string {
+	return a.provider.SupportedCurrencies()
 }
 
 func (a *RailAdapter) GetQuote(ctx context.Context, req QuoteRequest) (*FiatQuote, error) {

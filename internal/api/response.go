@@ -111,6 +111,10 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrClaimantNotCustodied), errors.Is(err, domain.ErrSourceWalletRequired),
 		errors.Is(err, domain.ErrSponsorNotCustodied):
 		BadRequest(w, err.Error())
+	// An unsupported fiat currency is a 400 with its own code so a caller can
+	// tell "this rail does not serve that currency" from a malformed request.
+	case errors.Is(err, domain.ErrUnsupportedFiatCurrency):
+		Error(w, http.StatusBadRequest, "UNSUPPORTED_FIAT_CURRENCY", err.Error())
 	// An unsatisfiable predicate is a 400 with its own code, not a generic bad
 	// request: the caller has to be able to tell "you cannot claim this yet"
 	// (retryable, once the predicate holds) from "this balance is unusable".

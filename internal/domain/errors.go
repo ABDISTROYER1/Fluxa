@@ -22,6 +22,7 @@ var (
 	ErrQuoteOwnershipMismatch       = errors.New("quote does not belong to this tenant")
 	ErrInvalidQuoteAmount           = errors.New("quote amount must be positive")
 	ErrAmountOutOfLimits            = errors.New("amount outside allowed limits for asset")
+	ErrUnsupportedFiatCurrency      = errors.New("unsupported fiat currency")
 	ErrBatchNotFound                = errors.New("batch not found")
 	ErrBatchTooLarge                = errors.New("batch exceeds the maximum number of transfers")
 	ErrBatchEmpty                   = errors.New("batch must contain at least one transfer")
