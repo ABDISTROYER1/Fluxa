@@ -30,6 +30,12 @@ type Screener interface {
 	RecordHold(ctx context.Context, tx *domain.Transaction, decision *domain.ScreeningDecision) error
 }
 
+// BeneficiaryChecker is optional so existing tenants with no configured
+// allowlist retain their current transfer behaviour.
+type BeneficiaryChecker interface {
+	Check(ctx context.Context, account string) (configured, active bool, err error)
+}
+
 type AuditEntry struct {
 	Actor     string
 	Action    string
@@ -98,6 +104,7 @@ type service struct {
 	clientResolver stellar.ClientResolver
 	screener       Screener
 	audit          AuditLogger
+	beneficiaries  BeneficiaryChecker
 }
 
 func NewService(repo Repository, walletRepo walletpkg.Repository, feeSvc fees.Service, q Queue, tenantRepo ...TenantGetter) Service {
@@ -136,6 +143,20 @@ func ConfigureClientResolver(svc Service, resolver stellar.ClientResolver) Servi
 		return configurable.WithClientResolver(resolver)
 	}
 	return svc
+}
+
+func ConfigureBeneficiaryChecker(svc Service, checker BeneficiaryChecker) Service {
+	if configurable, ok := svc.(interface {
+		WithBeneficiaryChecker(BeneficiaryChecker) Service
+	}); ok {
+		return configurable.WithBeneficiaryChecker(checker)
+	}
+	return svc
+}
+
+func (s *service) WithBeneficiaryChecker(checker BeneficiaryChecker) Service {
+	s.beneficiaries = checker
+	return s
 }
 
 func (s *service) WithScreener(screener Screener) Service {
@@ -228,6 +249,15 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 	dstWallet, err := s.walletRepo.GetByID(ctx, toID)
 	if err != nil {
 		return nil, fmt.Errorf("destination wallet: %w", err)
+	}
+	if tenantID != "" && s.beneficiaries != nil {
+		configured, active, checkErr := s.beneficiaries.Check(ctx, dstWallet.PublicKey)
+		if checkErr != nil {
+			return nil, fmt.Errorf("check beneficiary: %w", checkErr)
+		}
+		if configured && !active {
+			return nil, domain.ErrBeneficiaryNotAllowed
+		}
 	}
 
 	// Validate trustline on source wallet for non-XLM assets

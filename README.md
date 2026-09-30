@@ -235,6 +235,31 @@ The transfer returns `202 Accepted` with `status: pending`. The worker submits t
 
 See [docs/quickstart.md](docs/quickstart.md) for the complete 10-step integration guide including USDC trustlines, FX quotes, and webhooks.
 
+### Beneficiary allowlists
+
+Tenants can require an explicit, cooling-off approval before an account may be
+used as a transfer beneficiary. Beneficiaries are isolated by tenant and
+environment. Creating one returns `status: pending` and a `cooldown_until` 24
+hours in the future; an owner or admin can activate it after that timestamp.
+
+```bash
+curl -X POST http://localhost:3000/v1/beneficiaries \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk_live_..." \
+  -d '{"account":"G...","label":"Treasury"}'
+
+curl http://localhost:3000/v1/beneficiaries \
+  -H "Authorization: Bearer sk_live_..."
+```
+
+Use `POST /v1/beneficiaries/{id}/activate` after the cooling-off timestamp and
+`DELETE /v1/beneficiaries/{id}` to revoke one. Mutation calls require an owner
+or admin role and the `beneficiaries:write` API-key scope; reads require
+`beneficiaries:read`. Once a tenant has at least one beneficiary, transfers to
+any account that is not active in that tenant/environment are rejected.
+Duplicate accounts are rejected per tenant and environment, including
+concurrent requests.
+
 ---
 
 ## Configuration

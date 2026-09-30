@@ -11,6 +11,7 @@ import (
 	"github.com/fluxa/fluxa/internal/audit"
 	"github.com/fluxa/fluxa/internal/auth"
 	"github.com/fluxa/fluxa/internal/batch"
+	"github.com/fluxa/fluxa/internal/beneficiary"
 	"github.com/fluxa/fluxa/internal/claimable"
 	"github.com/fluxa/fluxa/internal/compliance"
 	"github.com/fluxa/fluxa/internal/domain"
@@ -63,13 +64,19 @@ func New(
 	healthChecks map[string]DependencyCheck,
 	membershipValidator MembershipValidator,
 	corsOrigins []string,
-	authRateLimitCfg ...AuthRateLimitConfig,
+	options ...interface{},
 ) *Server {
 	r := chi.NewRouter()
 
 	rateCfg := DefaultAuthRateLimitConfig()
-	if len(authRateLimitCfg) > 0 {
-		rateCfg = authRateLimitCfg[0]
+	var beneficiaryHandler *beneficiary.Handler
+	for _, option := range options {
+		switch value := option.(type) {
+		case AuthRateLimitConfig:
+			rateCfg = value
+		case *beneficiary.Handler:
+			beneficiaryHandler = value
+		}
 	}
 	authLimiter := NewAuthRateLimiter(rateCfg)
 
@@ -159,6 +166,9 @@ func New(
 			r.Group(func(r chi.Router) {
 				r.Use(RequireNotViewer)
 				r.With(RequireScope(domain.ScopeWalletsRead)).Route("/wallets", walletHandler.Routes())
+				if beneficiaryHandler != nil {
+					r.With(RequireScope(domain.ScopeBeneficiariesRead)).Route("/beneficiaries", beneficiaryHandler.Routes())
+				}
 				r.Route("/wallets/{id}/deposit", fiatHandler.DepositRoutes())
 				r.Route("/wallets/{id}/withdraw", fiatHandler.WithdrawRoutes())
 				r.Route("/webhooks/fiat", fiatHandler.WebhookRoutes())

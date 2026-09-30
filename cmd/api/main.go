@@ -15,6 +15,7 @@ import (
 	"github.com/fluxa/fluxa/internal/audit"
 	"github.com/fluxa/fluxa/internal/auth"
 	"github.com/fluxa/fluxa/internal/batch"
+	"github.com/fluxa/fluxa/internal/beneficiary"
 	"github.com/fluxa/fluxa/internal/claimable"
 	"github.com/fluxa/fluxa/internal/compliance"
 	"github.com/fluxa/fluxa/internal/config"
@@ -346,6 +347,8 @@ func main() {
 	auditSvc := audit.NewService(auditRepo)
 	auditHandler := audit.NewHandler(auditSvc)
 	usageHandler := server.NewUsageHandler(repoDB)
+	beneficiarySvc := beneficiary.NewService(postgres.NewBeneficiaryRepo(repoDB), auditSvc)
+	transferSvc = transfer.ConfigureBeneficiaryChecker(transferSvc, beneficiarySvc)
 
 	transferHandler := transfer.NewHandler(transferSvc).WithIdempotency(transferIdemMW)
 	fxHandler := fx.NewHandler(fxSvc).WithIdempotency(idemMW)
@@ -360,6 +363,7 @@ func main() {
 	scheduleHandler := schedule.NewHandler(scheduleSvc)
 	treasuryHandler := treasury.NewHandler(treasurySvc).WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 	statusHandler := status.NewHandler(status.NewService(incidentRepo))
+	beneficiaryHandler := beneficiary.NewHandler(beneficiarySvc)
 
 	// Claimable balances move real funds in both directions, so the mutating
 	// routes share the Owner/Admin gate used by /v1/keys and the treasury.
@@ -408,6 +412,7 @@ func main() {
 			AccountRPS:   cfg.AuthRateLimitAccountRPS,
 			AccountBurst: cfg.AuthRateLimitAccountBurst,
 		},
+		beneficiaryHandler,
 	)
 	server.RegisterDocsRoutes(srv.Router())
 
