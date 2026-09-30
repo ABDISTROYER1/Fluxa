@@ -1,5 +1,6 @@
 export { FluxaClient } from './client';
 export type { FluxaClientConfig } from './client';
+export type { RequestOptions } from './http';
 
 export {
   FluxaError,
@@ -15,6 +16,8 @@ export type {
   CreateWalletResponse,
   Balance,
   GetBalancesResponse,
+  CreateTrustlineRequest,
+  TrustlineResponse,
   // Transfer
   TransactionStatus,
   TransactionType,

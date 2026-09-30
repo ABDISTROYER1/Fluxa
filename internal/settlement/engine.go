@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
-	"strings"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
@@ -21,12 +19,6 @@ import (
 	"github.com/shopspring/decimal"
 	stellarnet "github.com/stellar/go/network"
 	"github.com/stellar/go/txnbuild"
-)
-
-var (
-	ErrRetryableRateLimit = errors.New("retryable rate limit")
-	ErrRetryableService   = errors.New("retryable service unavailable")
-	ErrRetryableTimeout   = errors.New("retryable timeout")
 )
 
 type Engine struct {
@@ -239,7 +231,7 @@ func (e *Engine) SubmitTransfer(ctx context.Context, txID string) error {
 		e.finalizeConfirmed(ctx, tx, txID, txHash, srcWallet, dstWallet)
 		return nil
 
-	case outcome.ambiguous:
+	case outcome.class != stellar.SubmitDefinite:
 		// The network result is unknown — do not mark this failed. Try one
 		// immediate lookup of this exact hash on Horizon; if that's also
 		// inconclusive, leave the transaction in `submitted` (hash already
@@ -348,7 +340,7 @@ func (e *Engine) networkPassphraseFor(ctx context.Context) string {
 type submitOutcome struct {
 	hash      string
 	confirmed bool
-	ambiguous bool
+	class     stellar.SubmitClass
 	err       error
 }
 
@@ -361,7 +353,6 @@ type submitOutcome struct {
 // produce a second on-chain payment.
 func (e *Engine) submitWithRetry(ctx context.Context, tx *txnbuild.Transaction) submitOutcome {
 	var lastErr error
-	ambiguous := true
 	maxAtt := e.maxAttempts
 	if maxAtt <= 0 {
 		maxAtt = 3
@@ -374,7 +365,7 @@ func (e *Engine) submitWithRetry(ctx context.Context, tx *txnbuild.Transaction) 
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return submitOutcome{ambiguous: true, err: ctx.Err()}
+				return submitOutcome{class: stellar.ClassifySubmitError(ctx.Err()), err: ctx.Err()}
 			case <-time.After(time.Duration(attempt) * time.Duration(backoff) * time.Second):
 			}
 		}
@@ -385,47 +376,15 @@ func (e *Engine) submitWithRetry(ctx context.Context, tx *txnbuild.Transaction) 
 		}
 
 		lastErr = err
-		if !isRetryable(err) {
-			ambiguous = false
-			break
+		class := stellar.ClassifySubmitError(err)
+		if class == stellar.SubmitDefinite {
+			return submitOutcome{class: class, err: lastErr}
+		}
+		if attempt == maxAtt-1 {
+			return submitOutcome{class: class, err: lastErr}
 		}
 	}
-	return submitOutcome{ambiguous: ambiguous, err: lastErr}
-}
-
-func isRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrRetryableRateLimit) || errors.Is(err, ErrRetryableService) || errors.Is(err, ErrRetryableTimeout) {
-		return true
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
-	}
-	// A transport-level failure (dial timeout, connection reset, TLS error)
-	// leaves the on-chain outcome unknown: Horizon may have applied the
-	// transaction even though we never saw the response. Those errors do not
-	// always arrive as *horizonclient.Error, so recognise the net.Error
-	// interface and the usual 5xx/timeout wording explicitly.
-	var netErr net.Error
-	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
-		return true
-	}
-	var errCode interface{ HTTPStatus() int }
-	if errors.As(err, &errCode) {
-		status := errCode.HTTPStatus()
-		if status == 429 || status >= 500 {
-			return true
-		}
-	}
-	msg := strings.ToLower(err.Error())
-	for _, fragment := range []string{"timeout", "timed out", "connection reset", "connection refused", "unexpected eof", "unavailable", "503", "502", "504"} {
-		if strings.Contains(msg, fragment) {
-			return true
-		}
-	}
-	return false
+	return submitOutcome{class: stellar.SubmitDefinite, err: lastErr}
 }
 
 func (e *Engine) syncWalletBalances(ctx context.Context, w *domain.Wallet) {

@@ -1,10 +1,10 @@
-import { HttpClient } from '../http';
+import { HttpClient, RequestOptions } from '../http';
 import { FeeScheduleResponse, ListCollectedQuery, ListCollectedResponse } from '../types';
 
 export class FeesResource {
   constructor(private http: HttpClient) {}
 
-  async get(options?: { signal?: AbortSignal }): Promise<FeeScheduleResponse> {
+  async get(options?: RequestOptions): Promise<FeeScheduleResponse> {
     const res = await this.http.request<FeeScheduleResponse>({
       method: 'GET',
       path: '/fees',
@@ -15,7 +15,7 @@ export class FeesResource {
 
   async listCollected(
     query?: ListCollectedQuery,
-    options?: { signal?: AbortSignal },
+    options?: RequestOptions,
   ): Promise<ListCollectedResponse> {
     const res = await this.http.request<ListCollectedResponse>({
       method: 'GET',

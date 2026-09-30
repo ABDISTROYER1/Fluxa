@@ -13,7 +13,6 @@ import (
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
-	horizonclient "github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/txnbuild"
 )
 
@@ -187,8 +186,7 @@ func (s *service) GetBalances(ctx context.Context, walletID string, includeFX ..
 
 	acct, err := s.client(ctx).LoadAccount(w.PublicKey)
 	if err != nil {
-		hErr, ok := err.(*horizonclient.Error)
-		if ok && hErr.Response.Status == "404" {
+		if stellar.IsNotFound(err) {
 			// Account not yet funded on Stellar — return empty balances
 			return []Balance{}, nil
 		}

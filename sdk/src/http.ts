@@ -9,13 +9,18 @@ export interface HttpClientConfig {
 }
 
 export interface RequestOptions {
+  signal?: AbortSignal;
+  idempotencyKey?: string;
+}
+
+export interface HttpRequestOptions extends RequestOptions {
   method: string;
   path: string;
   body?: unknown;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   query?: Record<string, any>;
   headers?: Record<string, string>;
-  signal?: AbortSignal;
+  timeout?: number;
 }
 
 export interface HttpResponse<T> {
@@ -42,6 +47,40 @@ function isRetryable(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+function requiresIdempotencyKey(method: string, path: string): boolean {
+  if (method.toUpperCase() !== 'POST') return false;
+  if (
+    [
+      '/wallets',
+      '/transfers',
+      '/transfers/batch',
+      '/withdrawals',
+      '/fx/convert',
+      '/schedules',
+      '/claimable-balances',
+    ].includes(path)
+  ) {
+    return true;
+  }
+  return (
+    (path.startsWith('/wallets/') &&
+      ['/deposit/fiat', '/withdraw/fiat', '/trustlines'].some((suffix) => path.endsWith(suffix))) ||
+    (path.startsWith('/claimable-balances/') && path.endsWith('/claim'))
+  );
+}
+
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
+function makeIdempotencyKey(): string {
+  return globalThis.crypto.randomUUID();
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -53,26 +92,39 @@ export class HttpClient {
     this.config = config;
   }
 
-  async request<T>(options: RequestOptions): Promise<HttpResponse<T>> {
+  async request<T>(options: HttpRequestOptions): Promise<HttpResponse<T>> {
     const { method, path, body, query, headers: extraHeaders, signal } = options;
-    const url = `${this.config.baseUrl}/v1${path}${buildQueryString(query)}`;
+    const rootUrl = this.config.baseUrl.replace(/\/$/, '').replace(/\/v1$/, '');
+    const url = `${rootUrl}${path === '/../health' ? '/health' : `/v1${path}`}${buildQueryString(query)}`;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${this.config.apiKey}`,
       ...extraHeaders,
     };
+    const existingKey = Object.entries(headers).find(([name]) =>
+      ['idempotency-key', 'x-idempotency-key'].includes(name.toLowerCase()),
+    )?.[1];
+    const idempotencyKey =
+      options.idempotencyKey ||
+      existingKey ||
+      (requiresIdempotencyKey(method, path) ? makeIdempotencyKey() : undefined);
+    if (idempotencyKey && !existingKey) headers['Idempotency-Key'] = idempotencyKey;
+    const safeToRetry = ['GET', 'HEAD'].includes(method.toUpperCase()) || Boolean(idempotencyKey);
 
     let lastError: Error | undefined;
+    let nextRetryDelay: number | undefined;
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       if (attempt > 0) {
-        const delay = this.config.retryDelay * Math.pow(2, attempt - 1);
+        const delay = nextRetryDelay ?? this.config.retryDelay * Math.pow(2, attempt - 1);
+        nextRetryDelay = undefined;
         await sleep(delay);
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+      const requestTimeout = options.timeout ?? this.config.timeout;
+      const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
       // Combine external signal with timeout signal
       if (signal) {
@@ -117,19 +169,14 @@ export class HttpClient {
           if (error instanceof RateLimitError) {
             const retryHeader = res.headers.get('retry-after');
             if (retryHeader) {
-              error.retryAfter = parseInt(retryHeader, 10);
+              const retryAfterMs = parseRetryAfter(retryHeader);
+              if (retryAfterMs !== undefined) error.retryAfter = Math.ceil(retryAfterMs / 1000);
             }
           }
 
-          if (isRetryable(res.status) && attempt < this.config.maxRetries) {
+          if (safeToRetry && isRetryable(res.status) && attempt < this.config.maxRetries) {
             lastError = error;
-            const retryDelay =
-              error instanceof RateLimitError && error.retryAfter
-                ? error.retryAfter * 1000
-                : undefined;
-            if (retryDelay) {
-              await sleep(retryDelay);
-            }
+            nextRetryDelay = parseRetryAfter(res.headers.get('retry-after'));
             continue;
           }
 
@@ -144,16 +191,16 @@ export class HttpClient {
           throw err;
         }
 
+        lastError = err instanceof Error ? err : new Error(String(err));
         // Network or abort errors are retryable
-        if (attempt < this.config.maxRetries) {
-          lastError = err instanceof Error ? err : new Error(String(err));
+        if (safeToRetry && attempt < this.config.maxRetries) {
           continue;
         }
 
         if (err instanceof DOMException && err.name === 'AbortError') {
           throw new FluxaError(408, {
             code: 'TIMEOUT',
-            message: `Request timed out after ${this.config.timeout}ms`,
+            message: `Request timed out after ${options.timeout ?? this.config.timeout}ms`,
           });
         }
 

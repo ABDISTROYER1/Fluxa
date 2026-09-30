@@ -1,4 +1,4 @@
-import { HttpClient } from '../http';
+import { HttpClient, RequestOptions } from '../http';
 import {
   CreateTransferRequest,
   TransferResponse,
@@ -12,18 +12,19 @@ export class TransfersResource {
 
   async create(
     request: CreateTransferRequest,
-    options?: { signal?: AbortSignal },
+    options?: RequestOptions,
   ): Promise<TransferResponse> {
     const res = await this.http.request<TransferResponse>({
       method: 'POST',
       path: '/transfers',
       body: request,
       signal: options?.signal,
+      idempotencyKey: options?.idempotencyKey,
     });
     return res.data;
   }
 
-  async get(transferId: string, options?: { signal?: AbortSignal }): Promise<TransferResponse> {
+  async get(transferId: string, options?: RequestOptions): Promise<TransferResponse> {
     const res = await this.http.request<TransferResponse>({
       method: 'GET',
       path: `/transfers/${encodeURIComponent(transferId)}`,
@@ -34,11 +35,11 @@ export class TransfersResource {
 
   async list(
     query: ListTransactionsQuery,
-    options?: { signal?: AbortSignal },
+    options?: RequestOptions,
   ): Promise<ListTransactionsResponse> {
     const res = await this.http.request<ListTransactionsResponse>({
       method: 'GET',
-      path: '/transactions',
+      path: '/transfers',
       query,
       signal: options?.signal,
     });
@@ -47,18 +48,19 @@ export class TransfersResource {
 
   async createBatch(
     request: import('../types').CreateBatchRequest,
-    options?: { signal?: AbortSignal },
+    options?: RequestOptions,
   ): Promise<BatchResponse> {
     const res = await this.http.request<BatchResponse>({
       method: 'POST',
       path: '/transfers/batch',
       body: request,
       signal: options?.signal,
+      idempotencyKey: options?.idempotencyKey,
     });
     return res.data;
   }
 
-  async getBatch(batchId: string, options?: { signal?: AbortSignal }): Promise<BatchResponse> {
+  async getBatch(batchId: string, options?: RequestOptions): Promise<BatchResponse> {
     const res = await this.http.request<BatchResponse>({
       method: 'GET',
       path: `/transfers/batch/${encodeURIComponent(batchId)}`,
@@ -67,7 +69,7 @@ export class TransfersResource {
     return res.data;
   }
 
-  async exportBatch(batchId: string, options?: { signal?: AbortSignal }): Promise<string> {
+  async exportBatch(batchId: string, options?: RequestOptions): Promise<string> {
     const res = await this.http.request<string>({
       method: 'GET',
       path: `/transfers/batch/${encodeURIComponent(batchId)}/export`,

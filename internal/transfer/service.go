@@ -14,7 +14,6 @@ import (
 	walletpkg "github.com/fluxa/fluxa/internal/wallet"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
-	horizonclient "github.com/stellar/go/clients/horizonclient"
 )
 
 var ErrTransferFinal = errors.New("transfer already final")
@@ -358,8 +357,7 @@ func (s *service) validateTrustline(ctx context.Context, walletID, publicKey, as
 	if s.stellar != nil {
 		acct, err := stellar.LoadAccountWithContext(ctx, s.client(ctx), publicKey)
 		if err != nil {
-			hErr, ok := err.(*horizonclient.Error)
-			if ok && hErr.Response.Status == "404" {
+			if stellar.IsNotFound(err) {
 				return domain.NewErrNoTrustline(asset)
 			}
 		} else {

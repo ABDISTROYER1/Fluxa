@@ -40,10 +40,12 @@ const client = new FluxaClient({
   apiKey: "sk_live_...",         // Required
   baseUrl: "https://api.fluxa.io", // Default
   timeout: 30000,              // 30s default
-  maxRetries: 3,               // Exponential backoff for 5xx/network errors
+  maxRetries: 0,               // Retries are opt-in
   retryDelay: 500,             // Base delay in ms
 });
 ```
+
+Retries only replay reads or requests carrying an idempotency key. Financial mutations get a generated `Idempotency-Key` by default; supply `idempotencyKey` in method options to reuse a caller-owned key.
 
 ## Resources
 
@@ -55,6 +57,12 @@ const wallet = await client.wallets.create();
 
 // Get balances
 const { balances } = await client.wallets.getBalances("wallet-id");
+
+// Add a trustline
+await client.wallets.createTrustline("wallet-id", {
+  asset_code: "USDC",
+  asset_issuer: "stellar-issuer-public-key",
+});
 ```
 
 ### Transfers
@@ -66,7 +74,7 @@ const tx = await client.transfers.create({
   to_wallet_id: "to",
   asset: "USDC",
   amount: "100.0000000",
-});
+}, { idempotencyKey: "payout-2026-09-28" });
 
 // Get by ID
 const found = await client.transfers.get("tx-id");

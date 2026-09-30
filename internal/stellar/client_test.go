@@ -118,6 +118,9 @@ func TestPayments_ReturnsRecords(t *testing.T) {
 	if got := values.Get("order"); got != "asc" {
 		t.Errorf("order = %q, want asc", got)
 	}
+	if got := values.Get("join"); got != "transactions" {
+		t.Errorf("join = %q, want transactions", got)
+	}
 }
 
 func TestLoadAccount_Success(t *testing.T) {
