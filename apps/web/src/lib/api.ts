@@ -17,6 +17,7 @@ import type {
   FxRatesResponse,
   ScheduleTransferRequest,
   ScheduleTransferResponse,
+  ScheduleRunResponse,
 } from './types';
 export type { BatchResponse } from './types';
 export type { WalletBalance };
@@ -25,6 +26,7 @@ export type APIKey = APIKeyType;
 export type QuoteResponse = FxQuoteResponse;
 export type RateResponse = FxRatesResponse;
 export type ScheduleResponse = ScheduleTransferResponse;
+export type { ScheduleRunResponse };
 
 export interface StatusResponse {
   api_version: string;
@@ -227,7 +229,10 @@ export const api = {
         timezone: body.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
         missed_run_policy: body.missed_run_policy || 'skip',
       }),
+      headers: { 'Idempotency-Key': globalThis.crypto.randomUUID() },
     }),
+  listScheduleRuns: (id: string) =>
+    request<{ runs: ScheduleRunResponse[] }>(`/v1/schedules/${encodeURIComponent(id)}/runs?limit=20`),
   updateSchedule: (id: string, body: { status?: string }) =>
     request<ScheduleResponse>(`/v1/schedules/${id}`, {
       method: 'PATCH',

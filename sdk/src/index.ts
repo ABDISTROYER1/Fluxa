@@ -64,6 +64,9 @@ export type {
   UpdateScheduleRequest,
   ScheduleResponse,
   ListSchedulesResponse,
+  ScheduleRunStatus,
+  ScheduleRunResponse,
+  ListScheduleRunsResponse,
   // API Key
   CreateKeyRequest,
   CreateKeyResponse,

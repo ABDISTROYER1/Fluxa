@@ -60,14 +60,30 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 
 	// Record the expected occurrence before claiming — this is the value that
 	// the UNIQUE constraint and idempotency key are both keyed on.
-	expectedAt := sch.NextRunAt.UTC().Truncate(time.Second)
+	claimedNextRunAt := sch.NextRunAt
+	runAt := claimedNextRunAt
+	now := time.Now().UTC()
+	missedOccurrences := false
+	for {
+		next := AddInterval(runAt, sch.Frequency, sch.Timezone)
+		if next.After(now) {
+			break
+		}
+		missedOccurrences = true
+		runAt = next
+	}
+	skipMissed := sch.MissedRunPolicy == domain.MissedRunPolicySkip && missedOccurrences
+	expectedAt := runAt.UTC().Truncate(time.Second)
+	if skipMissed {
+		expectedAt = claimedNextRunAt.UTC().Truncate(time.Second)
+	}
 
 	// -----------------------------------------------------------------------
 	// Step 1: Claim the schedule row (CAS: active → processing).
 	// Only the winner of this atomic UPDATE proceeds; a concurrent worker that
 	// also picked up this row finds it in 'processing' and skips it.
 	// -----------------------------------------------------------------------
-	claimed, err := w.repo.Claim(ctx, sch.ID, sch.NextRunAt)
+	claimed, err := w.repo.Claim(ctx, sch.ID, claimedNextRunAt)
 	if err != nil {
 		log.Error().Err(err).Str("schedule_id", sch.ID).Msg("failed to claim schedule")
 		return
@@ -75,6 +91,9 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 	if !claimed {
 		// Another worker already claimed this occurrence.
 		return
+	}
+	if !skipMissed {
+		sch.NextRunAt = runAt
 	}
 
 	// Build a tenant-scoped context for all downstream calls.
@@ -115,6 +134,19 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 		domain.ScheduleRunStatusFailed,
 		domain.ScheduleRunStatusSkipped,
 		domain.ScheduleRunStatusCancelled:
+		w.advanceSchedule(ctx, sch)
+		return
+	}
+	if skipMissed {
+		now := time.Now().UTC()
+		run.Status = domain.ScheduleRunStatusSkipped
+		run.CompletedAt = &now
+		if updateErr := w.repo.UpdateRun(runCtx, run); updateErr != nil {
+			log.Error().Err(updateErr).
+				Str("schedule_id", sch.ID).
+				Str("run_id", run.ID).
+				Msg("failed to record skipped schedule occurrence")
+		}
 		w.advanceSchedule(ctx, sch)
 		return
 	}
@@ -160,7 +192,10 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 	completedAt := time.Now().UTC()
 
 	if transferErr != nil {
-		errMsg := transferErr.Error()
+		// Transfer errors may include provider responses or internal identifiers.
+		// Keep the durable run record user-safe and leave sensitive detail out of
+		// the schedule worker log.
+		errMsg := "scheduled payout could not be initiated; check the wallet and asset configuration before resuming"
 		run.Status = domain.ScheduleRunStatusFailed
 		run.Error = &errMsg
 		run.CompletedAt = &completedAt
@@ -171,7 +206,7 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 				Msg("failed to record run failure")
 		}
 
-		log.Error().Err(transferErr).
+		log.Error().
 			Str("schedule_id", sch.ID).
 			Str("run_id", run.ID).
 			Msg("scheduled transfer failed to initiate")

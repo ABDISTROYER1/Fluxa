@@ -183,7 +183,10 @@ func New(
 				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transfers", transferHandler.Routes())
 				r.With(RequireScope(domain.ScopeTransfersWrite)).Route("/transfers/batch", batchHandler.Routes())
 				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transactions", transferHandler.TransactionRoutes())
-				r.Route("/schedules", scheduleHandler.Routes())
+				r.Route("/schedules", scheduleHandler.Routes(
+					RequireScope(domain.ScopeTransfersRead),
+					RequireScope(domain.ScopeTransfersWrite),
+				))
 				r.With(RequireScope(domain.ScopeFXRead)).Route("/fx", fxHandler.Routes())
 				r.With(RequireScope(domain.ScopeFeesRead)).Route("/fees", feeHandler.Routes())
 				if claimableHandler != nil {

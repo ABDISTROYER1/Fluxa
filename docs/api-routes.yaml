@@ -30,6 +30,7 @@ routes:
   - "GET /v1/idempotency/{key}"
   - GET /v1/keys
   - GET /v1/schedules
+  - "GET /v1/schedules/{id}/runs"
   - GET /v1/transfers
   - "GET /v1/transfers/batch/{batchId}"
   - "GET /v1/transfers/batch/{batchId}/export"

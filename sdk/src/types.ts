@@ -274,7 +274,13 @@ export interface ListDeliveriesResponse {
 
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
 
-export type ScheduleStatus = 'active' | 'paused' | 'cancelled' | 'completed';
+export type ScheduleStatus =
+  | 'active'
+  | 'processing'
+  | 'failed'
+  | 'paused'
+  | 'cancelled'
+  | 'completed';
 
 export interface CreateScheduleRequest {
   from_wallet_id: string;
@@ -284,6 +290,8 @@ export interface CreateScheduleRequest {
   frequency: ScheduleFrequency;
   start_date: string;
   end_date?: string;
+  timezone?: string;
+  missed_run_policy?: 'skip' | 'run_once';
 }
 
 export interface UpdateScheduleRequest {
@@ -291,6 +299,8 @@ export interface UpdateScheduleRequest {
   amount?: string;
   frequency?: ScheduleFrequency;
   end_date?: string;
+  timezone?: string;
+  missed_run_policy?: 'skip' | 'run_once';
 }
 
 export interface ScheduleResponse {
@@ -300,10 +310,36 @@ export interface ScheduleResponse {
   asset: string;
   amount: string;
   frequency: ScheduleFrequency;
+  timezone: string;
+  missed_run_policy: 'skip' | 'run_once';
   next_run_at: string;
   end_at?: string;
   status: ScheduleStatus;
   created_at: string;
+}
+
+export type ScheduleRunStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
+
+export interface ScheduleRunResponse {
+  id: string;
+  schedule_id: string;
+  expected_run_at: string;
+  status: ScheduleRunStatus;
+  transaction_id?: string;
+  error?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface ListScheduleRunsResponse {
+  runs: ScheduleRunResponse[];
 }
 
 export interface ListSchedulesResponse {
