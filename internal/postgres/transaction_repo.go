@@ -77,24 +77,7 @@ func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) er
 		nullableStringPtr(tx.ExternalReference), tx.Tags,
 		nullableString(tx.IdempotencyKey),
 		nullableString(tx.FailureReason), nullableString(tx.FailureMessage),
-		nullableUUID(tx.IdempotencyRecordID),
-	}
-	query := fmt.Sprintf(`INSERT INTO transactions (%s) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`, txInsertColumns)
-	if conflict != "" {
-		query += " " + conflict
-	}
-	return db.Exec(ctx, query, args...)
-}
-
-func (r *TransactionRepo) Create(ctx context.Context, tx *domain.Transaction) error {
-	if tx.Mode == "" {
-		tx.Mode = transactionMode(ctx)
-	}
-	tID := tenant.IDFromContext(ctx)
-	if tID != "" {
-		tx.TenantID = &tID
-	}
-	_, err := insertTx(ctx, r.db, tx, "")
+	)
 	if err != nil {
 		return fmt.Errorf("insert transaction: %w", mapTransactionInsertError(err))
 	}
@@ -121,7 +104,7 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 	var amount, fee string
 	var localAmt *string
 	var feeBps *int
-var tenantID *string
+	var tenantID *string
 	var batchID *string
 	var idempotencyRecordID *string
 	var reference string

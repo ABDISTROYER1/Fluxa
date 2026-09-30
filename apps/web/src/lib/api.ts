@@ -232,7 +232,9 @@ export const api = {
       headers: { 'Idempotency-Key': globalThis.crypto.randomUUID() },
     }),
   listScheduleRuns: (id: string) =>
-    request<{ runs: ScheduleRunResponse[] }>(`/v1/schedules/${encodeURIComponent(id)}/runs?limit=20`),
+    request<{ runs: ScheduleRunResponse[] }>(
+      `/v1/schedules/${encodeURIComponent(id)}/runs?limit=20`,
+    ),
   updateSchedule: (id: string, body: { status?: string }) =>
     request<ScheduleResponse>(`/v1/schedules/${id}`, {
       method: 'PATCH',
