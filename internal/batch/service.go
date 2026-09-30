@@ -73,13 +73,13 @@ func (s *service) CreateBatch(ctx context.Context, fromWalletID string, items []
 		tx, err := s.transferSvc.InitiateBatchTransfer(ctx, fromWalletID, item.ToWalletID, item.Asset, item.Amount, b.ID, item.Reference)
 		if err != nil {
 			tx = &domain.Transaction{
-				ID:         uuid.New().String(),
-				Type:       domain.TypeTransfer,
-				Status:     domain.StatusFailed,
-				FromWallet: fromWalletID,
-				ToWallet:   item.ToWalletID,
-				Asset:      item.Asset,
-				Amount:     item.Amount,
+				ID:             uuid.New().String(),
+				Type:           domain.TypeTransfer,
+				Status:         domain.StatusFailed,
+				FromWallet:     fromWalletID,
+				ToWallet:       item.ToWalletID,
+				Asset:          item.Asset,
+				Amount:         item.Amount,
 				BatchID:        &b.ID,
 				Reference:      item.Reference,
 				FailureReason:  "transfer_initiation_failed",

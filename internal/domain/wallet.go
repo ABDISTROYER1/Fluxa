@@ -53,34 +53,34 @@ type WalletBalance struct {
 
 // ConsolidationOperation represents a request to consolidate balances from multiple wallets.
 type ConsolidationOperation struct {
-	ID               string          `json:"id"`
-	TenantID         string          `json:"tenant_id"`
-	SourceWalletIDs  []string        `json:"source_wallet_ids"`
-	DestinationWallet string         `json:"destination_wallet"`
-	IdempotencyKey   string          `json:"idempotency_key"`
-	TotalFee         decimal.Decimal `json:"total_fee"`
-	ReserveRecovered decimal.Decimal `json:"reserve_recovered"`
-	Status           string          `json:"status"` // pending, completed, failed
-	DryRun           bool            `json:"dry_run"`
-	TransactionHashes []string       `json:"transaction_hashes,omitempty"`
-	ActorType        string          `json:"actor_type"`
-	ActorID          string          `json:"actor_id"`
-	ErrorMessage     *string         `json:"error_message,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
+	ID                string          `json:"id"`
+	TenantID          string          `json:"tenant_id"`
+	SourceWalletIDs   []string        `json:"source_wallet_ids"`
+	DestinationWallet string          `json:"destination_wallet"`
+	IdempotencyKey    string          `json:"idempotency_key"`
+	TotalFee          decimal.Decimal `json:"total_fee"`
+	ReserveRecovered  decimal.Decimal `json:"reserve_recovered"`
+	Status            string          `json:"status"` // pending, completed, failed
+	DryRun            bool            `json:"dry_run"`
+	TransactionHashes []string        `json:"transaction_hashes,omitempty"`
+	ActorType         string          `json:"actor_type"`
+	ActorID           string          `json:"actor_id"`
+	ErrorMessage      *string         `json:"error_message,omitempty"`
+	CreatedAt         time.Time       `json:"created_at"`
+	CompletedAt       *time.Time      `json:"completed_at,omitempty"`
 }
 
 // AccountClosure represents a request to close a custodial account.
 type AccountClosure struct {
-	ID               string     `json:"id"`
-	TenantID         string     `json:"tenant_id"`
-	WalletID         string     `json:"wallet_id"`
-	DestinationWallet string    `json:"destination_wallet"`
-	ActorType        string     `json:"actor_type"`
-	ActorID          string     `json:"actor_id"`
-	TransactionHash  *string    `json:"transaction_hash,omitempty"`
-	Status           string     `json:"status"` // pending, completed, failed
-	ErrorMessage     *string    `json:"error_message,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	ID                string     `json:"id"`
+	TenantID          string     `json:"tenant_id"`
+	WalletID          string     `json:"wallet_id"`
+	DestinationWallet string     `json:"destination_wallet"`
+	ActorType         string     `json:"actor_type"`
+	ActorID           string     `json:"actor_id"`
+	TransactionHash   *string    `json:"transaction_hash,omitempty"`
+	Status            string     `json:"status"` // pending, completed, failed
+	ErrorMessage      *string    `json:"error_message,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	CompletedAt       *time.Time `json:"completed_at,omitempty"`
 }

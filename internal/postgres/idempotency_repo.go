@@ -333,4 +333,3 @@ func (r *IdempotencyRepo) Lookup(ctx context.Context, orgID string, mode domain.
 	}
 	return idempotency.LookupResult{Found: true, Record: rec}, nil
 }
-

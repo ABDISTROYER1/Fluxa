@@ -73,8 +73,8 @@ func (m *mockConvRepo) Create(_ context.Context, c *domain.Conversion) error {
 
 type mockAuditRepo struct{}
 
-func (m *mockAuditRepo) CreateQuote(_ context.Context, _ *domain.Quote) error      { return nil }
-func (m *mockAuditRepo) MarkQuoteUsed(_ context.Context, _, _ string) error { return nil }
+func (m *mockAuditRepo) CreateQuote(_ context.Context, _ *domain.Quote) error { return nil }
+func (m *mockAuditRepo) MarkQuoteUsed(_ context.Context, _, _ string) error   { return nil }
 
 type mockFeeSvc struct{}
 

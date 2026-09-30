@@ -63,13 +63,13 @@ type createBatchRequest struct {
 }
 
 type batchTransferResponse struct {
-	ID        string `json:"id"`
-	ToWallet  string `json:"to_wallet_id"`
-	Asset     string `json:"asset"`
-	Amount    string `json:"amount"`
-	Reference string `json:"reference,omitempty"`
-	Status    string `json:"status"`
-	TxHash    string `json:"tx_hash,omitempty"`
+	ID             string `json:"id"`
+	ToWallet       string `json:"to_wallet_id"`
+	Asset          string `json:"asset"`
+	Amount         string `json:"amount"`
+	Reference      string `json:"reference,omitempty"`
+	Status         string `json:"status"`
+	TxHash         string `json:"tx_hash,omitempty"`
 	FailureReason  string `json:"failure_reason,omitempty"`
 	FailureMessage string `json:"failure_message,omitempty"`
 }

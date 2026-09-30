@@ -67,7 +67,7 @@ type Response struct {
 type LookupResult struct {
 	// Found is true when a non-expired record exists for the (orgID, mode, key)
 	// triple. When false, all other fields are zero-valued.
-	Found bool
+	Found  bool
 	Record Record
 }
 

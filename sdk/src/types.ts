@@ -275,12 +275,7 @@ export interface ListDeliveriesResponse {
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
 
 export type ScheduleStatus =
-  | 'active'
-  | 'processing'
-  | 'failed'
-  | 'paused'
-  | 'cancelled'
-  | 'completed';
+  'active' | 'processing' | 'failed' | 'paused' | 'cancelled' | 'completed';
 
 export interface CreateScheduleRequest {
   from_wallet_id: string;
@@ -319,12 +314,7 @@ export interface ScheduleResponse {
 }
 
 export type ScheduleRunStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'skipped'
-  | 'cancelled';
+  'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
 
 export interface ScheduleRunResponse {
   id: string;

@@ -27,15 +27,15 @@ var (
 // ValidatePassword checks password policy compliance.
 //
 // Policy Decision (NIST SP 800-63B):
-// - Length: Minimum 8 characters to ensure adequate baseline entropy.
-// - Maximum Length: Exactly 72 bytes to strictly match bcrypt's input limit.
-//   Passwords longer than 72 bytes are rejected with ErrPasswordTooLong rather
-//   than silently truncated, ensuring users know that trailing characters
-//   cannot contribute entropy.
-// - Complexity: Arbitrary composition rules (mandatory digits, uppercase, special
-//   characters) are deliberately omitted per NIST SP 800-63B recommendations,
-//   as they encourage predictable patterns (e.g. "Password1!") and degrade usability
-//   without improving security.
+//   - Length: Minimum 8 characters to ensure adequate baseline entropy.
+//   - Maximum Length: Exactly 72 bytes to strictly match bcrypt's input limit.
+//     Passwords longer than 72 bytes are rejected with ErrPasswordTooLong rather
+//     than silently truncated, ensuring users know that trailing characters
+//     cannot contribute entropy.
+//   - Complexity: Arbitrary composition rules (mandatory digits, uppercase, special
+//     characters) are deliberately omitted per NIST SP 800-63B recommendations,
+//     as they encourage predictable patterns (e.g. "Password1!") and degrade usability
+//     without improving security.
 func ValidatePassword(password string) error {
 	if utf8.RuneCountInString(password) < MinPasswordLength {
 		return ErrPasswordTooShort

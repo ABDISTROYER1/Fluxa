@@ -1,72 +1,72 @@
-openapi: "3.0.3"
+openapi: 3.0.3
 info:
-  title: "Fluxa API"
-  version: "1.0.0"
-  description: |
-    Fluxa is a multi-currency digital asset platform built on Stellar. It provides
+  title: Fluxa API
+  version: 1.0.0
+  description: 'Fluxa is a multi-currency digital asset platform built on Stellar. It provides
+
     wallets, instant transfers, FX conversions, scheduled recurring payments,
+
     batch disbursements, fiat on/off-ramps, and a developer-friendly webhook system.
 
+
     All endpoints under `/v1` require a Bearer API key in the `Authorization` header.
+
+    '
   contact:
-    name: "Fluxa Engineering"
-    email: "engineering@fluxa.io"
-    url: "https://github.com/fluxa/fluxa"
+    name: Fluxa Engineering
+    email: engineering@fluxa.io
+    url: https://github.com/fluxa/fluxa
   license:
-    name: "MIT"
-    url: "https://opensource.org/licenses/MIT"
-
+    name: MIT
+    url: https://opensource.org/licenses/MIT
 servers:
-  - url: http://localhost:3000
-    description: "Local development"
-  - url: https://api.fluxa.io
-    description: "Production"
-
+- url: http://localhost:3000
+  description: Local development
+- url: https://api.fluxa.io
+  description: Production
 tags:
-  - name: "Auth"
-    description: "Tenant registration, login and API key management"
-  - name: "Wallets"
-    description: "Stellar wallet creation, balances, and fiat deposits/withdrawals"
-  - name: "Beneficiaries"
-    description: "Tenant-scoped beneficiary allowlists with cooling-off approval"
-  - name: "Transfers"
-    description: "Single and batch transfers between wallets"
-  - name: "Transactions"
-    description: "Transaction history"
-  - name: "FX"
-    description: "Foreign-exchange quotes, conversions and rate lookups"
-  - name: "Schedules"
-    description: "Scheduled and recurring tenant payouts"
-  - name: "Webhooks"
-    description: "Webhook endpoint management and delivery logs"
-  - name: "Fees"
-    description: "Fee schedule queries"
-  - name: "Admin"
-    description: "Administrative endpoints (require admin key)"
-  - name: "System"
-    description: "Health, metrics and fiat provider webhooks"
-  - name: "Claimable balances"
-    description: "Claimable balance lookup and claiming"
-  - name: "Audit"
-    description: "Append-only tenant audit events and export"
-  - name: "Idempotency"
-    description: "Inspection and recovery of idempotent operations"
-
+- name: Auth
+  description: Tenant registration, login and API key management
+- name: Wallets
+  description: Stellar wallet creation, balances, and fiat deposits/withdrawals
+- name: Beneficiaries
+  description: Tenant-scoped beneficiary allowlists with cooling-off approval
+- name: Transfers
+  description: Single and batch transfers between wallets
+- name: Transactions
+  description: Transaction history
+- name: FX
+  description: Foreign-exchange quotes, conversions and rate lookups
+- name: Schedules
+  description: Scheduled and recurring tenant payouts
+- name: Webhooks
+  description: Webhook endpoint management and delivery logs
+- name: Fees
+  description: Fee schedule queries
+- name: Admin
+  description: Administrative endpoints (require admin key)
+- name: System
+  description: Health, metrics and fiat provider webhooks
+- name: Claimable balances
+  description: Claimable balance lookup and claiming
+- name: Audit
+  description: Append-only tenant audit events and export
+- name: Idempotency
+  description: Inspection and recovery of idempotent operations
 security:
-  - BearerAuth: []
-
+- BearerAuth: []
 paths:
-  # ── System & Documentation ────────────────────────────────────────────────
   /:
     get:
       operationId: getRoot
-      summary: "API root"
-      description: "Returns API metadata and links to documentation and OpenAPI specification."
-      tags: ["System"]
+      summary: API root
+      description: Returns API metadata and links to documentation and OpenAPI specification.
+      tags:
+      - System
       security: []
       responses:
-        "200":
-          description: "API metadata"
+        '200':
+          description: API metadata
           content:
             application/json:
               schema:
@@ -74,298 +74,307 @@ paths:
                 properties:
                   name:
                     type: string
-                    example: "Fluxa API"
+                    example: Fluxa API
                   version:
                     type: string
-                    example: "1.0.0"
+                    example: 1.0.0
                   description:
                     type: string
-                    example: "Multi-currency digital asset platform built on Stellar"
+                    example: Multi-currency digital asset platform built on Stellar
                   docs_url:
                     type: string
-                    example: "/docs"
+                    example: /docs
                   docs:
                     type: string
-                    example: "/docs"
+                    example: /docs
                   openapi_url:
                     type: string
-                    example: "/docs/openapi.yaml"
+                    example: /docs/openapi.yaml
                   openapi:
                     type: string
-                    example: "/docs/openapi.yaml"
-
+                    example: /docs/openapi.yaml
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /docs:
     get:
       operationId: getDocs
-      summary: "Interactive Swagger UI documentation"
-      description: "Serves an interactive Swagger UI API explorer loaded from CDN."
-      tags: ["System"]
+      summary: Interactive Swagger UI documentation
+      description: Serves an interactive Swagger UI API explorer loaded from CDN.
+      tags:
+      - System
       security: []
       responses:
-        "200":
-          description: "Interactive Swagger UI HTML page"
+        '200':
+          description: Interactive Swagger UI HTML page
           content:
             text/html:
               schema:
                 type: string
-
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /docs/openapi.yaml:
     get:
       operationId: getOpenAPISpec
-      summary: "OpenAPI specification"
-      description: "Returns the raw OpenAPI 3.0 YAML specification file."
-      tags: ["System"]
+      summary: OpenAPI specification
+      description: Returns the raw OpenAPI 3.0 YAML specification file.
+      tags:
+      - System
       security: []
       responses:
-        "200":
-          description: "Raw OpenAPI 3.0 specification"
+        '200':
+          description: Raw OpenAPI 3.0 specification
           content:
             application/yaml:
               schema:
                 type: string
-        "404":
-          description: "Specification file not found"
-
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /health:
     get:
       operationId: getHealth
-      summary: "Health check"
-      description: "Returns service health. Checks Postgres and Redis connectivity."
-      tags: ["System"]
+      summary: Health check
+      description: Returns service health. Checks Postgres and Redis connectivity.
+      tags:
+      - System
       security: []
       responses:
-        "200":
-          description: "All services healthy"
+        '200':
+          description: All services healthy
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
+                $ref: '#/components/schemas/HealthResponse'
               example:
-                status: "ok"
+                status: ok
                 services:
-                  postgres: "up"
-                  redis: "up"
-        "503":
-          description: "One or more services degraded"
+                  postgres: up
+                  redis: up
+        '503':
+          description: One or more services degraded
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
+                $ref: '#/components/schemas/HealthResponse'
               example:
-                status: "degraded"
+                status: degraded
                 services:
-                  postgres: "up"
-                  redis: "down"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-
+                  postgres: up
+                  redis: down
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /metrics:
     get:
       operationId: getMetrics
-      summary: "Server metrics"
-      description: "Returns runtime metrics: uptime, request counts, active requests, error rate by status code."
-      tags: ["System"]
+      summary: Server metrics
+      description: 'Returns runtime metrics: uptime, request counts, active requests, error rate by status code.'
+      tags:
+      - System
       security: []
       responses:
-        "200":
-          description: "Metrics snapshot"
+        '200':
+          description: Metrics snapshot
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MetricsResponse"
+                $ref: '#/components/schemas/MetricsResponse'
               example:
-                started_at: "2026-01-15T10:00:00Z"
+                started_at: '2026-01-15T10:00:00Z'
                 total_requests: 142857
                 active_requests: 3
                 total_errors: 120
                 uptime_seconds: 86400.5
                 requests_by_code:
-                  "OK": 140000
-                  "Bad Request": 80
-                  "Not Found": 40
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Auth ──────────────────────────────────────────────────────────────────
+                  OK: 140000
+                  Bad Request: 80
+                  Not Found: 40
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/auth/register:
     post:
       operationId: registerTenant
-      summary: "Register a new tenant"
-      description: "Creates a new tenant account and returns the initial API key."
-      tags: ["Auth"]
+      summary: Register a new tenant
+      description: Creates a new tenant account and returns the initial API key.
+      tags:
+      - Auth
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RegisterRequest"
+              $ref: '#/components/schemas/RegisterRequest'
             example:
-              name: "Acme Corp"
-              email: "ops@acme.com"
+              name: Acme Corp
+              email: ops@acme.com
       responses:
-        "201":
-          description: "Tenant registered"
+        '201':
+          description: Tenant registered
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthResponse"
+                $ref: '#/components/schemas/AuthResponse'
               example:
-                tenant_id: "t_8f3a2b1c"
-                api_key: "sk_live_abc123def456"
-                name: "Acme Corp"
-                email: "ops@acme.com"
-                created_at: "2026-01-15T10:00:00Z"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                tenant_id: t_8f3a2b1c
+                api_key: sk_live_abc123def456
+                name: Acme Corp
+                email: ops@acme.com
+                created_at: '2026-01-15T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/auth/login:
     post:
       operationId: loginTenant
-      summary: "Login and issue a new API key"
-      description: "Authenticates an existing tenant and returns a new API key."
-      tags: ["Auth"]
+      summary: Login and issue a new API key
+      description: Authenticates an existing tenant and returns a new API key.
+      tags:
+      - Auth
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/LoginRequest"
+              $ref: '#/components/schemas/LoginRequest'
             example:
-              email: "ops@acme.com"
-              password: "s3cret"
+              email: ops@acme.com
+              password: s3cret
       responses:
-        "200":
-          description: "Login successful"
+        '200':
+          description: Login successful
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthResponse"
+                $ref: '#/components/schemas/AuthResponse'
               example:
-                tenant_id: "t_8f3a2b1c"
-                api_key: "sk_live_abc123def456"
-                name: "Acme Corp"
-                email: "ops@acme.com"
-                created_at: "2026-01-15T10:00:00Z"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── API Keys ──────────────────────────────────────────────────────────────
+                tenant_id: t_8f3a2b1c
+                api_key: sk_live_abc123def456
+                name: Acme Corp
+                email: ops@acme.com
+                created_at: '2026-01-15T10:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/keys:
     post:
       operationId: createAPIKey
-      summary: "Create an API key"
-      description: |
-        Generates a new API key for the authenticated tenant. The raw key is
+      summary: Create an API key
+      description: 'Generates a new API key for the authenticated tenant. The raw key is
+
         returned only in this response — it cannot be retrieved later.
-      tags: ["Auth"]
+
+        '
+      tags:
+      - Auth
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateKeyRequest"
+              $ref: '#/components/schemas/CreateKeyRequest'
             example:
-              label: "CI deploy key"
+              label: CI deploy key
       responses:
-        "201":
-          description: "API key created"
+        '201':
+          description: API key created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/APIKeyCreated"
+                $ref: '#/components/schemas/APIKeyCreated'
               example:
-                id: "k_9a8b7c6d"
-                key: "sk_live_a1b2c3d4e5f6g7h8"
-                prefix: "sk_live_a1b2"
-                label: "CI deploy key"
-                created_at: "2026-01-15T10:00:00Z"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                id: k_9a8b7c6d
+                key: sk_live_a1b2c3d4e5f6g7h8
+                prefix: sk_live_a1b2
+                label: CI deploy key
+                created_at: '2026-01-15T10:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     get:
       operationId: listAPIKeys
-      summary: "List API keys"
-      description: "Returns all API keys for the authenticated tenant."
-      tags: ["Auth"]
+      summary: List API keys
+      description: Returns all API keys for the authenticated tenant.
+      tags:
+      - Auth
       responses:
-        "200":
-          description: "List of API keys"
+        '200':
+          description: List of API keys
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/APIKeySummary"
+                  $ref: '#/components/schemas/APIKeySummary'
               example:
-                - id: "k_9a8b7c6d"
-                  prefix: "sk_live_a1b2"
-                  label: "CI deploy key"
-                  last_used_at: "2026-01-15T12:00:00Z"
-                  revoked_at: null
-                  created_at: "2026-01-15T10:00:00Z"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+              - id: k_9a8b7c6d
+                prefix: sk_live_a1b2
+                label: CI deploy key
+                last_used_at: '2026-01-15T12:00:00Z'
+                revoked_at: null
+                created_at: '2026-01-15T10:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/keys/{id}:
     delete:
       operationId: revokeAPIKey
-      summary: "Revoke an API key"
-      description: "Permanently revokes the given API key. The key can no longer be used."
-      tags: ["Auth"]
+      summary: Revoke an API key
+      description: Permanently revokes the given API key. The key can no longer be used.
+      tags:
+      - Auth
       parameters:
-        - $ref: "#/components/parameters/KeyID"
+      - $ref: '#/components/parameters/KeyID'
       responses:
-        "204":
-          description: "Key revoked"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Wallets ───────────────────────────────────────────────────────────────
+        '204':
+          description: Key revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/wallets:
     post:
       operationId: createWallet
-      summary: "Create a wallet"
-      description: "Generates a new Stellar keypair, encrypts the secret, and returns the wallet."
-      tags: ["Wallets"]
+      summary: Create a wallet
+      description: Generates a new Stellar keypair, encrypts the secret, and returns the wallet.
+      tags:
+      - Wallets
       responses:
-        "201":
-          description: "Wallet created"
+        '201':
+          description: Wallet created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WalletCreated"
+                $ref: '#/components/schemas/WalletCreated'
               example:
-                id: "w_1a2b3c4d"
-                public_key: "GBXCAFE7RJHBEVGT5ANBZ7YXDU7S3Y3VQWZ5J4YKJ2D6S7F8G9H0I"
-                created_at: "2026-01-15T10:00:00Z"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                id: w_1a2b3c4d
+                public_key: GBXCAFE7RJHBEVGT5ANBZ7YXDU7S3Y3VQWZ5J4YKJ2D6S7F8G9H0I
+                created_at: '2026-01-15T10:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/beneficiaries:
     get:
       operationId: listBeneficiaries
-      summary: "List beneficiaries"
-      tags: ["Beneficiaries"]
+      summary: List beneficiaries
+      tags:
+      - Beneficiaries
       responses:
-        "200":
-          description: "Tenant beneficiaries"
+        '200':
+          description: Tenant beneficiaries
           content:
             application/json:
               schema:
@@ -374,271 +383,302 @@ paths:
                   beneficiaries:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Beneficiary"
+                      $ref: '#/components/schemas/Beneficiary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createBeneficiary
-      summary: "Create a beneficiary"
-      description: "Creates a pending beneficiary. Activation is blocked until the 24-hour cooling-off period ends."
-      tags: ["Beneficiaries"]
+      summary: Create a beneficiary
+      description: Creates a pending beneficiary. Activation is blocked until the 24-hour cooling-off period ends.
+      tags:
+      - Beneficiaries
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateBeneficiaryRequest"
+              $ref: '#/components/schemas/CreateBeneficiaryRequest'
       responses:
-        "201":
-          description: "Beneficiary created"
+        '201':
+          description: Beneficiary created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Beneficiary"
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "409": { description: "Duplicate beneficiary" }
-
+                $ref: '#/components/schemas/Beneficiary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/beneficiaries/{id}:
     get:
       operationId: getBeneficiary
-      summary: "Get a beneficiary"
-      tags: ["Beneficiaries"]
+      summary: Get a beneficiary
+      tags:
+      - Beneficiaries
       parameters:
-        - $ref: "#/components/parameters/BeneficiaryID"
+      - $ref: '#/components/parameters/BeneficiaryID'
       responses:
-        "200":
-          description: "Beneficiary"
+        '200':
+          description: Beneficiary
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Beneficiary"
-        "404": { $ref: "#/components/responses/NotFound" }
+                $ref: '#/components/schemas/Beneficiary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: revokeBeneficiary
-      summary: "Revoke a beneficiary"
-      tags: ["Beneficiaries"]
+      summary: Revoke a beneficiary
+      tags:
+      - Beneficiaries
       parameters:
-        - $ref: "#/components/parameters/BeneficiaryID"
+      - $ref: '#/components/parameters/BeneficiaryID'
       responses:
-        "204": { description: "Beneficiary revoked" }
-        "404": { $ref: "#/components/responses/NotFound" }
-
+        '204':
+          description: Beneficiary revoked
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/beneficiaries/{id}/activate:
     post:
       operationId: activateBeneficiary
-      summary: "Activate a beneficiary after its cooling-off period"
-      tags: ["Beneficiaries"]
+      summary: Activate a beneficiary after its cooling-off period
+      tags:
+      - Beneficiaries
       parameters:
-        - $ref: "#/components/parameters/BeneficiaryID"
+      - $ref: '#/components/parameters/BeneficiaryID'
       responses:
-        "200":
-          description: "Beneficiary activated"
+        '200':
+          description: Beneficiary activated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Beneficiary"
-        "409": { description: "Cooling-off period has not elapsed" }
-
+                $ref: '#/components/schemas/Beneficiary'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/wallets/{id}:
     get:
       operationId: getWallet
-      summary: "Get wallet details"
-      description: "Returns the wallet metadata including public key and creation timestamp."
-      tags: ["Wallets"]
+      summary: Get wallet details
+      description: Returns the wallet metadata including public key and creation timestamp.
+      tags:
+      - Wallets
       parameters:
-        - $ref: "#/components/parameters/WalletID"
+      - $ref: '#/components/parameters/WalletID'
       responses:
-        "200":
-          description: "Wallet details"
+        '200':
+          description: Wallet details
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Wallet"
+                $ref: '#/components/schemas/Wallet'
               example:
-                id: "w_1a2b3c4d"
-                public_key: "GBXCAFE7RJHBEVGT5ANBZ7YXDU7S3Y3VQWZ5J4YKJ2D6S7F8G9H0I"
-                created_at: "2026-01-15T10:00:00Z"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                id: w_1a2b3c4d
+                public_key: GBXCAFE7RJHBEVGT5ANBZ7YXDU7S3Y3VQWZ5J4YKJ2D6S7F8G9H0I
+                created_at: '2026-01-15T10:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/wallets/{id}/balances:
     get:
       operationId: getWalletBalances
-      summary: "Get wallet balances"
-      description: "Returns all asset balances for the wallet from the Stellar network."
-      tags: ["Wallets"]
+      summary: Get wallet balances
+      description: Returns all asset balances for the wallet from the Stellar network.
+      tags:
+      - Wallets
       parameters:
-        - $ref: "#/components/parameters/WalletID"
+      - $ref: '#/components/parameters/WalletID'
       responses:
-        "200":
-          description: "Wallet balances"
+        '200':
+          description: Wallet balances
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WalletBalances"
+                $ref: '#/components/schemas/WalletBalances'
               example:
-                wallet_id: "w_1a2b3c4d"
+                wallet_id: w_1a2b3c4d
                 balances:
-                  - asset_code: "USDC"
-                    issuer: "GA5ZSEJ6BHT2ZKGDABICHI62W25ZJUXUNFFYGLYTIEXP6CZMUWqmOvxM"
-                    balance: "1250.0000000"
-                  - asset_code: "XLM"
-                    issuer: ""
-                    balance: "42.5000000"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                - asset_code: USDC
+                  issuer: GA5ZSEJ6BHT2ZKGDABICHI62W25ZJUXUNFFYGLYTIEXP6CZMUWqmOvxM
+                  balance: '1250.0000000'
+                - asset_code: XLM
+                  issuer: ''
+                  balance: '42.5000000'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/wallets/{id}/trustlines:
     post:
       operationId: createTrustline
-      summary: "Establish a trustline"
-      description: "Adds a trustline for an asset on the wallet so it can hold that token."
-      tags: ["Wallets"]
+      summary: Establish a trustline
+      description: Adds a trustline for an asset on the wallet so it can hold that token.
+      tags:
+      - Wallets
       parameters:
-        - $ref: "#/components/parameters/WalletID"
+      - $ref: '#/components/parameters/WalletID'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateTrustlineRequest"
+              $ref: '#/components/schemas/CreateTrustlineRequest'
             example:
-              asset_code: "USDC"
-              asset_issuer: "GA5ZSEJ6BHT2ZKGDABICHI62W25ZJUXUNFFYGLYTIEXP6CZMUWqmOvxM"
-              limit: "100000"
+              asset_code: USDC
+              asset_issuer: GA5ZSEJ6BHT2ZKGDABICHI62W25ZJUXUNFFYGLYTIEXP6CZMUWqmOvxM
+              limit: '100000'
       responses:
-        "202":
-          description: "Trustline submission accepted"
+        '202':
+          description: Trustline submission accepted
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TrustlineResponse"
+                $ref: '#/components/schemas/TrustlineResponse'
               example:
-                wallet_id: "w_1a2b3c4d"
-                asset_code: "USDC"
-                asset_issuer: "GA5ZSEJ6BHT2ZKGDABICHI62W25ZJUXUNFFYGLYTIEXP6CZMUWqmOvxM"
-                status: "submitted"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                wallet_id: w_1a2b3c4d
+                asset_code: USDC
+                asset_issuer: GA5ZSEJ6BHT2ZKGDABICHI62W25ZJUXUNFFYGLYTIEXP6CZMUWqmOvxM
+                status: submitted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/wallets/{id}/deposit/fiat:
     post:
       operationId: depositFiat
-      summary: "Initiate a fiat deposit"
-      description: |
-        Starts a fiat-to-crypto deposit via the configured payment rail (e.g. Flutterwave).
+      summary: Initiate a fiat deposit
+      description: 'Starts a fiat-to-crypto deposit via the configured payment rail (e.g. Flutterwave).
+
         Returns a payment link the customer should be redirected to.
-      tags: ["Wallets"]
+
+        '
+      tags:
+      - Wallets
       parameters:
-        - $ref: "#/components/parameters/WalletID"
+      - $ref: '#/components/parameters/WalletID'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/FiatDepositRequest"
+              $ref: '#/components/schemas/FiatDepositRequest'
             example:
-              amount: "100.00"
-              currency: "NGN"
-              email: "customer@acme.com"
-              name: "John Doe"
+              amount: '100.00'
+              currency: NGN
+              email: customer@acme.com
+              name: John Doe
       responses:
-        "200":
-          description: "Deposit initiated"
+        '200':
+          description: Deposit initiated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DepositResponse"
+                $ref: '#/components/schemas/DepositResponse'
               example:
-                payment_link: "https://checkout.flutterwave.com/pay/abc123"
-                reference: "DEP-a1b2c3d4"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                payment_link: https://checkout.flutterwave.com/pay/abc123
+                reference: DEP-a1b2c3d4
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/wallets/{id}/withdraw/fiat:
     post:
       operationId: withdrawFiat
-      summary: "Initiate a fiat withdrawal"
-      description: "Converts USDC from the wallet and sends fiat to a bank account."
-      tags: ["Wallets"]
+      summary: Initiate a fiat withdrawal
+      description: Converts USDC from the wallet and sends fiat to a bank account.
+      tags:
+      - Wallets
       parameters:
-        - $ref: "#/components/parameters/WalletID"
-        - name: X-Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate withdrawals on network retries"
-        - name: Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate withdrawals on network retries"
+      - $ref: '#/components/parameters/WalletID'
+      - name: X-Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Optional idempotency key to prevent duplicate withdrawals on network retries
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          format: uuid
+        description: Optional idempotency key to prevent duplicate withdrawals on network retries
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/FiatWithdrawalRequest"
+              $ref: '#/components/schemas/FiatWithdrawalRequest'
             example:
-              amount: "50.00"
-              currency: "NGN"
-              account_bank: "GTBank"
-              account_number: "0123456789"
+              amount: '50.00'
+              currency: NGN
+              account_bank: GTBank
+              account_number: 0123456789
       responses:
-        "200":
-          description: "Withdrawal initiated"
+        '200':
+          description: Withdrawal initiated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WithdrawalResponse"
+                $ref: '#/components/schemas/WithdrawalResponse'
               example:
-                reference: "WIT-e5f6g7h8"
-                status: "pending"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-        "409":
-          description: "Conflict: request in progress or idempotency key reused with different body"
-
-  # ── Withdrawals ────────────────────────────────────────────────────────────
+                reference: WIT-e5f6g7h8
+                status: pending
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/withdrawals:
     post:
       operationId: initiateWithdrawal
-      summary: "Initiate a withdrawal"
-      description: "Converts USDC from the wallet and sends fiat to a bank account, protected by idempotency."
-      tags: ["Wallets"]
+      summary: Initiate a withdrawal
+      description: Converts USDC from the wallet and sends fiat to a bank account, protected by idempotency.
+      tags:
+      - Wallets
       parameters:
-        - name: X-Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate withdrawals on network retries"
-        - name: Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate withdrawals on network retries"
+      - name: X-Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Optional idempotency key to prevent duplicate withdrawals on network retries
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          format: uuid
+        description: Optional idempotency key to prevent duplicate withdrawals on network retries
       requestBody:
         required: true
         content:
@@ -646,13 +686,11 @@ paths:
             schema:
               type: object
               required:
-                [
-                  "wallet_id",
-                  "amount",
-                  "currency",
-                  "account_bank",
-                  "account_number",
-                ]
+              - wallet_id
+              - amount
+              - currency
+              - account_bank
+              - account_number
               properties:
                 wallet_id:
                   type: string
@@ -666,127 +704,132 @@ paths:
                 account_number:
                   type: string
       responses:
-        "200":
-          description: "Withdrawal initiated"
+        '200':
+          description: Withdrawal initiated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WithdrawalResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          description: "Conflict: request in progress or idempotency key reused with different body"
-
-  # ── Transfers ─────────────────────────────────────────────────────────────
+                $ref: '#/components/schemas/WithdrawalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/transfers:
     post:
       operationId: initiateTransfer
-      summary: "Initiate a transfer"
-      description: "Moves an asset between two wallets, applying platform fees."
-      tags: ["Transfers"]
+      summary: Initiate a transfer
+      description: Moves an asset between two wallets, applying platform fees.
+      tags:
+      - Transfers
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateTransferRequest"
+              $ref: '#/components/schemas/CreateTransferRequest'
             example:
-              from_wallet_id: "w_1a2b3c4d"
-              to_wallet_id: "w_5e6f7g8h"
-              asset: "USDC"
-              amount: "100.0000000"
+              from_wallet_id: w_1a2b3c4d
+              to_wallet_id: w_5e6f7g8h
+              asset: USDC
+              amount: '100.0000000'
       parameters:
-        - name: X-Idempotency-Key
-          in: header
-          required: false
-          schema:
-            type: string
-          description: "Optional idempotency key to prevent duplicate transfers on retries"
-        - name: "Idempotency-Key"
-          in: header
-          required: true
-          description: |
-            Client-generated UUID v4 that makes this request safe to retry.
-            The result is held for 24 hours: a repeat with the same body
-            replays the original response, a repeat with a different body or
-            a concurrent repeat is rejected with 409.
-          schema:
-            type: string
-            format: uuid
+      - name: X-Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Optional idempotency key to prevent duplicate transfers on retries
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: 'Client-generated UUID v4 that makes this request safe to retry.
+
+          The result is held for 24 hours: a repeat with the same body
+
+          replays the original response, a repeat with a different body or
+
+          a concurrent repeat is rejected with 409.
+
+          '
+        schema:
+          type: string
+          format: uuid
       responses:
-        "202":
-          description: "Transfer accepted"
+        '202':
+          description: Transfer accepted
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TransferResponse"
+                $ref: '#/components/schemas/TransferResponse'
               example:
-                id: "tx_abc123"
-                tx_hash: ""
-                type: "transfer"
-                status: "pending"
-                from_wallet_id: "w_1a2b3c4d"
-                to_wallet_id: "w_5e6f7g8h"
-                asset: "USDC"
-                amount: "100.0000000"
-                fee_amount: "0.2500000"
-                net_amount: "99.7500000"
+                id: tx_abc123
+                tx_hash: ''
+                type: transfer
+                status: pending
+                from_wallet_id: w_1a2b3c4d
+                to_wallet_id: w_5e6f7g8h
+                asset: USDC
+                amount: '100.0000000'
+                fee_amount: '0.2500000'
+                net_amount: '99.7500000'
                 fee_bps: 25
-                created_at: "2026-01-15T10:00:00Z"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-          description: "Conflict: request in progress or idempotency key reused with different body"
-
+                created_at: '2026-01-15T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+          description: 'Conflict: request in progress or idempotency key reused with different body'
     get:
       operationId: listTransfers
-      summary: "List transfers"
-      description: "Returns all transactions for a given wallet."
-      tags: ["Transactions"]
+      summary: List transfers
+      description: Returns all transactions for a given wallet.
+      tags:
+      - Transactions
       parameters:
-        - name: wallet_id
-          in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: "Filter by wallet ID"
-        - name: external_reference
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by external reference"
-        - name: tag
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by tag"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
-          description: "Maximum number of results"
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-          description: "Offset for pagination"
+      - name: wallet_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+        description: Filter by wallet ID
+      - name: external_reference
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by external reference
+      - name: tag
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by tag
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+        description: Maximum number of results
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+        description: Offset for pagination
       responses:
-        "200":
-          description: "List of transactions"
+        '200':
+          description: List of transactions
           content:
             application/json:
               schema:
@@ -795,168 +838,178 @@ paths:
                   transactions:
                     type: array
                     items:
-                      $ref: "#/components/schemas/TransferResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                      $ref: '#/components/schemas/TransferResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/transfers/{id}:
     get:
       operationId: getTransfer
-      summary: "Get transfer details"
-      description: "Returns full details for a single transfer."
-      tags: ["Transfers"]
+      summary: Get transfer details
+      description: Returns full details for a single transfer.
+      tags:
+      - Transfers
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: "Transaction ID"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Transaction ID
       responses:
-        "200":
-          description: "Transfer details"
+        '200':
+          description: Transfer details
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TransferResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Batch Transfers ───────────────────────────────────────────────────────
+                $ref: '#/components/schemas/TransferResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/transfers/batch:
     post:
       operationId: createBatch
-      summary: "Create a batch transfer"
-      description: |
-        Submits up to 100 transfers from a single source wallet in one request.
+      summary: Create a batch transfer
+      description: 'Submits up to 100 transfers from a single source wallet in one request.
+
         Each transfer is processed independently; partial success is possible.
-      tags: ["Transfers"]
+
+        '
+      tags:
+      - Transfers
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateBatchRequest"
+              $ref: '#/components/schemas/CreateBatchRequest'
             example:
-              from_wallet_id: "w_1a2b3c4d"
+              from_wallet_id: w_1a2b3c4d
               transfers:
-                - to_wallet_id: "w_5e6f7g8h"
-                  asset: "USDC"
-                  amount: "50.0000000"
-                  reference: "payroll-jan"
-                - to_wallet_id: "w_9i0j1k2l"
-                  asset: "USDC"
-                  amount: "75.0000000"
-                  reference: "payroll-jan"
+              - to_wallet_id: w_5e6f7g8h
+                asset: USDC
+                amount: '50.0000000'
+                reference: payroll-jan
+              - to_wallet_id: w_9i0j1k2l
+                asset: USDC
+                amount: '75.0000000'
+                reference: payroll-jan
       parameters:
-        - name: "Idempotency-Key"
-          in: header
-          required: true
-          description: |
-            Client-generated UUID v4 that makes this request safe to retry.
-            The result is held for 24 hours: a repeat with the same body
-            replays the original response, a repeat with a different body or
-            a concurrent repeat is rejected with 409.
-          schema:
-            type: string
-            format: uuid
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: 'Client-generated UUID v4 that makes this request safe to retry.
+
+          The result is held for 24 hours: a repeat with the same body
+
+          replays the original response, a repeat with a different body or
+
+          a concurrent repeat is rejected with 409.
+
+          '
+        schema:
+          type: string
+          format: uuid
       responses:
-        "202":
-          description: "Batch accepted"
+        '202':
+          description: Batch accepted
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BatchResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/BatchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/transfers/batch/{batchId}:
     get:
       operationId: getBatch
-      summary: "Get batch status"
-      description: "Returns the batch and the status of every individual transfer in it."
-      tags: ["Transfers"]
+      summary: Get batch status
+      description: Returns the batch and the status of every individual transfer in it.
+      tags:
+      - Transfers
       parameters:
-        - name: batchId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: "Batch ID"
+      - name: batchId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Batch ID
       responses:
-        "200":
-          description: "Batch details"
+        '200':
+          description: Batch details
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BatchResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/BatchResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/transfers/batch/{batchId}/export:
     get:
       operationId: exportBatch
-      summary: "Export batch as CSV"
-      description: "Downloads the batch transfer results as a CSV file."
-      tags: ["Transfers"]
+      summary: Export batch as CSV
+      description: Downloads the batch transfer results as a CSV file.
+      tags:
+      - Transfers
       parameters:
-        - name: batchId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: "Batch ID"
+      - name: batchId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Batch ID
       responses:
-        "200":
-          description: "CSV file"
+        '200':
+          description: CSV file
           content:
             text/csv:
               schema:
                 type: string
                 format: binary
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Fiat ──────────────────────────────────────────────────────────────────
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/fiat/quote:
     post:
       operationId: previewFiat
-      summary: "Preview a fiat deposit or withdrawal"
-      description: "Get a read-only quote before creating a fiat deposit or withdrawal."
-      tags: ["Wallets"]
+      summary: Preview a fiat deposit or withdrawal
+      description: Get a read-only quote before creating a fiat deposit or withdrawal.
+      tags:
+      - Wallets
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [side, amount, currency, country]
+              required:
+              - side
+              - amount
+              - currency
+              - country
               properties:
                 side:
                   type: string
-                  enum: [deposit, withdraw]
+                  enum:
+                  - deposit
+                  - withdraw
                 amount:
                   type: string
                 currency:
@@ -964,214 +1017,216 @@ paths:
                 country:
                   type: string
       responses:
-        "200":
-          description: "Preview quote"
+        '200':
+          description: Preview quote
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FiatQuotePreviewResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
-  # ── FX ────────────────────────────────────────────────────────────────────
+                $ref: '#/components/schemas/FiatQuotePreviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/fx/quote:
     post:
       operationId: getFXQuote
-      summary: "Get an FX quote"
-      description: |
-        Returns a time-limited conversion quote (valid for 30 seconds).
+      summary: Get an FX quote
+      description: 'Returns a time-limited conversion quote (valid for 30 seconds).
+
         Use the returned `id` with POST /v1/fx/convert to execute.
-      tags: ["FX"]
+
+        '
+      tags:
+      - FX
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuoteRequest"
+              $ref: '#/components/schemas/QuoteRequest'
             example:
-              from_asset: "USDC"
-              to_asset: "XLM"
-              amount: "100.0000000"
+              from_asset: USDC
+              to_asset: XLM
+              amount: '100.0000000'
       responses:
-        "200":
-          description: "FX quote"
+        '200':
+          description: FX quote
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
+                $ref: '#/components/schemas/Quote'
               example:
-                id: "q_abc123"
-                org_id: "t_8f3a2b1c"
-                from_asset: "USDC"
-                to_asset: "XLM"
-                from_amount: "100.0000000"
-                to_amount: "3450.2500000"
-                rate: "34.5025000"
-                fee: "0.2500000"
-                expires_at: "2026-01-15T10:00:30Z"
+                id: q_abc123
+                org_id: t_8f3a2b1c
+                from_asset: USDC
+                to_asset: XLM
+                from_amount: '100.0000000'
+                to_amount: '3450.2500000'
+                rate: '34.5025000'
+                fee: '0.2500000'
+                expires_at: '2026-01-15T10:00:30Z'
                 used: false
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/fx/convert:
     post:
       operationId: executeConversion
-      summary: "Execute a conversion"
-      description: "Executes a previously quoted FX conversion. The quote must not be expired or already used."
-      tags: ["FX"]
+      summary: Execute a conversion
+      description: Executes a previously quoted FX conversion. The quote must not be expired or already used.
+      tags:
+      - FX
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConvertRequest"
+              $ref: '#/components/schemas/ConvertRequest'
             example:
-              wallet_id: "w_1a2b3c4d"
-              quote_id: "q_abc123"
+              wallet_id: w_1a2b3c4d
+              quote_id: q_abc123
       responses:
-        "200":
-          description: "Conversion executed"
+        '200':
+          description: Conversion executed
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConversionResponse"
+                $ref: '#/components/schemas/ConversionResponse'
               example:
-                id: "conv_xyz789"
-                wallet_id: "w_1a2b3c4d"
-                source_asset: "USDC"
-                dest_asset: "XLM"
-                source_amount: "100.0000000"
-                dest_amount: "3450.2500000"
-                fee_amount: "0.2500000"
+                id: conv_xyz789
+                wallet_id: w_1a2b3c4d
+                source_asset: USDC
+                dest_asset: XLM
+                source_amount: '100.0000000'
+                dest_amount: '3450.2500000'
+                fee_amount: '0.2500000'
                 fee_bps: 25
-                rate: "34.5025000"
-                tx_hash: "a1b2c3d4..."
-                created_at: "2026-01-15T10:00:05Z"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "422":
-          description: "Quote expired or already used"
+                rate: '34.5025000'
+                tx_hash: a1b2c3d4...
+                created_at: '2026-01-15T10:00:05Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Quote expired or already used
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
               example:
                 error:
-                  code: "QUOTE_EXPIRED"
-                  message: "quote expired"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                  code: QUOTE_EXPIRED
+                  message: quote expired
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/fx/rates:
     get:
       operationId: getFXRates
-      summary: "Get exchange rate"
-      description: "Returns the current exchange rate between two assets including fees."
-      tags: ["FX"]
+      summary: Get exchange rate
+      description: Returns the current exchange rate between two assets including fees.
+      tags:
+      - FX
       parameters:
-        - name: from
-          in: query
-          required: true
-          schema:
-            type: string
-          description: "Source asset code (e.g. USDC)"
-        - name: to
-          in: query
-          required: true
-          schema:
-            type: string
-          description: "Destination asset code (e.g. XLM)"
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Source asset code (e.g. USDC)
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Destination asset code (e.g. XLM)
       responses:
-        "200":
-          description: "Rate information"
+        '200':
+          description: Rate information
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RateResponse"
+                $ref: '#/components/schemas/RateResponse'
               example:
-                rate: "34.5025000"
-                mid_market_rate: "34.6000000"
+                rate: '34.5025000'
+                mid_market_rate: '34.6000000'
                 spread_bps: 28
-                provider: "stellar"
-                cached_at: "2026-01-15T10:00:00Z"
+                provider: stellar
+                cached_at: '2026-01-15T10:00:00Z'
                 stale: false
-                source_amount: "100.0000000"
-                dest_amount: "3450.2500000"
-                fee_amount: "0.2500000"
-                net_amount: "3449.0000000"
+                source_amount: '100.0000000'
+                dest_amount: '3450.2500000'
+                fee_amount: '0.2500000'
+                net_amount: '3449.0000000'
                 fee_bps: 25
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Schedules ─────────────────────────────────────────────────────────────
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/schedules:
     post:
       operationId: createSchedule
-      summary: "Create a recurring tenant payout schedule"
-      description: "Creates a tenant-scoped recurring payout that runs daily, weekly, or monthly. Requires transfers:write scope and a UUID v4 Idempotency-Key; retries with the same key and body replay the original response."
-      tags: ["Schedules"]
+      summary: Create a recurring tenant payout schedule
+      description: Creates a tenant-scoped recurring payout that runs daily, weekly, or monthly. Requires transfers:write scope and a UUID v4 Idempotency-Key; retries with the same key and body replay the original response.
+      tags:
+      - Schedules
       parameters:
-        - name: Idempotency-Key
-          in: header
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: "UUID v4 key for this schedule creation; reuse it only when retrying the same request."
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: UUID v4 key for this schedule creation; reuse it only when retrying the same request.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateScheduleRequest"
+              $ref: '#/components/schemas/CreateScheduleRequest'
             example:
-              from_wallet_id: "3f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77"
-              to_wallet_id: "4f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77"
-              asset: "USDC"
-              amount: "100.0000000"
-              frequency: "monthly"
-              timezone: "Africa/Lagos"
-              missed_run_policy: "skip"
-              start_date: "2026-02-01T00:00:00Z"
-              end_date: "2026-12-31T23:59:59Z"
+              from_wallet_id: 3f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77
+              to_wallet_id: 4f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77
+              asset: USDC
+              amount: '100.0000000'
+              frequency: monthly
+              timezone: Africa/Lagos
+              missed_run_policy: skip
+              start_date: '2026-02-01T00:00:00Z'
+              end_date: '2026-12-31T23:59:59Z'
       responses:
-        "201":
-          description: "Schedule created"
+        '201':
+          description: Schedule created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ScheduleResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/ScheduleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     get:
       operationId: listSchedules
-      summary: "List schedules"
-      description: "Returns up to 100 recurring payout schedules belonging to the authenticated tenant. Requires transfers:read scope."
-      tags: ["Schedules"]
+      summary: List schedules
+      description: Returns up to 100 recurring payout schedules belonging to the authenticated tenant. Requires transfers:read scope.
+      tags:
+      - Schedules
       responses:
-        "200":
-          description: "List of schedules"
+        '200':
+          description: List of schedules
           content:
             application/json:
               schema:
@@ -1180,36 +1235,36 @@ paths:
                   schedules:
                     type: array
                     items:
-                      $ref: "#/components/schemas/ScheduleResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                      $ref: '#/components/schemas/ScheduleResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/schedules/{id}/runs:
     get:
       operationId: listScheduleRuns
-      summary: "List payout attempts for a schedule"
-      description: "Returns the authenticated tenant's execution history, newest occurrence first. Requires transfers:read scope. Limit defaults to 20 and is capped at 100; offset defaults to 0."
-      tags: ["Schedules"]
+      summary: List payout attempts for a schedule
+      description: Returns the authenticated tenant's execution history, newest occurrence first. Requires transfers:read scope. Limit defaults to 20 and is capped at 100; offset defaults to 0.
+      tags:
+      - Schedules
       parameters:
-        - $ref: "#/components/parameters/ScheduleID"
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            minimum: 0
+      - $ref: '#/components/parameters/ScheduleID'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
       responses:
-        "200":
-          description: "Payout run history"
+        '200':
+          description: Payout run history
           content:
             application/json:
               schema:
@@ -1218,173 +1273,188 @@ paths:
                   runs:
                     type: array
                     items:
-                      $ref: "#/components/schemas/ScheduleRunResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                      $ref: '#/components/schemas/ScheduleRunResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/schedules/{id}:
     patch:
       operationId: updateSchedule
-      summary: "Update a schedule"
-      description: "Updates the amount, recurrence settings, or status. Requires transfers:write scope."
-      tags: ["Schedules"]
+      summary: Update a schedule
+      description: Updates the amount, recurrence settings, or status. Requires transfers:write scope.
+      tags:
+      - Schedules
       parameters:
-        - $ref: "#/components/parameters/ScheduleID"
+      - $ref: '#/components/parameters/ScheduleID'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateScheduleRequest"
+              $ref: '#/components/schemas/UpdateScheduleRequest'
             example:
-              status: "paused"
-              amount: "150.0000000"
+              status: paused
+              amount: '150.0000000'
       responses:
-        "200":
-          description: "Schedule updated"
+        '200':
+          description: Schedule updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ScheduleResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/ScheduleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: cancelSchedule
-      summary: "Cancel a schedule"
-      description: "Cancels a recurring tenant payout schedule. Requires transfers:write scope. Cannot be undone."
-      tags: ["Schedules"]
+      summary: Cancel a schedule
+      description: Cancels a recurring tenant payout schedule. Requires transfers:write scope. Cannot be undone.
+      tags:
+      - Schedules
       parameters:
-        - $ref: "#/components/parameters/ScheduleID"
+      - $ref: '#/components/parameters/ScheduleID'
       responses:
-        "204":
-          description: "Schedule cancelled"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Claimable balances ────────────────────────────────────────────────────
+        '204':
+          description: Schedule cancelled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/claimable-balances:
     post:
       operationId: createClaimableBalance
-      summary: "Create a claimable balance"
-      description: |
-        Creates a deferred payment held by the Stellar network until one of its
-        claimants satisfies their predicate. The org's source wallet funds it,
+      summary: Create a claimable balance
+      description: 'Creates a deferred payment held by the Stellar network until one of its
+
+        claimants satisfies their predicate. The org''s source wallet funds it,
+
         unless `sponsor_account` names a Fluxa-custodied wallet, in which case
+
         the creation is wrapped in BeginSponsoringFutureReserves /
+
         EndSponsoringFutureReserves and the sponsor pays the 0.5 XLM entry
+
         reserve.
 
+
         The returned `balance_id` is derived from the create operation, so it is
+
         available without a second Horizon round trip.
-      tags: ["Claimable balances"]
+
+        '
+      tags:
+      - Claimable balances
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateClaimableBalanceRequest"
+              $ref: '#/components/schemas/CreateClaimableBalanceRequest'
             example:
-              asset: "USDC"
-              amount: "250.0000000"
-              source_wallet_id: "3f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77"
-              sponsor_account: "GBAXPW7YQFAZPJS7WFD3XCP3MHKX4ZR3Z4WQ3L7VQZ4X3Z4WQ3L7VQZ4X"
+              asset: USDC
+              amount: '250.0000000'
+              source_wallet_id: 3f1c2b8e-9a4d-4d3f-8f4e-2b6c1a9d0e77
+              sponsor_account: GBAXPW7YQFAZPJS7WFD3XCP3MHKX4ZR3Z4WQ3L7VQZ4X3Z4WQ3L7VQZ4X
               revoke_on_expiry: true
               claimants:
-                - account: "GCLAIMANTACCOUNT0000000000000000000000000000000000000000"
-                  predicate:
-                    type: "before_absolute_time"
-                    timestamp: 1798761600
-                - account: "GORGACCOUNT000000000000000000000000000000000000000000"
-                  predicate:
-                    type: "after_absolute_time"
-                    timestamp: 1798761600
+              - account: GCLAIMANTACCOUNT0000000000000000000000000000000000000000
+                predicate:
+                  type: before_absolute_time
+                  timestamp: 1798761600
+              - account: GORGACCOUNT000000000000000000000000000000000000000000
+                predicate:
+                  type: after_absolute_time
+                  timestamp: 1798761600
       responses:
-        "201":
-          description: "Claimable balance created"
+        '201':
+          description: Claimable balance created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreateClaimableBalanceResponse"
-        "400":
-          description: |
-            Malformed request, unsupported asset, no claimants, a sponsor Fluxa
-            does not custody, or an invalid claim predicate.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
+                $ref: '#/components/schemas/CreateClaimableBalanceResponse'
+        '400':
+          description: 'Malformed request, unsupported asset, no claimants, a sponsor Fluxa
 
+            does not custody, or an invalid claim predicate.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     get:
       operationId: listClaimableBalances
-      summary: "List claimable balances"
-      description: |
-        Lists the claimable balances created by the org. All filters are
+      summary: List claimable balances
+      description: 'Lists the claimable balances created by the org. All filters are
+
         optional; an omitted `status` returns every balance.
-      tags: ["Claimable balances"]
+
+        '
+      tags:
+      - Claimable balances
       parameters:
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: ["pending", "claimed", "revoked", "expired"]
-          description: "Only return balances in this state"
-        - name: asset
-          in: query
-          schema:
-            type: string
-          description: "Only return balances for this asset"
-        - name: claimant
-          in: query
-          schema:
-            type: string
-          description: "Only return balances that include this claimant account"
-        - name: expires_before
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description: "Only return balances expiring before this RFC3339 timestamp"
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-            maximum: 100
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - pending
+          - claimed
+          - revoked
+          - expired
+        description: Only return balances in this state
+      - name: asset
+        in: query
+        schema:
+          type: string
+        description: Only return balances for this asset
+      - name: claimant
+        in: query
+        schema:
+          type: string
+        description: Only return balances that include this claimant account
+      - name: expires_before
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Only return balances expiring before this RFC3339 timestamp
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          maximum: 100
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
       responses:
-        "200":
-          description: "List of claimable balances"
+        '200':
+          description: List of claimable balances
           content:
             application/json:
               schema:
@@ -1393,145 +1463,159 @@ paths:
                   claimable_balances:
                     type: array
                     items:
-                      $ref: "#/components/schemas/ClaimableBalanceResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                      $ref: '#/components/schemas/ClaimableBalanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/claimable-balances/{id}:
     get:
       operationId: getClaimableBalance
-      summary: "Get a claimable balance"
-      description: |
-        Returns the stored balance together with its live status from Horizon
+      summary: Get a claimable balance
+      description: 'Returns the stored balance together with its live status from Horizon
+
         and whether a claimant could claim right now. `on_chain` is absent when
+
         Horizon no longer knows the balance, which is what an already-claimed
+
         balance looks like.
-      tags: ["Claimable balances"]
+
+        '
+      tags:
+      - Claimable balances
       parameters:
-        - $ref: "#/components/parameters/ClaimableBalanceID"
+      - $ref: '#/components/parameters/ClaimableBalanceID'
       responses:
-        "200":
-          description: "Claimable balance"
+        '200':
+          description: Claimable balance
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LiveClaimableBalanceResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/LiveClaimableBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/claimable-balances/{id}/claim:
     post:
       operationId: claimClaimableBalance
-      summary: "Claim a claimable balance"
-      description: |
-        Claims on behalf of a claimant account Fluxa custodies, after checking
-        the claimant's predicate is satisfiable right now. A predicate that does
+      summary: Claim a claimable balance
+      description: 'Claims on behalf of a claimant account Fluxa custodies, after checking
+
+        the claimant''s predicate is satisfiable right now. A predicate that does
+
         not hold is rejected with 400 `PREDICATE_NOT_SATISFIABLE` and no
+
         transaction is submitted.
 
+
         `claimant_account` may be omitted when the balance has exactly one
+
         Fluxa-custodied claimant.
-      tags: ["Claimable balances"]
+
+        '
+      tags:
+      - Claimable balances
       parameters:
-        - $ref: "#/components/parameters/ClaimableBalanceID"
+      - $ref: '#/components/parameters/ClaimableBalanceID'
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ClaimClaimableBalanceRequest"
+              $ref: '#/components/schemas/ClaimClaimableBalanceRequest'
             example:
-              claimant_account: "GCLAIMANTACCOUNT0000000000000000000000000000000000000000"
+              claimant_account: GCLAIMANTACCOUNT0000000000000000000000000000000000000000
       responses:
-        "200":
-          description: "Balance claimed"
+        '200':
+          description: Balance claimed
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ClaimClaimableBalanceResponse"
-        "400":
-          description: |
-            The claimant's predicate is not currently satisfiable
-            (`PREDICATE_NOT_SATISFIABLE`), the account is not a claimant, or no
-            custodied claimant could be resolved.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: "The balance has already been claimed, revoked or expired."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
+                $ref: '#/components/schemas/ClaimClaimableBalanceResponse'
+        '400':
+          description: 'The claimant''s predicate is not currently satisfiable
 
-  # ── Webhooks ──────────────────────────────────────────────────────────────
+            (`PREDICATE_NOT_SATISFIABLE`), the account is not a claimant, or no
+
+            custodied claimant could be resolved.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The balance has already been claimed, revoked or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/webhooks:
     post:
       operationId: registerWebhook
-      summary: "Register a webhook endpoint"
-      description: |
-        Registers a new webhook endpoint. A signing secret is generated and
+      summary: Register a webhook endpoint
+      description: 'Registers a new webhook endpoint. A signing secret is generated and
+
         returned — it will be used to sign webhook payloads via HMAC-SHA256.
-      tags: ["Webhooks"]
+
+        '
+      tags:
+      - Webhooks
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RegisterWebhookRequest"
+              $ref: '#/components/schemas/RegisterWebhookRequest'
             example:
-              url: "https://acme.com/hooks/fluxa"
+              url: https://acme.com/hooks/fluxa
               events:
-                - "transfer.initiated"
-                - "transfer.settled"
+              - transfer.initiated
+              - transfer.settled
       responses:
-        "201":
-          description: "Webhook registered"
+        '201':
+          description: Webhook registered
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WebhookEndpointResponse"
+                $ref: '#/components/schemas/WebhookEndpointResponse'
               example:
-                id: "wh_abc123"
-                url: "https://acme.com/hooks/fluxa"
-                secret: "whsec_abc123def456"
+                id: wh_abc123
+                url: https://acme.com/hooks/fluxa
+                secret: whsec_abc123def456
                 events:
-                  - "transfer.initiated"
-                  - "transfer.settled"
+                - transfer.initiated
+                - transfer.settled
                 active: true
-                created_at: "2026-01-15T10:00:00Z"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                created_at: '2026-01-15T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     get:
       operationId: listWebhooks
-      summary: "List webhook endpoints"
-      description: "Returns all registered webhook endpoints for the tenant."
-      tags: ["Webhooks"]
+      summary: List webhook endpoints
+      description: Returns all registered webhook endpoints for the tenant.
+      tags:
+      - Webhooks
       responses:
-        "200":
-          description: "List of webhook endpoints"
+        '200':
+          description: List of webhook endpoints
           content:
             application/json:
               schema:
@@ -1540,53 +1624,53 @@ paths:
                   endpoints:
                     type: array
                     items:
-                      $ref: "#/components/schemas/WebhookEndpointSummary"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                      $ref: '#/components/schemas/WebhookEndpointSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/webhooks/{id}:
     delete:
       operationId: deleteWebhook
-      summary: "Delete a webhook endpoint"
-      description: "Permanently removes the webhook endpoint."
-      tags: ["Webhooks"]
+      summary: Delete a webhook endpoint
+      description: Permanently removes the webhook endpoint.
+      tags:
+      - Webhooks
       parameters:
-        - $ref: "#/components/parameters/WebhookID"
+      - $ref: '#/components/parameters/WebhookID'
       responses:
-        "204":
-          description: "Webhook deleted"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+        '204':
+          description: Webhook deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/webhooks/{id}/deliveries:
     get:
       operationId: listWebhookDeliveries
-      summary: "List webhook deliveries"
-      description: "Returns delivery attempts for a specific webhook endpoint."
-      tags: ["Webhooks"]
+      summary: List webhook deliveries
+      description: Returns delivery attempts for a specific webhook endpoint.
+      tags:
+      - Webhooks
       parameters:
-        - $ref: "#/components/parameters/WebhookID"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
+      - $ref: '#/components/parameters/WebhookID'
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
       responses:
-        "200":
-          description: "List of deliveries"
+        '200':
+          description: List of deliveries
           content:
             application/json:
               schema:
@@ -1595,40 +1679,41 @@ paths:
                   deliveries:
                     type: array
                     items:
-                      $ref: "#/components/schemas/WebhookDelivery"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Fiat provider webhooks ────────────────────────────────────────────────
+                      $ref: '#/components/schemas/WebhookDelivery'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/webhooks/fiat/{provider}:
     post:
       operationId: handleFiatWebhook
-      summary: "Handle a fiat provider webhook"
-      description: |
-        Receives webhook callbacks from fiat payment providers (e.g. Flutterwave).
+      summary: Handle a fiat provider webhook
+      description: 'Receives webhook callbacks from fiat payment providers (e.g. Flutterwave).
+
         This is an internal endpoint called by the provider, not by the tenant.
-      tags: ["System"]
+
+        '
+      tags:
+      - System
       parameters:
-        - name: provider
-          in: path
-          required: true
-          schema:
-            type: string
-          description: "Provider name (e.g. flutterwave)"
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Provider name (e.g. flutterwave)
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              description: "Provider-specific webhook payload"
+              description: Provider-specific webhook payload
       responses:
-        "200":
-          description: "Webhook processed"
+        '200':
+          description: Webhook processed
           content:
             application/json:
               schema:
@@ -1636,39 +1721,43 @@ paths:
                 properties:
                   status:
                     type: string
-                    example: "ok"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Fees ──────────────────────────────────────────────────────────────────
+                    example: ok
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/fees/preview:
     post:
       operationId: previewFee
-      summary: "Preview fees"
-      description: "Preview the calculated fees for a transfer or conversion."
-      tags: ["Fees"]
+      summary: Preview fees
+      description: Preview the calculated fees for a transfer or conversion.
+      tags:
+      - Fees
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [type, asset, amount]
+              required:
+              - type
+              - asset
+              - amount
               properties:
                 type:
                   type: string
-                  enum: [transfer, conversion]
+                  enum:
+                  - transfer
+                  - conversion
                 asset:
                   type: string
                 amount:
                   type: string
       responses:
-        "200":
-          description: "Fee preview"
+        '200':
+          description: Fee preview
           content:
             application/json:
               schema:
@@ -1682,287 +1771,292 @@ paths:
                     type: string
                   fee_bps:
                     type: integer
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/fees:
     get:
       operationId: getFeeSchedule
-      summary: "Get fee schedule"
-      description: "Returns the fee schedule for the authenticated tenant."
-      tags: ["Fees"]
+      summary: Get fee schedule
+      description: Returns the fee schedule for the authenticated tenant.
+      tags:
+      - Fees
       responses:
-        "200":
-          description: "Fee schedule"
+        '200':
+          description: Fee schedule
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FeeScheduleResponse"
+                $ref: '#/components/schemas/FeeScheduleResponse'
               example:
                 transfer_fee_bps: 25
                 conversion_fee_bps: 30
-                min_fee_amount: "0.0100000"
-                max_fee_amount: "50.0000000"
-                asset: "USDC"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Audit Log ─────────────────────────────────────────────────────────────
+                min_fee_amount: '0.0100000'
+                max_fee_amount: '50.0000000'
+                asset: USDC
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/audit:
     get:
       operationId: listAuditEvents
-      summary: "List audit events"
-      description: "Returns append-only tenant audit events with filtering by action, actor, resource, and time range."
-      tags: ["Audit"]
+      summary: List audit events
+      description: Returns append-only tenant audit events with filtering by action, actor, resource, and time range.
+      tags:
+      - Audit
       parameters:
-        - name: action
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by action name"
-        - name: actor
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by actor ID"
-        - name: resource_type
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by resource type"
-        - name: resource_id
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by resource ID"
-        - name: from
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-          description: "Start of time range"
-        - name: to
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-          description: "End of time range"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
-          description: "Maximum results"
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-          description: "Offset for pagination"
+      - name: action
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by action name
+      - name: actor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by actor ID
+      - name: resource_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by resource type
+      - name: resource_id
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by resource ID
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Start of time range
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: End of time range
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+        description: Maximum results
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+        description: Offset for pagination
       responses:
-        "200":
-          description: "List of audit events"
+        '200':
+          description: List of audit events
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuditListResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/AuditListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/audit/export:
     get:
       operationId: exportAuditEvents
-      summary: "Export audit events"
-      description: "Exports tenant audit events as CSV or JSON."
-      tags: ["Audit"]
+      summary: Export audit events
+      description: Exports tenant audit events as CSV or JSON.
+      tags:
+      - Audit
       parameters:
-        - name: format
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: ["csv", "json"]
-            default: "json"
-          description: "Export format"
-        - name: action
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by action name"
-        - name: actor
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by actor ID"
-        - name: resource_type
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by resource type"
-        - name: resource_id
-          in: query
-          required: false
-          schema:
-            type: string
-          description: "Filter by resource ID"
-        - name: from
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-          description: "Start of time range"
-        - name: to
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-          description: "End of time range"
+      - name: format
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - csv
+          - json
+          default: json
+        description: Export format
+      - name: action
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by action name
+      - name: actor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by actor ID
+      - name: resource_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by resource type
+      - name: resource_id
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter by resource ID
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Start of time range
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: End of time range
       responses:
-        "200":
-          description: "Exported audit events"
+        '200':
+          description: Exported audit events
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/AuditEvent"
+                  $ref: '#/components/schemas/AuditEvent'
             text/csv:
               schema:
                 type: string
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Usage ─────────────────────────────────────────────────────────────────
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/usage:
     get:
       operationId: getUsage
-      summary: "Get API usage"
-      description: "Returns API usage metrics for the current tenant."
-      tags: ["Fees"]
+      summary: Get API usage
+      description: Returns API usage metrics for the current tenant.
+      tags:
+      - Fees
       responses:
-        "200":
-          description: "Usage summary"
+        '200':
+          description: Usage summary
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UsageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Idempotency ───────────────────────────────────────────────────────────
+                $ref: '#/components/schemas/UsageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/idempotency/{key}:
     get:
       operationId: inspectIdempotencyKey
-      summary: "Inspect idempotency key state"
-      description: |
-        Returns the durable state of an idempotency key: processing, completed, failed, or unknown.
+      summary: Inspect idempotency key state
+      description: 'Returns the durable state of an idempotency key: processing, completed, failed, or unknown.
+
         On completed requests, the stored response body and status code are faithfully reproduced without re-execution.
+
         Clients should inspect existing keys rather than generating new keys following timeouts or network partitions.
-      tags: ["Idempotency"]
+
+        '
+      tags:
+      - Idempotency
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: key
-          in: path
-          required: true
-          description: "Idempotency key (UUID or client reference string)"
-          schema:
-            type: string
-        - name: request_hash
-          in: query
-          required: false
-          description: "Expected SHA-256 request hash. If provided and mismatched, returns 422 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY."
-          schema:
-            type: string
+      - name: key
+        in: path
+        required: true
+        description: Idempotency key (UUID or client reference string)
+        schema:
+          type: string
+      - name: request_hash
+        in: query
+        required: false
+        description: Expected SHA-256 request hash. If provided and mismatched, returns 422 IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY.
+        schema:
+          type: string
       responses:
-        "200":
-          description: "Idempotency key state"
+        '200':
+          description: Idempotency key state
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/IdempotencyInspectionResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-  # ── Admin ─────────────────────────────────────────────────────────────────
+                $ref: '#/components/schemas/IdempotencyInspectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/fees/collected:
     get:
       operationId: listCollectedFees
-      summary: "List collected fees"
-      description: |
-        Returns fee collection totals grouped by asset and tenant.
+      summary: List collected fees
+      description: 'Returns fee collection totals grouped by asset and tenant.
+
         Requires an admin role (Owner or Admin).
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       parameters:
-        - name: start_date
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-          description: "Start of period (RFC3339)"
-        - name: end_date
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date-time
-          description: "End of period (RFC3339)"
-        - name: tenant_id
-          in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: "Filter by tenant"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 100
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
+      - name: start_date
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Start of period (RFC3339)
+      - name: end_date
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: End of period (RFC3339)
+      - name: tenant_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+        description: Filter by tenant
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
       responses:
-        "200":
-          description: "Paginated fee collections"
+        '200':
+          description: Paginated fee collections
           content:
             application/json:
               schema:
@@ -1988,74 +2082,78 @@ paths:
                         collected_at:
                           type: string
                           format: date-time
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/reconciliation/summary:
     get:
       operationId: getReconciliationSummary
-      summary: "Get reconciliation summary"
-      description: |
-        Returns a daily breakdown of reconciliation results (ok / mismatch / not_found)
+      summary: Get reconciliation summary
+      description: 'Returns a daily breakdown of reconciliation results (ok / mismatch / not_found)
+
         and the count of pending stuck transactions. Requires an admin API key.
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       parameters:
-        - name: days
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 7
-            minimum: 1
-            maximum: 90
-          description: "Number of days to look back"
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 7
+          minimum: 1
+          maximum: 90
+        description: Number of days to look back
       responses:
-        "200":
-          description: "Reconciliation summary"
+        '200':
+          description: Reconciliation summary
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReconciliationSummary"
+                $ref: '#/components/schemas/ReconciliationSummary'
               example:
                 days:
-                  - date: "2026-01-15"
-                    ok: 1200
-                    mismatch: 3
-                    not_found: 1
-                  - date: "2026-01-14"
-                    ok: 1150
-                    mismatch: 0
-                    not_found: 2
+                - date: '2026-01-15'
+                  ok: 1200
+                  mismatch: 3
+                  not_found: 1
+                - date: '2026-01-14'
+                  ok: 1150
+                  mismatch: 0
+                  not_found: 2
                 total_ok: 2350
                 total_mismatch: 3
                 total_not_found: 3
                 pending_stuck: 0
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/reconciliation/run:
     post:
       operationId: runReconciliation
-      summary: "Trigger a reconciliation run"
-      description: |
-        Manually triggers a reconciliation pass that checks pending transactions
+      summary: Trigger a reconciliation run
+      description: 'Manually triggers a reconciliation pass that checks pending transactions
+
         against the Stellar Horizon API. Requires an admin API key.
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       responses:
-        "202":
-          description: "Reconciliation run started"
+        '202':
+          description: Reconciliation run started
           content:
             application/json:
               schema:
@@ -2065,102 +2163,118 @@ paths:
                     type: string
                   status:
                     type: string
-                    enum: ["started"]
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                    enum:
+                    - started
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/transfers/{transferID}/force-settle:
     post:
       operationId: retryFailedSettlement
-      summary: "Retry a failed settlement"
-      description: |
-        Requeues a transaction that is currently `failed` for settlement.
+      summary: Retry a failed settlement
+      description: 'Requeues a transaction that is currently `failed` for settlement.
+
         Only transfers in the authenticated tenant and environment can be
+
         retried. The status transition is atomic; a repeated request or a
+
         transfer in any other state returns `409 CONFLICT`. Requires an
+
         Owner or Admin role. The response means the retry was queued, not
+
         that Stellar has confirmed it.
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       parameters:
-        - name: transferID
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      - name: transferID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
       responses:
-        "202":
-          description: "Failed settlement retry queued"
+        '202':
+          description: Failed settlement retry queued
           content:
             application/json:
               schema:
                 type: object
-                required: [status, transfer_id]
+                required:
+                - status
+                - transfer_id
                 properties:
                   status:
                     type: string
-                    enum: [retry_queued]
+                    enum:
+                    - retry_queued
                   transfer_id:
                     type: string
                     format: uuid
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: "Transfer is not failed or a retry is already in progress"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Transfer is not failed or a retry is already in progress
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/compliance/reviews:
     get:
       operationId: listComplianceReviews
-      summary: "List compliance reviews"
-      description: |
-        Lists transfers held by compliance screening. A held transfer is
+      summary: List compliance reviews
+      description: 'Lists transfers held by compliance screening. A held transfer is
+
         persisted with status `compliance_hold` and is deliberately not
+
         enqueued for settlement until it is approved.
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       parameters:
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: ["pending", "approved", "rejected"]
-          description: "Filter by review status"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 20
-            minimum: 1
-            maximum: 100
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-            minimum: 0
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - pending
+          - approved
+          - rejected
+        description: Filter by review status
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
       responses:
-        "200":
-          description: "Compliance reviews"
+        '200':
+          description: Compliance reviews
           content:
             application/json:
               schema:
@@ -2169,66 +2283,72 @@ paths:
                   reviews:
                     type: array
                     items:
-                      $ref: "#/components/schemas/ComplianceReview"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                      $ref: '#/components/schemas/ComplianceReview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/compliance/reviews/{id}:
     get:
       operationId: getComplianceReview
-      summary: "Get a compliance review"
-      tags: ["Admin"]
+      summary: Get a compliance review
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
       responses:
-        "200":
-          description: "Compliance review"
+        '200':
+          description: Compliance review
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ComplianceReview"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                $ref: '#/components/schemas/ComplianceReview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/compliance/reviews/{id}/approve:
     post:
       operationId: approveComplianceReview
-      summary: "Approve a held transfer"
-      description: |
-        Releases a held transfer. The transaction is reset to `pending` and
+      summary: Approve a held transfer
+      description: 'Releases a held transfer. The transaction is reset to `pending` and
+
         then re-enqueued for settlement — in that order, because the
+
         settlement engine skips any transaction that is not `pending`.
 
+
         Decisions are terminal: approving an already-decided review returns
+
         `409 REVIEW_ALREADY_DECIDED`, which is what stops two reviewers from
+
         releasing the same payment twice.
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
       requestBody:
         required: false
         content:
@@ -2238,50 +2358,52 @@ paths:
               properties:
                 notes:
                   type: string
-                  description: "Reviewer notes recorded on the audit trail"
+                  description: Reviewer notes recorded on the audit trail
       responses:
-        "200":
-          description: "Review approved and transfer released"
+        '200':
+          description: Review approved and transfer released
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ComplianceReview"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: "Review has already been decided"
+                $ref: '#/components/schemas/ComplianceReview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Review has already been decided
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
               example:
                 error:
-                  code: "REVIEW_ALREADY_DECIDED"
-                  message: "compliance review has already been decided"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                  code: REVIEW_ALREADY_DECIDED
+                  message: compliance review has already been decided
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/compliance/reviews/{id}/reject:
     post:
       operationId: rejectComplianceReview
-      summary: "Reject a held transfer"
-      description: |
-        Rejects a held transfer. The transaction is marked `failed` and is
+      summary: Reject a held transfer
+      description: 'Rejects a held transfer. The transaction is marked `failed` and is
+
         never enqueued for settlement.
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
       requestBody:
         required: false
         content:
@@ -2292,88 +2414,92 @@ paths:
                 notes:
                   type: string
       responses:
-        "200":
-          description: "Review rejected"
+        '200':
+          description: Review rejected
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ComplianceReview"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: "Conflict"
+                $ref: '#/components/schemas/ComplianceReview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
               example:
                 error:
-                  code: "REVIEW_ALREADY_DECIDED"
-                  message: "compliance review has already been decided"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
+                  code: REVIEW_ALREADY_DECIDED
+                  message: compliance review has already been decided
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/admin/compliance/sanctions-status:
     get:
       operationId: getSanctionsStatus
-      summary: "Get sanctions list status"
-      description: |
-        Reports the state of the in-memory OFAC SDN set and the outcome of the
+      summary: Get sanctions list status
+      description: 'Reports the state of the in-memory OFAC SDN set and the outcome of the
+
         last refresh. `loaded: false` means screening is failing closed and
+
         every transfer is being held for review.
-      tags: ["Admin"]
+
+        '
+      tags:
+      - Admin
       security:
-        - BearerAuth: []
+      - AdminAuth: []
       responses:
-        "200":
-          description: "Sanctions list status"
+        '200':
+          description: Sanctions list status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SanctionsStatus"
+                $ref: '#/components/schemas/SanctionsStatus'
               example:
                 loaded: true
                 entity_count: 17423
                 address_count: 621
                 name_count: 16802
-                updated_at: "2026-01-15T03:00:12Z"
+                updated_at: '2026-01-15T03:00:12Z'
                 last_refresh:
-                  status: "success"
+                  status: success
                   entity_count: 17423
                   duration_ms: 8412
-                  finished_at: "2026-01-15T03:00:12Z"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Components
-# ══════════════════════════════════════════════════════════════════════════════
+                  finished_at: '2026-01-15T03:00:12Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
-  # ── Security Schemes ────────────────────────────────────────────────────
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: token
-      description: |
-        Pass a tenant API key (`sk_live_...` or `sk_test_...`) or JWT bearer token.
-        In Swagger UI, enter your token in the Authorize dialog (the 'Bearer ' prefix is added automatically).
+      description: 'Pass a tenant API key (`sk_live_...` or `sk_test_...`) or JWT bearer token.
+
+        In Swagger UI, enter your token in the Authorize dialog (the ''Bearer '' prefix is added automatically).
+
+        '
     ApiKeyAuth:
       type: apiKey
       in: header
       name: Authorization
-      description: |
-        Pass an API key as `Bearer <key>` in the `Authorization` header.
+      description: 'Pass an API key as `Bearer <key>` in the `Authorization` header.
 
-  # ── Parameters ──────────────────────────────────────────────────────────
+        '
+    AdminAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: admin token
+      description: Administrative bearer token.
   parameters:
     WalletID:
       name: id
@@ -2381,37 +2507,39 @@ components:
       required: true
       schema:
         type: string
-      description: "Wallet ID"
+      description: Wallet ID
     KeyID:
       name: id
       in: path
       required: true
       schema:
         type: string
-      description: "API key ID"
+      description: API key ID
     ScheduleID:
       name: id
       in: path
       required: true
       schema:
         type: string
-      description: "Schedule ID"
+      description: Schedule ID
     WebhookID:
       name: id
       in: path
       required: true
       schema:
         type: string
-      description: "Webhook endpoint ID"
+      description: Webhook endpoint ID
     ClaimableBalanceID:
       name: id
       in: path
       required: true
       schema:
         type: string
-      description: |
-        Stellar claimable balance ID: the hex-encoded XDR of the balance ID
+      description: 'Stellar claimable balance ID: the hex-encoded XDR of the balance ID
+
         (a 4-byte V0 type discriminant followed by a 32-byte hash).
+
+        '
     BeneficiaryID:
       name: id
       in: path
@@ -2419,101 +2547,123 @@ components:
       schema:
         type: string
         format: uuid
-      description: "Beneficiary ID"
-
-  # ── Reusable Responses ──────────────────────────────────────────────────
-
+      description: Beneficiary ID
   responses:
     BadRequest:
-      description: "Bad request"
+      description: Bad request
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error:
-              code: "BAD_REQUEST"
-              message: "invalid request body"
+              code: BAD_REQUEST
+              message: invalid request body
     Unauthorized:
-      description: "Unauthorized — missing or invalid API key"
+      description: Unauthorized — missing or invalid API key
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error:
-              code: "UNAUTHORIZED"
-              message: "missing or invalid authorization header"
+              code: UNAUTHORIZED
+              message: missing or invalid authorization header
     NotFound:
-      description: "Resource not found"
+      description: Resource not found
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error:
-              code: "NOT_FOUND"
-              message: "resource not found"
+              code: NOT_FOUND
+              message: resource not found
     Forbidden:
-      description: "Forbidden — admin access required"
+      description: Forbidden — admin access required
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error:
-              code: "FORBIDDEN"
-              message: "admin access required"
+              code: FORBIDDEN
+              message: admin access required
     Conflict:
-      description: "Conflict — a request with this Idempotency-Key is still in flight"
+      description: Conflict — a request with this Idempotency-Key is still in flight
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error:
-              code: "REQUEST_IN_PROGRESS"
-              message: "a request with this Idempotency-Key is still in progress"
+              code: REQUEST_IN_PROGRESS
+              message: a request with this Idempotency-Key is still in progress
     UnprocessableEntity:
-      description: "Unprocessable — the Idempotency-Key was reused with a different body"
+      description: Unprocessable — the Idempotency-Key was reused with a different body
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error:
-              code: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY"
-              message: "this Idempotency-Key was already used with a different request body"
+              code: IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY
+              message: this Idempotency-Key was already used with a different request body
     InternalServerError:
-      description: "Internal server error"
+      description: Internal server error
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error:
-              code: "INTERNAL_ERROR"
-              message: "an unexpected error occurred"
-
-  # ── Schemas ─────────────────────────────────────────────────────────────
+              code: INTERNAL_ERROR
+              message: an unexpected error occurred
   schemas:
     Beneficiary:
       type: object
-      required: [id, account, status, cooldown_until, created_at, updated_at]
+      required:
+      - id
+      - account
+      - status
+      - cooldown_until
+      - created_at
+      - updated_at
       properties:
-        id: { type: string, format: uuid }
-        account: { type: string, description: "Stellar account public key" }
-        label: { type: string }
-        status: { type: string, enum: [pending, active, revoked] }
-        cooldown_until: { type: string, format: date-time }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+        id:
+          type: string
+          format: uuid
+        account:
+          type: string
+          description: Stellar account public key
+        label:
+          type: string
+        status:
+          type: string
+          enum:
+          - pending
+          - active
+          - revoked
+        cooldown_until:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     CreateBeneficiaryRequest:
       type: object
-      required: [account]
+      required:
+      - account
       properties:
-        account: { type: string, description: "Stellar account public key" }
-        label: { type: string, maxLength: 200 }
+        account:
+          type: string
+          description: Stellar account public key
+        label:
+          type: string
+          maxLength: 200
     ComplianceReview:
       type: object
       properties:
@@ -2525,7 +2675,10 @@ components:
           format: uuid
         status:
           type: string
-          enum: ["pending", "approved", "rejected"]
+          enum:
+          - pending
+          - approved
+          - rejected
         risk_score:
           type: integer
           minimum: 0
@@ -2535,18 +2688,18 @@ components:
           items:
             type: string
             enum:
-              - "sanctions_address_match"
-              - "sanctions_name_match"
-              - "sanctions_name_fuzzy_match"
-              - "velocity_burst"
-              - "structuring"
-              - "round_trip"
-              - "screener_error"
+            - sanctions_address_match
+            - sanctions_name_match
+            - sanctions_name_fuzzy_match
+            - velocity_burst
+            - structuring
+            - round_trip
+            - screener_error
         reason:
           type: string
         reviewed_by:
           type: string
-          description: "Empty for approvals made with API-key authentication, which carries no user identity."
+          description: Empty for approvals made with API-key authentication, which carries no user identity.
         review_notes:
           type: string
         reviewed_at:
@@ -2555,13 +2708,12 @@ components:
         created_at:
           type: string
           format: date-time
-
     SanctionsStatus:
       type: object
       properties:
         loaded:
           type: boolean
-          description: "False means screening is failing closed and holding every transfer."
+          description: False means screening is failing closed and holding every transfer.
         entity_count:
           type: integer
         address_count:
@@ -2576,7 +2728,9 @@ components:
           properties:
             status:
               type: string
-              enum: ["success", "failed"]
+              enum:
+              - success
+              - failed
             entity_count:
               type: integer
             duration_ms:
@@ -2586,49 +2740,50 @@ components:
             finished_at:
               type: string
               format: date-time
-
-    # ── Error ────────────────────────────────────────────────────────────
     ErrorResponse:
       type: object
-      required: ["error"]
+      required:
+      - error
       properties:
         error:
           type: object
-          required: ["code", "message"]
+          required:
+          - code
+          - message
           properties:
             code:
               type: string
               enum:
-                - "BAD_REQUEST"
-                - "NOT_FOUND"
-                - "UNAUTHORIZED"
-                - "FORBIDDEN"
-                - "INTERNAL_ERROR"
-                - "QUOTE_EXPIRED"
-                - "QUOTE_ALREADY_USED"
-                - "REVIEW_ALREADY_DECIDED"
-                - "CLAIMABLE_BALANCE_NOT_PENDING"
-                - "REQUEST_IN_PROGRESS"
-                - "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY"
-              description: "Machine-readable error code"
+              - BAD_REQUEST
+              - NOT_FOUND
+              - UNAUTHORIZED
+              - FORBIDDEN
+              - INTERNAL_ERROR
+              - QUOTE_EXPIRED
+              - QUOTE_ALREADY_USED
+              - REVIEW_ALREADY_DECIDED
+              - CLAIMABLE_BALANCE_NOT_PENDING
+              - REQUEST_IN_PROGRESS
+              - IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY
+              description: Machine-readable error code
             message:
               type: string
-              description: "Human-readable error message"
-
-    # ── Health ────────────────────────────────────────────────────────────
+              description: Human-readable error message
     HealthResponse:
       type: object
       properties:
         status:
           type: string
-          enum: ["ok", "degraded"]
+          enum:
+          - ok
+          - degraded
         services:
           type: object
           additionalProperties:
             type: string
-            enum: ["up", "down"]
-
-    # ── Metrics ───────────────────────────────────────────────────────────
+            enum:
+            - up
+            - down
     MetricsResponse:
       type: object
       properties:
@@ -2652,15 +2807,16 @@ components:
           additionalProperties:
             type: integer
             format: int64
-
-    # ── Auth ──────────────────────────────────────────────────────────────
     RegisterRequest:
       type: object
-      required: ["name", "email", "password"]
+      required:
+      - name
+      - email
+      - password
       properties:
         name:
           type: string
-          description: "Tenant / organization name"
+          description: Tenant / organization name
         email:
           type: string
           format: email
@@ -2668,10 +2824,11 @@ components:
           type: string
           format: password
           minLength: 8
-
     LoginRequest:
       type: object
-      required: ["email", "password"]
+      required:
+      - email
+      - password
       properties:
         email:
           type: string
@@ -2679,7 +2836,6 @@ components:
         password:
           type: string
           format: password
-
     AuthResponse:
       type: object
       properties:
@@ -2687,7 +2843,7 @@ components:
           type: string
         api_key:
           type: string
-          description: "Raw API key — returned once only"
+          description: Raw API key — returned once only
         name:
           type: string
         email:
@@ -2696,21 +2852,18 @@ components:
         created_at:
           type: string
           format: date-time
-
-    # ── API Keys ──────────────────────────────────────────────────────────
     CreateKeyRequest:
       type: object
       properties:
         label:
           type: string
           nullable: true
-          description: "Optional human-readable label for the key"
+          description: Optional human-readable label for the key
         scopes:
           type: array
           items:
             type: string
-          description: "Granular permission scopes for the API key (e.g. transfers:read, transfers:write, wallets:read, wallets:write)"
-
+          description: Granular permission scopes for the API key (e.g. transfers:read, transfers:write, wallets:read, wallets:write)
     APIKeyCreated:
       type: object
       properties:
@@ -2718,10 +2871,10 @@ components:
           type: string
         key:
           type: string
-          description: "Raw API key — returned once only"
+          description: Raw API key — returned once only
         prefix:
           type: string
-          description: "First 8 characters of the key for identification"
+          description: First 8 characters of the key for identification
         label:
           type: string
           nullable: true
@@ -2732,7 +2885,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     APIKeySummary:
       type: object
       properties:
@@ -2758,8 +2910,6 @@ components:
         created_at:
           type: string
           format: date-time
-
-    # ── Wallet ────────────────────────────────────────────────────────────
     Wallet:
       type: object
       properties:
@@ -2767,11 +2917,10 @@ components:
           type: string
         public_key:
           type: string
-          description: "Stellar public key"
+          description: Stellar public key
         created_at:
           type: string
           format: date-time
-
     WalletCreated:
       type: object
       properties:
@@ -2782,7 +2931,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     WalletBalances:
       type: object
       properties:
@@ -2791,34 +2939,33 @@ components:
         balances:
           type: array
           items:
-            $ref: "#/components/schemas/Balance"
-
+            $ref: '#/components/schemas/Balance'
     Balance:
       type: object
       properties:
         asset_code:
           type: string
-          description: "Asset code (e.g. USDC, XLM)"
+          description: Asset code (e.g. USDC, XLM)
         issuer:
           type: string
-          description: "Issuer public key (empty for native XLM)"
+          description: Issuer public key (empty for native XLM)
         balance:
           type: string
-          description: "Available balance as decimal string"
-
+          description: Available balance as decimal string
     CreateTrustlineRequest:
       type: object
-      required: ["asset_code", "asset_issuer"]
+      required:
+      - asset_code
+      - asset_issuer
       properties:
         asset_code:
           type: string
         asset_issuer:
           type: string
-          description: "Issuer public key"
+          description: Issuer public key
         limit:
           type: string
-          description: "Trust line limit (optional)"
-
+          description: Trust line limit (optional)
     TrustlineResponse:
       type: object
       properties:
@@ -2830,9 +2977,8 @@ components:
           type: string
         status:
           type: string
-          enum: ["submitted"]
-
-    # ── Fiat ──────────────────────────────────────────────────────────────
+          enum:
+          - submitted
     FiatQuotePreviewResponse:
       type: object
       properties:
@@ -2855,58 +3001,64 @@ components:
         expires_at:
           type: string
           format: date-time
-
     FiatDepositRequest:
       type: object
-      required: ["amount", "currency", "email", "name"]
+      required:
+      - amount
+      - currency
+      - email
+      - name
       properties:
         amount:
           type: string
-          description: "Fiat amount as decimal string"
+          description: Fiat amount as decimal string
         currency:
           type: string
-          description: "Fiat currency code (e.g. NGN, USD, KES)"
+          description: Fiat currency code (e.g. NGN, USD, KES)
         email:
           type: string
           format: email
         name:
           type: string
-
     DepositResponse:
       type: object
       properties:
         payment_link:
           type: string
           format: uri
-          description: "URL the customer should visit to complete payment"
+          description: URL the customer should visit to complete payment
         reference:
           type: string
-          description: "Unique deposit reference (DEP-XXXXXXXX)"
-
+          description: Unique deposit reference (DEP-XXXXXXXX)
     FiatWithdrawalRequest:
       type: object
-      required: ["amount", "currency", "account_bank", "account_number"]
+      required:
+      - amount
+      - currency
+      - account_bank
+      - account_number
       properties:
         amount:
           type: string
-          description: "Fiat amount as decimal string"
+          description: Fiat amount as decimal string
         currency:
           type: string
         account_bank:
           type: string
         account_number:
           type: string
-
     WithdrawalResponse:
       type: object
       properties:
         reference:
           type: string
-          description: "Unique withdrawal reference (WIT-XXXXXXXX)"
+          description: Unique withdrawal reference (WIT-XXXXXXXX)
         status:
           type: string
-          enum: ["pending", "completed", "failed"]
-
+          enum:
+          - pending
+          - completed
+          - failed
     FiatDeposit:
       type: object
       properties:
@@ -2926,11 +3078,13 @@ components:
           type: string
         status:
           type: string
-          enum: ["pending", "completed", "failed"]
+          enum:
+          - pending
+          - completed
+          - failed
         created_at:
           type: string
           format: date-time
-
     FiatWithdrawal:
       type: object
       properties:
@@ -2950,15 +3104,20 @@ components:
           type: string
         status:
           type: string
-          enum: ["pending", "completed", "failed"]
+          enum:
+          - pending
+          - completed
+          - failed
         created_at:
           type: string
           format: date-time
-
-    # ── Transfers ─────────────────────────────────────────────────────────
     CreateTransferRequest:
       type: object
-      required: ["from_wallet_id", "to_wallet_id", "asset", "amount"]
+      required:
+      - from_wallet_id
+      - to_wallet_id
+      - asset
+      - amount
       properties:
         from_wallet_id:
           type: string
@@ -2968,20 +3127,19 @@ components:
           format: uuid
         asset:
           type: string
-          description: "Asset code to transfer (e.g. USDC, XLM)"
+          description: Asset code to transfer (e.g. USDC, XLM)
         amount:
           type: string
-          description: "Positive decimal amount"
+          description: Positive decimal amount
         external_reference:
           type: string
           nullable: true
-          description: "Optional client-specified reference for reconciliation"
+          description: Optional client-specified reference for reconciliation
         tags:
           type: array
           items:
             type: string
-          description: "Optional tags for categorization and querying"
-
+          description: Optional tags for categorization and querying
     TransferResponse:
       type: object
       properties:
@@ -2989,20 +3147,21 @@ components:
           type: string
         tx_hash:
           type: string
-          description: "Stellar transaction hash (empty until submitted)"
+          description: Stellar transaction hash (empty until submitted)
         type:
           type: string
-          enum: ["transfer", "conversion", "funding"]
+          enum:
+          - transfer
+          - conversion
+          - funding
         status:
           type: string
           enum:
-            [
-              "pending",
-              "submitted",
-              "confirmed",
-              "failed",
-              "reconciliation_failed",
-            ]
+          - pending
+          - submitted
+          - confirmed
+          - failed
+          - reconciliation_failed
         from_wallet_id:
           type: string
         to_wallet_id:
@@ -3011,16 +3170,16 @@ components:
           type: string
         amount:
           type: string
-          description: "Gross amount as decimal string"
+          description: Gross amount as decimal string
         fee_amount:
           type: string
-          description: "Fee deducted as decimal string"
+          description: Fee deducted as decimal string
         net_amount:
           type: string
-          description: "Amount after fee as decimal string"
+          description: Amount after fee as decimal string
         fee_bps:
           type: integer
-          description: "Fee in basis points"
+          description: Fee in basis points
         external_reference:
           type: string
           nullable: true
@@ -3030,15 +3189,13 @@ components:
             type: string
         failure_reason:
           type: string
-          description: "Machine-readable reason code when the transfer failed during initiation"
+          description: Machine-readable reason code when the transfer failed during initiation
         failure_message:
           type: string
-          description: "Underlying initiation error for support diagnostics"
+          description: Underlying initiation error for support diagnostics
         created_at:
           type: string
           format: date-time
-
-    # ── Audit Log ─────────────────────────────────────────────────────────
     AuditEvent:
       type: object
       properties:
@@ -3050,10 +3207,15 @@ components:
           format: uuid
         mode:
           type: string
-          enum: ["test", "live"]
+          enum:
+          - test
+          - live
         actor_type:
           type: string
-          enum: ["api_key", "user", "system"]
+          enum:
+          - api_key
+          - user
+          - system
         actor_id:
           type: string
         action:
@@ -3073,25 +3235,24 @@ components:
         created_at:
           type: string
           format: date-time
-
     AuditListResponse:
       type: object
       properties:
         events:
           type: array
           items:
-            $ref: "#/components/schemas/AuditEvent"
+            $ref: '#/components/schemas/AuditEvent'
         total:
           type: integer
         limit:
           type: integer
         offset:
           type: integer
-
-    # ── Batch ─────────────────────────────────────────────────────────────
     CreateBatchRequest:
       type: object
-      required: ["from_wallet_id", "transfers"]
+      required:
+      - from_wallet_id
+      - transfers
       properties:
         from_wallet_id:
           type: string
@@ -3101,11 +3262,13 @@ components:
           minItems: 1
           maxItems: 100
           items:
-            $ref: "#/components/schemas/BatchItemRequest"
-
+            $ref: '#/components/schemas/BatchItemRequest'
     BatchItemRequest:
       type: object
-      required: ["to_wallet_id", "asset", "amount"]
+      required:
+      - to_wallet_id
+      - asset
+      - amount
       properties:
         to_wallet_id:
           type: string
@@ -3114,11 +3277,10 @@ components:
           type: string
         amount:
           type: string
-          description: "Positive decimal amount"
+          description: Positive decimal amount
         reference:
           type: string
-          description: "Optional reference for this transfer"
-
+          description: Optional reference for this transfer
     BatchResponse:
       type: object
       properties:
@@ -3127,14 +3289,12 @@ components:
         status:
           type: string
           enum:
-            [
-              "pending",
-              "processing",
-              "partial",
-              "completed",
-              "failed",
-              "compliance_hold",
-            ]
+          - pending
+          - processing
+          - partial
+          - completed
+          - failed
+          - compliance_hold
         total_count:
           type: integer
         success_count:
@@ -3149,8 +3309,7 @@ components:
         transfers:
           type: array
           items:
-            $ref: "#/components/schemas/BatchTransferItem"
-
+            $ref: '#/components/schemas/BatchTransferItem'
     BatchTransferItem:
       type: object
       properties:
@@ -3167,21 +3326,26 @@ components:
           nullable: true
         status:
           type: string
-          enum: ["pending", "submitted", "confirmed", "failed"]
+          enum:
+          - pending
+          - submitted
+          - confirmed
+          - failed
         tx_hash:
           type: string
           nullable: true
         failure_reason:
           type: string
-          description: "Machine-readable reason code when the transfer failed during initiation"
+          description: Machine-readable reason code when the transfer failed during initiation
         failure_message:
           type: string
-          description: "Underlying initiation error for support diagnostics"
-
-    # ── FX ────────────────────────────────────────────────────────────────
+          description: Underlying initiation error for support diagnostics
     QuoteRequest:
       type: object
-      required: ["from_asset", "to_asset", "amount"]
+      required:
+      - from_asset
+      - to_asset
+      - amount
       properties:
         from_asset:
           type: string
@@ -3189,14 +3353,13 @@ components:
           type: string
         amount:
           type: string
-          description: "Source amount as decimal string"
-
+          description: Source amount as decimal string
     Quote:
       type: object
       properties:
         id:
           type: string
-          description: "Quote ID — use with POST /v1/fx/convert"
+          description: Quote ID — use with POST /v1/fx/convert
         org_id:
           type: string
         from_asset:
@@ -3216,10 +3379,11 @@ components:
           format: date-time
         used:
           type: boolean
-
     ConvertRequest:
       type: object
-      required: ["wallet_id", "quote_id"]
+      required:
+      - wallet_id
+      - quote_id
       properties:
         wallet_id:
           type: string
@@ -3229,11 +3393,10 @@ components:
           format: uuid
         min_amount_out:
           type: string
-          description: "Optional minimum acceptable output amount"
+          description: Optional minimum acceptable output amount
         max_slippage_bps:
           type: integer
-          description: "Optional maximum acceptable slippage in basis points"
-
+          description: Optional maximum acceptable slippage in basis points
     ConversionResponse:
       type: object
       properties:
@@ -3260,13 +3423,12 @@ components:
         created_at:
           type: string
           format: date-time
-
     RateResponse:
       type: object
       properties:
         rate:
           type: string
-          description: "Effective rate after spread"
+          description: Effective rate after spread
         mid_market_rate:
           type: string
         spread_bps:
@@ -3278,7 +3440,7 @@ components:
           format: date-time
         stale:
           type: boolean
-          description: "True if cached data is older than refresh interval"
+          description: True if cached data is older than refresh interval
         source_amount:
           type: string
         dest_amount:
@@ -3289,19 +3451,15 @@ components:
           type: string
         fee_bps:
           type: integer
-
-    # ── Schedules ─────────────────────────────────────────────────────────
     CreateScheduleRequest:
       type: object
       required:
-        [
-          "from_wallet_id",
-          "to_wallet_id",
-          "asset",
-          "amount",
-          "frequency",
-          "start_date",
-        ]
+      - from_wallet_id
+      - to_wallet_id
+      - asset
+      - amount
+      - frequency
+      - start_date
       properties:
         from_wallet_id:
           type: string
@@ -3313,26 +3471,30 @@ components:
           type: string
         amount:
           type: string
-          description: "Positive decimal amount"
+          description: Positive decimal amount
         frequency:
           type: string
-          enum: ["daily", "weekly", "monthly"]
+          enum:
+          - daily
+          - weekly
+          - monthly
         timezone:
           type: string
-          description: "IANA time zone; defaults to UTC"
+          description: IANA time zone; defaults to UTC
         missed_run_policy:
           type: string
-          enum: ["skip", "run_once"]
-          description: "Defaults to run_once. skip advances past elapsed occurrences; run_once makes one catch-up payout."
+          enum:
+          - skip
+          - run_once
+          description: Defaults to run_once. skip advances past elapsed occurrences; run_once makes one catch-up payout.
         start_date:
           type: string
           format: date-time
-          description: "RFC3339 timestamp"
+          description: RFC3339 timestamp
         end_date:
           type: string
           format: date-time
-          description: "Optional RFC3339 timestamp; must not precede start_date"
-
+          description: Optional RFC3339 timestamp; must not precede start_date
     ScheduleRunResponse:
       type: object
       properties:
@@ -3345,13 +3507,19 @@ components:
           format: date-time
         status:
           type: string
-          enum: ["pending", "running", "succeeded", "failed", "skipped", "cancelled"]
+          enum:
+          - pending
+          - running
+          - succeeded
+          - failed
+          - skipped
+          - cancelled
         transaction_id:
           type: string
           nullable: true
         error:
           type: string
-          description: "Safe explanation shown only when the run failed"
+          description: Safe explanation shown only when the run failed
         started_at:
           type: string
           format: date-time
@@ -3361,20 +3529,24 @@ components:
         created_at:
           type: string
           format: date-time
-
     UpdateScheduleRequest:
       type: object
       properties:
         status:
           type: string
-          enum: ["active", "paused"]
-          description: "Pause or resume the schedule"
+          enum:
+          - active
+          - paused
+          description: Pause or resume the schedule
         amount:
           type: string
-          description: "New amount as decimal string"
+          description: New amount as decimal string
         frequency:
           type: string
-          enum: ["daily", "weekly", "monthly"]
+          enum:
+          - daily
+          - weekly
+          - monthly
         end_date:
           type: string
           format: date-time
@@ -3382,8 +3554,9 @@ components:
           type: string
         missed_run_policy:
           type: string
-          enum: ["skip", "run_once"]
-
+          enum:
+          - skip
+          - run_once
     ScheduleResponse:
       type: object
       properties:
@@ -3399,12 +3572,17 @@ components:
           type: string
         frequency:
           type: string
-          enum: ["daily", "weekly", "monthly"]
+          enum:
+          - daily
+          - weekly
+          - monthly
         timezone:
           type: string
         missed_run_policy:
           type: string
-          enum: ["skip", "run_once"]
+          enum:
+          - skip
+          - run_once
         next_run_at:
           type: string
           format: date-time
@@ -3414,15 +3592,20 @@ components:
           nullable: true
         status:
           type: string
-          enum: ["active", "processing", "failed", "paused", "cancelled", "completed"]
+          enum:
+          - active
+          - processing
+          - failed
+          - paused
+          - cancelled
+          - completed
         created_at:
           type: string
           format: date-time
-
-    # ── Webhooks ──────────────────────────────────────────────────────────
     RegisterWebhookRequest:
       type: object
-      required: ["url"]
+      required:
+      - url
       properties:
         url:
           type: string
@@ -3432,18 +3615,19 @@ components:
           items:
             type: string
             enum:
-              - "transfer.initiated"
-              - "transfer.settled"
-              - "transfer.failed"
-              - "wallet.funded"
-              - "conversion.completed"
-          description: |
-            Event types to subscribe to. Omit or pass an empty array to
+            - transfer.initiated
+            - transfer.settled
+            - transfer.failed
+            - wallet.funded
+            - conversion.completed
+          description: 'Event types to subscribe to. Omit or pass an empty array to
+
             receive all events.
 
+            '
     WebhookEndpointResponse:
       type: object
-      description: "Returned on create — includes the signing secret"
+      description: Returned on create — includes the signing secret
       properties:
         id:
           type: string
@@ -3452,7 +3636,7 @@ components:
           format: uri
         secret:
           type: string
-          description: "HMAC-SHA256 signing secret (shown once)"
+          description: HMAC-SHA256 signing secret (shown once)
         events:
           type: array
           items:
@@ -3462,10 +3646,9 @@ components:
         created_at:
           type: string
           format: date-time
-
     WebhookEndpointSummary:
       type: object
-      description: "Returned on list — secret is never included"
+      description: Returned on list — secret is never included
       properties:
         id:
           type: string
@@ -3481,7 +3664,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     WebhookDelivery:
       type: object
       properties:
@@ -3492,18 +3674,21 @@ components:
         event_type:
           type: string
           enum:
-            - "transfer.initiated"
-            - "transfer.settled"
-            - "transfer.failed"
-            - "wallet.funded"
-            - "conversion.completed"
+          - transfer.initiated
+          - transfer.settled
+          - transfer.failed
+          - wallet.funded
+          - conversion.completed
         status:
           type: string
-          enum: ["pending", "success", "failed"]
+          enum:
+          - pending
+          - success
+          - failed
         response_code:
           type: integer
           nullable: true
-          description: "HTTP status code from the endpoint"
+          description: HTTP status code from the endpoint
         attempt_count:
           type: integer
         last_attempt:
@@ -3513,28 +3698,25 @@ components:
         created_at:
           type: string
           format: date-time
-
-    # ── Fees ──────────────────────────────────────────────────────────────
     FeeScheduleResponse:
       type: object
       properties:
         transfer_fee_bps:
           type: integer
-          description: "Transfer fee in basis points"
+          description: Transfer fee in basis points
         conversion_fee_bps:
           type: integer
-          description: "FX conversion fee in basis points"
+          description: FX conversion fee in basis points
         min_fee_amount:
           type: string
-          description: "Minimum fee as decimal string"
+          description: Minimum fee as decimal string
         max_fee_amount:
           type: string
           nullable: true
-          description: "Maximum fee cap as decimal string (null = uncapped)"
+          description: Maximum fee cap as decimal string (null = uncapped)
         asset:
           type: string
-          description: "Asset in which fees are denominated"
-
+          description: Asset in which fees are denominated
     FeeCollectionSummary:
       type: object
       properties:
@@ -3545,8 +3727,7 @@ components:
         tenant_fees:
           type: array
           items:
-            $ref: "#/components/schemas/TenantFeeTotal"
-
+            $ref: '#/components/schemas/TenantFeeTotal'
     TenantFeeTotal:
       type: object
       properties:
@@ -3555,97 +3736,106 @@ components:
           nullable: true
         total_fees:
           type: string
-
-    # ── Claimable balances ────────────────────────────────────────────────
     ClaimPredicate:
       type: object
-      description: |
-        A claim predicate, in Fluxa's declarative form. `unconditional` needs no
+      description: 'A claim predicate, in Fluxa''s declarative form. `unconditional` needs no
+
         other field; `before_absolute_time` / `after_absolute_time` use
+
         `timestamp` (Unix seconds) and `before_relative_time` uses `seconds`
+
         (measured from creation). `not` takes exactly one nested predicate and
+
         `and` / `or` take exactly two.
-      required: ["type"]
+
+        '
+      required:
+      - type
       properties:
         type:
           type: string
           enum:
-            - "unconditional"
-            - "before_absolute_time"
-            - "after_absolute_time"
-            - "before_relative_time"
-            - "not"
-            - "and"
-            - "or"
+          - unconditional
+          - before_absolute_time
+          - after_absolute_time
+          - before_relative_time
+          - not
+          - and
+          - or
         timestamp:
           type: integer
           format: int64
-          description: "Unix timestamp in seconds (absolute-time predicates)"
+          description: Unix timestamp in seconds (absolute-time predicates)
         seconds:
           type: integer
           format: int64
-          description: "Offset in seconds (before_relative_time)"
+          description: Offset in seconds (before_relative_time)
         predicates:
           type: array
           items:
-            $ref: "#/components/schemas/ClaimPredicate"
-          description: "Operands: one for `not`, two for `and`/`or`"
-
+            $ref: '#/components/schemas/ClaimPredicate'
+          description: 'Operands: one for `not`, two for `and`/`or`'
     Claimant:
       type: object
-      required: ["account"]
+      required:
+      - account
       properties:
         account:
           type: string
-          description: "Stellar account allowed to claim"
+          description: Stellar account allowed to claim
         predicate:
           allOf:
-            - $ref: "#/components/schemas/ClaimPredicate"
-          description: "Omitted means unconditional"
-
+          - $ref: '#/components/schemas/ClaimPredicate'
+          description: Omitted means unconditional
     CreateClaimableBalanceRequest:
       type: object
-      required: ["asset", "amount", "claimants"]
+      required:
+      - asset
+      - amount
+      - claimants
       properties:
         asset:
           type: string
-          description: "Asset code (XLM, USDC, EURC)"
+          description: Asset code (XLM, USDC, EURC)
         amount:
           type: string
-          description: "Decimal string, up to 7 decimal places"
+          description: Decimal string, up to 7 decimal places
         claimants:
           type: array
           minItems: 1
           items:
-            $ref: "#/components/schemas/Claimant"
+            $ref: '#/components/schemas/Claimant'
         source_wallet_id:
           type: string
-          description: "Wallet that funds the balance; defaults to the configured source wallet"
+          description: Wallet that funds the balance; defaults to the configured source wallet
         sponsor_account:
           type: string
-          description: |
-            Optional sponsor account that pays the entry reserve. Must be a
+          description: 'Optional sponsor account that pays the entry reserve. Must be a
+
             wallet Fluxa custodies, because sponsoring requires its signature.
+
+            '
         revoke_on_expiry:
           type: boolean
           default: false
-          description: "Claim an unclaimed balance back to the org once it expires"
+          description: Claim an unclaimed balance back to the org once it expires
         expires_at:
           type: string
           format: date-time
-          description: |
-            Explicit expiry. When omitted it is derived from the earliest
-            absolute deadline in the claimants' predicates.
+          description: 'Explicit expiry. When omitted it is derived from the earliest
 
+            absolute deadline in the claimants'' predicates.
+
+            '
     CreateClaimableBalanceResponse:
       type: object
       properties:
         balance_id:
           type: string
-          description: "Stellar claimable balance ID"
+          description: Stellar claimable balance ID
         reserve_required:
           type: string
-          description: "XLM the entry locks up (0.5, paid by the sponsor when sponsored)"
+          description: XLM the entry locks up (0.5, paid by the sponsor when sponsored)
         sponsored:
           type: boolean
         tx_hash:
@@ -3654,13 +3844,12 @@ components:
           type: string
           format: date-time
           nullable: true
-
     ClaimableBalanceResponse:
       type: object
       properties:
         id:
           type: string
-          description: "Stellar claimable balance ID"
+          description: Stellar claimable balance ID
         asset:
           type: string
         amount:
@@ -3668,12 +3857,16 @@ components:
         claimants:
           type: array
           items:
-            $ref: "#/components/schemas/Claimant"
+            $ref: '#/components/schemas/Claimant'
         sponsor:
           type: string
         status:
           type: string
-          enum: ["pending", "claimed", "revoked", "expired"]
+          enum:
+          - pending
+          - claimed
+          - revoked
+          - expired
         revoke_on_expiry:
           type: boolean
         created_at:
@@ -3689,40 +3882,39 @@ components:
           nullable: true
         claimed_by:
           type: string
-
     LiveClaimableBalanceResponse:
       allOf:
-        - $ref: "#/components/schemas/ClaimableBalanceResponse"
-        - type: object
-          properties:
-            claimable:
-              type: boolean
-              description: "Whether a claimant could claim right now"
-            on_chain:
-              type: object
-              nullable: true
-              description: "Horizon's view of the balance; absent once it is consumed"
-              properties:
-                id:
-                  type: string
-                asset:
-                  type: string
-                amount:
-                  type: string
-                sponsor:
-                  type: string
-                last_modified_ledger:
-                  type: integer
-
+      - $ref: '#/components/schemas/ClaimableBalanceResponse'
+      - type: object
+        properties:
+          claimable:
+            type: boolean
+            description: Whether a claimant could claim right now
+          on_chain:
+            type: object
+            nullable: true
+            description: Horizon's view of the balance; absent once it is consumed
+            properties:
+              id:
+                type: string
+              asset:
+                type: string
+              amount:
+                type: string
+              sponsor:
+                type: string
+              last_modified_ledger:
+                type: integer
     ClaimClaimableBalanceRequest:
       type: object
       properties:
         claimant_account:
           type: string
-          description: |
-            Claimant to claim for. Required unless the balance has exactly one
+          description: 'Claimant to claim for. Required unless the balance has exactly one
+
             Fluxa-custodied claimant.
 
+            '
     ClaimClaimableBalanceResponse:
       type: object
       properties:
@@ -3736,9 +3928,8 @@ components:
           type: string
         status:
           type: string
-          enum: ["claimed"]
-
-    # ── Usage ─────────────────────────────────────────────────────────────
+          enum:
+          - claimed
     UsageResponse:
       type: object
       properties:
@@ -3754,15 +3945,13 @@ components:
           type: integer
         batches_count:
           type: integer
-
-    # ── Reconciliation ────────────────────────────────────────────────────
     ReconciliationSummary:
       type: object
       properties:
         days:
           type: array
           items:
-            $ref: "#/components/schemas/DailySummaryRow"
+            $ref: '#/components/schemas/DailySummaryRow'
         total_ok:
           type: integer
         total_mismatch:
@@ -3771,72 +3960,72 @@ components:
           type: integer
         pending_stuck:
           type: integer
-          description: "Transactions stuck in pending beyond threshold"
-
+          description: Transactions stuck in pending beyond threshold
     DailySummaryRow:
       type: object
       properties:
         date:
           type: string
-          description: "Date in YYYY-MM-DD format"
+          description: Date in YYYY-MM-DD format
         ok:
           type: integer
-          description: "Transactions reconciled successfully"
+          description: Transactions reconciled successfully
         mismatch:
           type: integer
-          description: "Transactions with amount/asset discrepancies"
+          description: Transactions with amount/asset discrepancies
         not_found:
           type: integer
-          description: "Transactions not found on Stellar"
-
-    # ── Idempotency ─────────────────────────────────────────────────────────
+          description: Transactions not found on Stellar
     IdempotencyInspectionResponse:
       type: object
       required:
-        - key
-        - status
+      - key
+      - status
       properties:
         key:
           type: string
-          description: "Normalized idempotency key"
-          example: "b477c770-4f51-40be-a006-03daef194d30"
+          description: Normalized idempotency key
+          example: b477c770-4f51-40be-a006-03daef194d30
         status:
           type: string
-          enum: ["processing", "completed", "failed", "unknown"]
-          description: "Current lifecycle state of the key"
-          example: "completed"
+          enum:
+          - processing
+          - completed
+          - failed
+          - unknown
+          description: Current lifecycle state of the key
+          example: completed
         created_at:
           type: string
           format: date-time
-          description: "When the key was first registered"
+          description: When the key was first registered
         expires_at:
           type: string
           format: date-time
-          description: "When the key retention window elapses"
+          description: When the key retention window elapses
         request_hash:
           type: string
-          description: "SHA-256 digest of method, path, and request body"
-          example: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          description: SHA-256 digest of method, path, and request body
+          example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         retry_after_seconds:
           type: integer
-          description: "Suggested wait duration in seconds before retrying (when status is processing)"
+          description: Suggested wait duration in seconds before retrying (when status is processing)
           example: 2
         retry_hint:
           type: string
-          description: "Human-readable retry instructions (when status is processing)"
+          description: Human-readable retry instructions (when status is processing)
         response:
-          $ref: "#/components/schemas/IdempotencyStoredResponse"
-
+          $ref: '#/components/schemas/IdempotencyStoredResponse'
     IdempotencyStoredResponse:
       type: object
       required:
-        - status
-        - body_truncated
-        - body_size_bytes
+      - status
+      - body_truncated
+      - body_size_bytes
       properties:
         status:
           type: integer
-          description: "Original HTTP status code"
+          description: Original HTTP status code
           example: 200
         headers:
           type: object
@@ -3844,17 +4033,17 @@ components:
             type: array
             items:
               type: string
-          description: "Replayable HTTP response headers"
+          description: Replayable HTTP response headers
         body:
-          description: "Original HTTP response body"
+          description: Original HTTP response body
         body_text:
           type: string
-          description: "Raw or truncated response body text"
+          description: Raw or truncated response body text
         body_truncated:
           type: boolean
-          description: "True if the original response body exceeded the 64 KB inspection size bound"
+          description: True if the original response body exceeded the 64 KB inspection size bound
           example: false
         body_size_bytes:
           type: integer
-          description: "Total size in bytes of the original response body"
+          description: Total size in bytes of the original response body
           example: 48

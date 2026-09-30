@@ -8,6 +8,7 @@
 # and this file is the expected output of that comparison either way.
 
 routes:
+  - "DELETE /v1/beneficiaries/{id}"
   - "DELETE /v1/keys/{id}"
   - "DELETE /v1/schedules/{id}"
   - "DELETE /v1/webhooks/{id}"
@@ -23,6 +24,8 @@ routes:
   - GET /v1/admin/reconciliation/summary
   - GET /v1/audit
   - GET /v1/audit/export
+  - GET /v1/beneficiaries
+  - "GET /v1/beneficiaries/{id}"
   - GET /v1/claimable-balances
   - "GET /v1/claimable-balances/{id}"
   - GET /v1/fees
@@ -47,6 +50,8 @@ routes:
   - "POST /v1/admin/transfers/{transferID}/force-settle"
   - POST /v1/auth/login
   - POST /v1/auth/register
+  - POST /v1/beneficiaries
+  - "POST /v1/beneficiaries/{id}/activate"
   - POST /v1/claimable-balances
   - "POST /v1/claimable-balances/{id}/claim"
   - POST /v1/fees/preview

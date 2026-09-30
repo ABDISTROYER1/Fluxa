@@ -98,8 +98,8 @@ func NewErrNoTrustline(asset string) error {
 }
 
 type ErrTransferNotCancellable struct {
-	Status    string
-	TxHash    string
+	Status string
+	TxHash string
 }
 
 func (e *ErrTransferNotCancellable) Error() string {

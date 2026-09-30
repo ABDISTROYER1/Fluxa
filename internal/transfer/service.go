@@ -436,8 +436,8 @@ func (s *service) CancelTransfer(ctx context.Context, id, actor, idempotencyKey 
 	// is refused.
 	if tx.Status != domain.StatusPending && tx.Status != domain.StatusComplianceHold {
 		return nil, &domain.ErrTransferNotCancellable{
-			Status:    string(tx.Status),
-			TxHash:    tx.TxHash,
+			Status: string(tx.Status),
+			TxHash: tx.TxHash,
 		}
 	}
 
@@ -470,8 +470,8 @@ func (s *service) CancelTransfer(ctx context.Context, id, actor, idempotencyKey 
 	// The UPDATE did not set the status to cancelled (should not happen given the
 	// pre-check, but handle it defensively). Return the current state plainly.
 	return nil, &domain.ErrTransferNotCancellable{
-		Status:    string(tx.Status),
-		TxHash:    tx.TxHash,
+		Status: string(tx.Status),
+		TxHash: tx.TxHash,
 	}
 }
 

@@ -3,7 +3,7 @@ package fx
 import (
 	"testing"
 
-	"github.com/Savitura/Fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/shopspring/decimal"
 )
 

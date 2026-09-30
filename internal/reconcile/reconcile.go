@@ -971,10 +971,10 @@ func (s *Service) GetSummary(ctx context.Context, days int) (*SummaryResponse, e
 
 type SummaryResponse struct {
 	Days          []domain.DailySummaryRow `json:"days"`
-	TotalOK       int               `json:"total_ok"`
-	TotalMismatch int               `json:"total_mismatch"`
-	TotalNotFound int               `json:"total_not_found"`
-	PendingStuck  int               `json:"pending_stuck"`
+	TotalOK       int                      `json:"total_ok"`
+	TotalMismatch int                      `json:"total_mismatch"`
+	TotalNotFound int                      `json:"total_not_found"`
+	PendingStuck  int                      `json:"pending_stuck"`
 }
 
 func (s *Service) writeAudit(ctx context.Context, tx *domain.Transaction, horizonStatus string, amountOK, assetOK, feeOK bool, outcome domain.AuditOutcome, details string) {
