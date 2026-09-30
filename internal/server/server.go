@@ -224,10 +224,6 @@ func (s *Server) Start() error {
 	return s.http.ListenAndServe()
 }
 
-func (s *Server) Router() *chi.Mux {
-	return s.router
-}
-
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }

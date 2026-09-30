@@ -1,0 +1,1 @@
+ALTER TYPE transaction_status DROP VALUE 'cancelled';

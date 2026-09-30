@@ -96,3 +96,15 @@ func (e *ErrNoTrustline) Error() string {
 func NewErrNoTrustline(asset string) error {
 	return &ErrNoTrustline{Asset: asset}
 }
+
+type ErrTransferNotCancellable struct {
+	Status    string
+	TxHash    string
+}
+
+func (e *ErrTransferNotCancellable) Error() string {
+	if e.TxHash != "" {
+		return "transfer cannot be cancelled: status " + e.Status + ", tx_hash " + e.TxHash
+	}
+	return "transfer cannot be cancelled: status " + e.Status
+}

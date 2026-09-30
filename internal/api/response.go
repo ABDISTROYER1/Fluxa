@@ -151,6 +151,13 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 	// retrying with the same destination will always fail.
 	case errors.Is(err, domain.ErrTransferBlockedSanctions):
 		Error(w, http.StatusForbidden, "TRANSFER_BLOCKED_SANCTIONS", err.Error())
+	case errors.As(err, new(domain.ErrTransferNotCancellable)):
+		e := err.(*domain.ErrTransferNotCancellable)
+		msg := "transfer cannot be cancelled: status " + e.Status
+		if e.TxHash != "" {
+			msg += ", tx_hash " + e.TxHash
+		}
+		Error(w, http.StatusConflict, "TRANSFER_NOT_CANCELLABLE", msg)
 	default:
 		InternalError(w, err)
 	}

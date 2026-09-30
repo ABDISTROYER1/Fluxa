@@ -121,7 +121,7 @@ func (r *TransactionRepo) GetByID(ctx context.Context, id string) (*domain.Trans
 	var amount, fee string
 	var localAmt *string
 	var feeBps *int
-	var tenantID *string
+var tenantID *string
 	var batchID *string
 	var idempotencyRecordID *string
 	var reference string
