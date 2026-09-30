@@ -8,7 +8,9 @@ import (
 )
 
 type Service struct {
-	repo Repository
+	repo                 Repository
+	dependencyHistory    DependencyHistoryRepository
+	expectedDependencies []string
 }
 
 func NewService(repo Repository) *Service {
@@ -16,10 +18,11 @@ func NewService(repo Repository) *Service {
 }
 
 type StatusResponse struct {
-	APIVersion      string            `json:"api_version"`
-	Status          string            `json:"status"` // operational, degraded, outage
-	Message         string            `json:"message"`
-	RecentIncidents []domain.Incident `json:"recent_incidents"`
+	APIVersion      string             `json:"api_version"`
+	Status          string             `json:"status"` // operational, degraded, outage
+	Message         string             `json:"message"`
+	RecentIncidents []domain.Incident  `json:"recent_incidents"`
+	Dependencies    []DependencyStatus `json:"dependencies,omitempty"`
 }
 
 func (s *Service) GetStatus(ctx context.Context) (*StatusResponse, error) {
@@ -28,6 +31,10 @@ func (s *Service) GetStatus(ctx context.Context) (*StatusResponse, error) {
 		return nil, err
 	}
 	activeIncidents, err := s.repo.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dependencies, dependenciesDegraded, dependenciesUnavailable, err := s.dependencyStatuses(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +67,14 @@ func (s *Service) GetStatus(ctx context.Context) (*StatusResponse, error) {
 		}
 	}
 
+	if dependenciesUnavailable {
+		operationalStatus = "outage"
+		message = "All monitored dependencies are unavailable"
+	} else if dependenciesDegraded && operationalStatus == "operational" {
+		operationalStatus = "degraded"
+		message = "One or more dependencies are degraded or have stale status"
+	}
+
 	// Get recent incidents (last 5)
 	recent := incidents
 	if len(recent) > 5 {
@@ -71,6 +86,7 @@ func (s *Service) GetStatus(ctx context.Context) (*StatusResponse, error) {
 		Status:          operationalStatus,
 		Message:         message,
 		RecentIncidents: recent,
+		Dependencies:    dependencies,
 	}, nil
 }
 

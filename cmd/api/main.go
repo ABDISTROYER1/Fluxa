@@ -24,6 +24,7 @@ import (
 	"github.com/fluxa/fluxa/internal/fiat"
 	"github.com/fluxa/fluxa/internal/fiat/flutterwave"
 	"github.com/fluxa/fluxa/internal/fx"
+	"github.com/fluxa/fluxa/internal/health"
 	"github.com/fluxa/fluxa/internal/indexer"
 	"github.com/fluxa/fluxa/internal/logging"
 	"github.com/fluxa/fluxa/internal/org"
@@ -369,7 +370,18 @@ func main() {
 		WithIdempotency(scheduleIdemMW).
 		WithAuditLogger(auditSvc)
 	treasuryHandler := treasury.NewHandler(treasurySvc).WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
-	statusHandler := status.NewHandler(status.NewService(incidentRepo))
+	healthChecks := map[string]server.DependencyCheck{
+		"postgres": db.Ping,
+		"replica": func(ctx context.Context) error { return repoDB.ReplicaAvailable(ctx) },
+		"redis": func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
+		"horizon": server.HorizonDependencyCheck(cfg.StellarHorizonURL),
+		"worker": func(ctx context.Context) error { _, err := redisClient.Get(ctx, "fluxa:worker:heartbeat").Result(); return err },
+	}
+	healthHistoryRepo := postgres.NewDependencyHealthRepository(repoDB)
+	dependencyNames := []string{"postgres", "replica", "redis", "horizon", "worker"}
+	statusSvc := status.NewService(incidentRepo).WithDependencyHistory(healthHistoryRepo, dependencyNames)
+	statusHandler := status.NewHandler(statusSvc)
+	fluxahealth.NewSampler(healthChecks, healthHistoryRepo).Start(ctx)
 	beneficiaryHandler := beneficiary.NewHandler(beneficiarySvc)
 
 	// Claimable balances move real funds in both directions, so the mutating
@@ -398,19 +410,7 @@ func main() {
 		feeHandler, reconcileHandler, apikeyHandler, apiKeyRepo,
 		webhookHandler, batchHandler, scheduleHandler, treasuryHandler, claimableHandler,
 		statusHandler, complianceHandler, auditHandler, usageHandler, idempotencyHandler, jwtSecretBytes, cfg.Port,
-		map[string]server.DependencyCheck{
-			"postgres": db.Ping,
-			"replica":  func(ctx context.Context) error { return repoDB.ReplicaAvailable(ctx) },
-			"redis":    func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
-
-			"horizon": server.HorizonDependencyCheck(cfg.StellarHorizonURL),
-			"worker": func(ctx context.Context) error {
-				if _, err := redisClient.Get(ctx, "fluxa:worker:heartbeat").Result(); err != nil {
-					return err
-				}
-				return nil
-			},
-		},
+		healthChecks,
 
 		orgRepo,
 		cfg.CORSAllowedOrigins,

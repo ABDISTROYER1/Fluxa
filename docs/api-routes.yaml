@@ -17,6 +17,9 @@ routes:
   - GET /docs/openapi.yaml
   - GET /health
   - GET /metrics
+  - GET /status
+  - GET /status/dependencies/history
+  - GET /status/incidents
   - GET /v1/admin/compliance/reviews
   - "GET /v1/admin/compliance/reviews/{id}"
   - GET /v1/admin/compliance/sanctions-status

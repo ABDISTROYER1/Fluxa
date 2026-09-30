@@ -324,6 +324,10 @@ See [sdk/README.md](sdk/README.md) for full documentation.
 
 ---
 
+## Dependency health and status
+
+`GET /status` combines active incident severity with the latest dependency checks. A stale or missing check reports as `unknown` and degrades the aggregate status. `GET /status/dependencies/history` returns sanitized observations newest first; optional `dependency`, RFC3339 `since`, and `limit` (1-500, default 100) parameters filter results. The API samples PostgreSQL, read replica, Redis, Horizon, and worker heartbeat at startup and every minute, and retains history for 30 days. Probe error messages and response bodies are not persisted or returned.
+
 ## License
 
 [MIT](LICENSE)
