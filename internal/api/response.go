@@ -96,6 +96,7 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 
 		errors.Is(err, domain.ErrWebhookNotFound), errors.Is(err, domain.ErrWebhookDeliveryNotFound),
 		errors.Is(err, domain.ErrWebhookConfigNotFound),
+		errors.Is(err, domain.ErrTransferApprovalNotFound),
 		errors.Is(err, domain.ErrIncidentNotFound),
 		errors.Is(err, domain.ErrBatchNotFound), errors.Is(err, domain.ErrScheduleNotFound),
 		errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrOrgMemberNotFound),
@@ -129,6 +130,10 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusConflict, "CLAIMABLE_BALANCE_NOT_PENDING", err.Error())
 	case errors.Is(err, domain.ErrUserAlreadyExists):
 		Error(w, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, domain.ErrApprovalAlreadyDecided), errors.Is(err, domain.ErrApprovalExpired):
+		Error(w, http.StatusConflict, "TRANSFER_APPROVAL_CLOSED", err.Error())
+	case errors.Is(err, domain.ErrApprovalCreatorCannotApprove):
+		Error(w, http.StatusForbidden, "APPROVAL_SEPARATION_REQUIRED", err.Error())
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		Error(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
 	case errors.Is(err, domain.ErrForbidden), errors.Is(err, domain.ErrQuoteOwnershipMismatch):

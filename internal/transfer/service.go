@@ -36,6 +36,11 @@ type BeneficiaryChecker interface {
 	Check(ctx context.Context, account string) (configured, active bool, err error)
 }
 
+type ApprovalGate interface {
+	Plan(context.Context, string, string, decimal.Decimal) (*domain.TransferApprovalPolicy, error)
+	CreateRequest(context.Context, *domain.Transaction, string, *domain.TransferApprovalPolicy) error
+}
+
 type AuditEntry struct {
 	Actor     string
 	Action    string
@@ -105,6 +110,7 @@ type service struct {
 	screener       Screener
 	audit          AuditLogger
 	beneficiaries  BeneficiaryChecker
+	approvals      ApprovalGate
 }
 
 func NewService(repo Repository, walletRepo walletpkg.Repository, feeSvc fees.Service, q Queue, tenantRepo ...TenantGetter) Service {
@@ -152,6 +158,18 @@ func ConfigureBeneficiaryChecker(svc Service, checker BeneficiaryChecker) Servic
 		return configurable.WithBeneficiaryChecker(checker)
 	}
 	return svc
+}
+
+func ConfigureApprovalGate(svc Service, gate ApprovalGate) Service {
+	if configurable, ok := svc.(interface{ WithApprovalGate(ApprovalGate) Service }); ok {
+		return configurable.WithApprovalGate(gate)
+	}
+	return svc
+}
+
+func (s *service) WithApprovalGate(gate ApprovalGate) Service {
+	s.approvals = gate
+	return s
 }
 
 func (s *service) WithBeneficiaryChecker(checker BeneficiaryChecker) Service {
@@ -335,6 +353,16 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 		CreatedAt:         time.Now().UTC(),
 		IdempotencyKey:    idempotencyKey,
 	}
+	var approvalPolicy *domain.TransferApprovalPolicy
+	if status == domain.StatusPending && s.approvals != nil && tenantID != "" {
+		approvalPolicy, err = s.approvals.Plan(ctx, tenantID, asset, amount)
+		if err != nil {
+			return nil, fmt.Errorf("check transfer approval policy: %w", err)
+		}
+		if approvalPolicy != nil {
+			tx.Status = domain.StatusApprovalPending
+		}
+	}
 	if recordID := idempotency.RecordIDFromContext(ctx); recordID != "" && idempotencyKey != "" {
 		tx.IdempotencyRecordID = &recordID
 	}
@@ -363,12 +391,22 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 	} else if kID := tenant.APIKeyIDFromContext(ctx); kID != "" {
 		actor = kID
 	}
+	if approvalPolicy != nil {
+		creatorID := tenant.UserIDFromContext(ctx)
+		if err := s.approvals.CreateRequest(ctx, tx, creatorID, approvalPolicy); err != nil {
+			_ = s.repo.UpdateStatus(ctx, tx.ID, domain.StatusFailed, "")
+			return nil, fmt.Errorf("create transfer approval request: %w", err)
+		}
+	}
 	s.recordAudit(ctx, actor, "transfer.created", tx.ID)
 
 	if tx.Status == domain.StatusComplianceHold {
 		if err := s.screener.RecordHold(ctx, tx, decision); err != nil {
 			return nil, fmt.Errorf("record compliance hold: %w", err)
 		}
+		return tx, nil
+	}
+	if tx.Status == domain.StatusApprovalPending {
 		return tx, nil
 	}
 

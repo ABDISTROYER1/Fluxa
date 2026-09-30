@@ -2088,6 +2088,120 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /v1/transfer-approvals:
+    get:
+      operationId: listTransferApprovals
+      summary: List tenant transfer approvals
+      tags: [Transfers]
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum: [pending, approved, rejected, expired, all]
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100}
+      - name: offset
+        in: query
+        schema: {type: integer, minimum: 0}
+      responses:
+        '200': {description: Tenant transfer approval requests}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+  /v1/transfer-approvals/{id}/approve:
+    post:
+      operationId: approveTransfer
+      summary: Record an approval vote
+      tags: [Transfers]
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {note: {type: string}}
+      responses:
+        '200': {description: Approval recorded}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+  /v1/transfer-approvals/{id}/reject:
+    post:
+      operationId: rejectTransfer
+      summary: Reject a transfer
+      tags: [Transfers]
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {note: {type: string}}
+      responses:
+        '200': {description: Rejection recorded}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+  /v1/approval-policies:
+    get:
+      operationId: getTransferApprovalPolicy
+      summary: Get a tenant asset approval policy
+      tags: [Transfers]
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: asset
+        in: query
+        required: true
+        schema: {type: string}
+      responses:
+        '200': {description: Approval policy}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+    put:
+      operationId: putTransferApprovalPolicy
+      summary: Set a tenant asset approval policy
+      tags: [Transfers]
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset, threshold, required_approvals, expires_after_seconds]
+              properties:
+                asset: {type: string}
+                threshold: {type: string}
+                required_approvals: {type: integer, minimum: 1, maximum: 10}
+                expires_after_seconds: {type: integer, minimum: 60, maximum: 2592000}
+                enabled: {type: boolean}
+      responses:
+        '200': {description: Approval policy updated}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
   /v1/admin/reconciliation/summary:
     get:
       operationId: getReconciliationSummary

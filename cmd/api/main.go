@@ -41,6 +41,7 @@ import (
 	"github.com/fluxa/fluxa/internal/stellar"
 	"github.com/fluxa/fluxa/internal/tracing"
 	"github.com/fluxa/fluxa/internal/transfer"
+	"github.com/fluxa/fluxa/internal/transferapproval"
 	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/fluxa/fluxa/internal/wallet"
 	"github.com/fluxa/fluxa/internal/webhook"
@@ -189,6 +190,8 @@ func main() {
 			WithStellarClient(stellarClient),
 		clientResolver,
 	)
+	transferApprovalSvc := transferapproval.NewService(postgres.NewTransferApprovalRepo(repoDB), queueClient)
+	transferSvc = transfer.ConfigureApprovalGate(transferSvc, transferApprovalSvc)
 	webhookSvc := webhook.NewService(webhookRepo, redisClient, queueClient, 120, cfg.WebhookAllowPrivateNetworks)
 
 	// Compliance screening sits in front of settlement, so it is wired before
@@ -360,6 +363,7 @@ func main() {
 	transferSvc = transfer.ConfigureBeneficiaryChecker(transferSvc, beneficiarySvc)
 
 	transferHandler := transfer.NewHandler(transferSvc).WithIdempotency(transferIdemMW)
+	transferApprovalHandler := transferapproval.NewHandler(transferApprovalSvc)
 	fxHandler := fx.NewHandler(fxSvc).WithIdempotency(idemMW)
 	fiatHandler := fiat.NewHandler(fiatSvc).WithIdempotency(idemMW)
 	paymentLinkHandler := paymentlink.NewHandler(paymentlink.NewService(postgres.NewPaymentLinkRepo(repoDB), fiatSvc)).WithIdempotency(idemMW).WithAuditLogger(auditSvc)
@@ -377,10 +381,13 @@ func main() {
 	treasuryHandler := treasury.NewHandler(treasurySvc).WithMutationGate(server.RequireRole(domain.RoleOwner, domain.RoleAdmin))
 	healthChecks := map[string]server.DependencyCheck{
 		"postgres": db.Ping,
-		"replica": func(ctx context.Context) error { return repoDB.ReplicaAvailable(ctx) },
-		"redis": func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
-		"horizon": server.HorizonDependencyCheck(cfg.StellarHorizonURL),
-		"worker": func(ctx context.Context) error { _, err := redisClient.Get(ctx, "fluxa:worker:heartbeat").Result(); return err },
+		"replica":  func(ctx context.Context) error { return repoDB.ReplicaAvailable(ctx) },
+		"redis":    func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
+		"horizon":  server.HorizonDependencyCheck(cfg.StellarHorizonURL),
+		"worker": func(ctx context.Context) error {
+			_, err := redisClient.Get(ctx, "fluxa:worker:heartbeat").Result()
+			return err
+		},
 	}
 	healthHistoryRepo := postgres.NewDependencyHealthRepository(repoDB)
 	dependencyNames := []string{"postgres", "replica", "redis", "horizon", "worker"}
@@ -428,6 +435,7 @@ func main() {
 		beneficiaryHandler,
 		paymentLinkHandler,
 		refundHandler,
+		transferApprovalHandler,
 	)
 	server.RegisterDocsRoutes(srv.Router())
 

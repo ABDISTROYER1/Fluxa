@@ -28,6 +28,7 @@ import (
 	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/status"
 	"github.com/fluxa/fluxa/internal/transfer"
+	"github.com/fluxa/fluxa/internal/transferapproval"
 	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/fluxa/fluxa/internal/wallet"
 	"github.com/fluxa/fluxa/internal/webhook"
@@ -76,6 +77,7 @@ func New(
 	var beneficiaryHandler *beneficiary.Handler
 	var paymentLinkHandler *paymentlink.Handler
 	var refundHandler *refund.Handler
+	var transferApprovalHandler *transferapproval.Handler
 	for _, option := range options {
 		switch value := option.(type) {
 		case AuthRateLimitConfig:
@@ -86,6 +88,8 @@ func New(
 			paymentLinkHandler = value
 		case *refund.Handler:
 			refundHandler = value
+		case *transferapproval.Handler:
+			transferApprovalHandler = value
 		}
 	}
 	authLimiter := NewAuthRateLimiter(rateCfg)
@@ -133,6 +137,13 @@ func New(
 		r.Group(func(r chi.Router) {
 			r.Use(AuthMiddleware(apiKeyRepo, jwtSecret, membershipValidator))
 			r.Use(RateLimit(100, 200))
+			if transferApprovalHandler != nil {
+				r.With(RequireScope(domain.ScopeTransfersRead)).Get("/transfer-approvals", transferApprovalHandler.List)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersWrite)).Post("/transfer-approvals/{id}/approve", transferApprovalHandler.Approve)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersWrite)).Post("/transfer-approvals/{id}/reject", transferApprovalHandler.Reject)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersRead)).Get("/approval-policies", transferApprovalHandler.GetPolicy)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersWrite)).Put("/approval-policies", transferApprovalHandler.PutPolicy)
+			}
 
 			// API Keys (Owner & Admin only for creation, expiry update, rotation & revocation)
 			r.Route("/keys", func(r chi.Router) {

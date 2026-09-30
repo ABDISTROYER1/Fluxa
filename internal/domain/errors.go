@@ -52,6 +52,10 @@ var (
 	ErrTransferBlockedSanctions = errors.New("transfer blocked: destination matches a sanctions list entry")
 	ErrComplianceReviewNotFound = errors.New("compliance review not found")
 	ErrReviewNotPending         = errors.New("compliance review has already been decided")
+	ErrTransferApprovalNotFound = errors.New("transfer approval request not found")
+	ErrApprovalAlreadyDecided   = errors.New("transfer approval request has already been decided")
+	ErrApprovalExpired          = errors.New("transfer approval request has expired")
+	ErrApprovalCreatorCannotApprove = errors.New("transfer creator cannot approve a second-person policy")
 
 	// Claimable balance errors. The claim path distinguishes "you cannot claim
 	// this yet" (predicate not satisfiable) from "this is no longer claimable"
