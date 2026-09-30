@@ -69,7 +69,7 @@ func (s *Service) Handler() http.HandlerFunc {
 			component := ComponentHealth{Status: Healthy, LatencyMS: time.Since(start).Milliseconds(), LastChecked: time.Now().UTC(), Details: details}
 			if err != nil {
 				component.Status = Unhealthy
-				component.Details = map[string]string{"error": err.Error()}
+				component.Details = map[string]string{"error": "probe failed"}
 			}
 			components[name] = component
 		}

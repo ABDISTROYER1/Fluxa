@@ -3,9 +3,12 @@ package status
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/health"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -23,6 +26,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/status", h.GetStatus)
 	r.Get("/status/incidents", h.ListIncidents)
+	r.Get("/status/dependencies/history", h.ListDependencyHistory)
 }
 
 // RegisterAdminRoutes must be mounted inside the authenticated Owner/Admin
@@ -92,4 +96,38 @@ func (h *Handler) UpdateIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.JSON(w, http.StatusOK, inc)
+}
+
+func (h *Handler) ListDependencyHistory(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	dependency := query.Get("dependency")
+	if dependency != "" && !dependencyNamePattern.MatchString(dependency) {
+		api.BadRequest(w, "invalid dependency name")
+		return
+	}
+	var since *time.Time
+	if raw := query.Get("since"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			api.BadRequest(w, "since must be an RFC3339 timestamp")
+			return
+		}
+		parsed = parsed.UTC()
+		since = &parsed
+	}
+	limit := 100
+	if raw := query.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > health.HistoryMaxLimit {
+			api.BadRequest(w, "limit must be between 1 and 500")
+			return
+		}
+		limit = parsed
+	}
+	checks, err := h.service.ListDependencyHistory(r.Context(), dependency, since, limit)
+	if err != nil {
+		api.HandleDomainError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, DependencyHistoryResponse{Checks: checks, Limit: limit, RetentionDays: int(health.HistoryRetention / (24 * time.Hour))})
 }

@@ -159,6 +159,74 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /status:
+    get:
+      operationId: getPublicStatus
+      summary: "Current platform status"
+      description: "Returns incident status and the latest dependency health checks. Dependency errors are not included."
+      tags: ["System"]
+      security: []
+      responses:
+        "200":
+          description: "Current public status"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_version: { type: string }
+                  status: { type: string, enum: [operational, degraded, outage] }
+                  message: { type: string }
+                  recent_incidents: { type: array, items: { type: object } }
+                  dependencies: { type: array, items: { type: object } }
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /status/dependencies/history:
+    get:
+      operationId: listDependencyHealthHistory
+      summary: "Dependency health history"
+      description: "Returns sanitized dependency observations from the last 30 days, newest first."
+      tags: ["System"]
+      security: []
+      parameters:
+        - in: query
+          name: dependency
+          schema: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: "Dependency history"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checks: { type: array, items: { type: object } }
+                  limit: { type: integer }
+                  retention_days: { type: integer, example: 30 }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /status/incidents:
+    get:
+      operationId: listPublicIncidents
+      summary: "Recent public incidents"
+      tags: ["System"]
+      security: []
+      responses:
+        "200":
+          description: "Recent incidents"
+          content:
+            application/json:
+              schema: { type: object, properties: { incidents: { type: array, items: { type: object } } } }
   /metrics:
     get:
       operationId: getMetrics
