@@ -96,6 +96,9 @@ type DriftSnapshot struct {
 // Repository is implemented by postgres.TransactionRepo and covers confirmed-tx
 // auditing, pending-tx reconciliation, and run record writes.
 type Repository interface {
+	// RetryFailedTransaction atomically reopens a failed transfer for a manual
+	// operator retry. Implementations must scope the update by tenant and mode.
+	RetryFailedTransaction(ctx context.Context, id string) error
 	GetConfirmedTxesForReconciliation(ctx context.Context, since time.Duration, limit int) ([]*domain.Transaction, error)
 	GetStuckPendingTxes(ctx context.Context, olderThan time.Duration, limit int) ([]*domain.Transaction, error)
 	// ResetStuckSubmittedToPending recovers a transaction claimed
@@ -130,6 +133,11 @@ type DriftRepository interface {
 	ListCurrentDrift(ctx context.Context) ([]*DriftSnapshot, error)
 }
 
+type taskQueue interface {
+	EnqueueTransfer(context.Context, string) error
+	Enqueue(context.Context, string, interface{}) error
+}
+
 // WalletLookup resolves a wallet ID to its Stellar public key. Implemented by
 // postgres.WalletRepo. Used so reconciliation can require that a Horizon
 // payment operation's exact source/destination accounts match the wallets
@@ -145,7 +153,7 @@ type Service struct {
 	walletLookup      WalletLookup
 	stellar           stellar.Client
 	alerting          *alerting.Client
-	queue             *queue.Client
+	queue             taskQueue
 	webhookSvc        webhook.Service
 	svcName           string
 	balanceThreshold  decimal.Decimal
@@ -384,21 +392,26 @@ func (s *Service) dispatchWebhook(ctx context.Context, event domain.EventType, t
 // called by the admin force-settle endpoint; the worker-side ForceSettle does
 // the actual re-submission so the HTTP request never blocks on settlement.
 func (s *Service) EnqueueForceSettle(ctx context.Context, transferID, actor string) error {
-	payload := ForceSettlePayload{TransferID: transferID, Actor: actor}
-	if err := s.queue.Enqueue(ctx, queue.TypeForceSettle, payload); err != nil {
-		return fmt.Errorf("enqueue force-settle for transfer %s: %w", transferID, err)
+	if err := s.repo.RetryFailedTransaction(ctx, transferID); err != nil {
+		return fmt.Errorf("retry failed transfer %s: %w", transferID, err)
 	}
-	log.Info().Str("transfer_id", transferID).Str("actor", actor).Msg("reconcile: force-settle enqueued")
+	if err := s.queue.EnqueueTransfer(ctx, transferID); err != nil {
+		return fmt.Errorf("enqueue retried transfer %s: %w", transferID, err)
+	}
+	log.Info().Str("transfer_id", transferID).Str("actor", actor).Msg("reconcile: failed transfer retry enqueued")
 	return nil
 }
 
 // ForceSettle is the worker-side force-settle action: it re-submits the
 // transfer to the settlement worker, bypassing the stuck-pending heuristics.
 func (s *Service) ForceSettle(ctx context.Context, transferID, actor string) error {
-	if err := s.queue.EnqueueTransfer(ctx, transferID); err != nil {
-		return fmt.Errorf("force-settle transfer %s: %w", transferID, err)
+	if err := s.repo.RetryFailedTransaction(ctx, transferID); err != nil {
+		return fmt.Errorf("retry failed transfer %s: %w", transferID, err)
 	}
-	log.Info().Str("transfer_id", transferID).Str("actor", actor).Msg("reconcile: force-settle submitted")
+	if err := s.queue.EnqueueTransfer(ctx, transferID); err != nil {
+		return fmt.Errorf("enqueue retried transfer %s: %w", transferID, err)
+	}
+	log.Info().Str("transfer_id", transferID).Str("actor", actor).Msg("reconcile: failed transfer retry submitted")
 	return nil
 }
 
@@ -727,58 +740,58 @@ func (s *Service) RecoverPending(ctx context.Context) error {
 		log.Info().Int("count", len(txes)).Msg("reconcile: recovering stuck pending transactions")
 
 		for _, tx := range txes {
-		// Defence in depth, and checked first so no later branch can act on a
-		// held transfer. GetStuckPendingTxes selects pending rows and
-		// submitted-without-hash rows, so a compliance_hold row should never
-		// appear here — but such a transfer is waiting on a human, not stuck,
-		// and re-enqueuing one would release a payment compliance
-		// deliberately stopped. Re-asserting the invariant here keeps it
-		// testable and means a future widening of that query cannot quietly
-		// become a compliance bypass.
-		if tx.Status == domain.StatusComplianceHold {
-			log.Warn().Str("tx_id", tx.ID).
-				Msg("reconcile: skipping transaction held for compliance review")
-			continue
-		}
-
-		if tx.Status == domain.StatusSubmitted {
-			// This row was claimed by a worker that crashed before it could
-			// record a tx_hash — nothing may have reached the network. Reset
-			// it to pending so ClaimForSubmission (deliberately strict:
-			// pending-only) will accept a fresh attempt.
-			if err := s.repo.ResetStuckSubmittedToPending(ctx, tx.ID, stuckThreshold); err != nil {
-				if errors.Is(err, domain.ErrConcurrentUpdate) {
-					log.Info().Str("tx_id", tx.ID).
-						Msg("reconcile: stuck submitted tx no longer eligible for reset (already progressed)")
-				} else {
-					log.Error().Err(err).Str("tx_id", tx.ID).Msg("reconcile: reset stuck submitted tx to pending")
-				}
+			// Defence in depth, and checked first so no later branch can act on a
+			// held transfer. GetStuckPendingTxes selects pending rows and
+			// submitted-without-hash rows, so a compliance_hold row should never
+			// appear here — but such a transfer is waiting on a human, not stuck,
+			// and re-enqueuing one would release a payment compliance
+			// deliberately stopped. Re-asserting the invariant here keeps it
+			// testable and means a future widening of that query cannot quietly
+			// become a compliance bypass.
+			if tx.Status == domain.StatusComplianceHold {
+				log.Warn().Str("tx_id", tx.ID).
+					Msg("reconcile: skipping transaction held for compliance review")
 				continue
 			}
-		}
 
-		newCount, err := s.repo.IncrementRequeueCount(ctx, tx.ID)
-		if err != nil {
-			log.Error().Err(err).Str("tx_id", tx.ID).Msg("reconcile: increment requeue count")
-			continue
-		}
-
-		if newCount > maxRequeues {
-			log.Warn().Str("tx_id", tx.ID).Int("requeue_count", newCount).Msg("reconcile: max requeues reached, marking failed")
-			if repoErr := s.repo.UpdateReconciliationStatus(ctx, tx.ID, domain.StatusFailed); repoErr != nil {
-				log.Error().Err(repoErr).Str("tx_id", tx.ID).Msg("reconcile: mark as failed")
+			if tx.Status == domain.StatusSubmitted {
+				// This row was claimed by a worker that crashed before it could
+				// record a tx_hash — nothing may have reached the network. Reset
+				// it to pending so ClaimForSubmission (deliberately strict:
+				// pending-only) will accept a fresh attempt.
+				if err := s.repo.ResetStuckSubmittedToPending(ctx, tx.ID, stuckThreshold); err != nil {
+					if errors.Is(err, domain.ErrConcurrentUpdate) {
+						log.Info().Str("tx_id", tx.ID).
+							Msg("reconcile: stuck submitted tx no longer eligible for reset (already progressed)")
+					} else {
+						log.Error().Err(err).Str("tx_id", tx.ID).Msg("reconcile: reset stuck submitted tx to pending")
+					}
+					continue
+				}
 			}
-			s.alerting.Critical(ctx, "Transaction Failed: Max Requeues",
-				fmt.Sprintf("Transaction %s has been re-enqueued %d times without success. Marked as failed.", tx.ID, newCount))
-			continue
-		}
 
-		if err := s.queue.EnqueueTransfer(ctx, tx.ID); err != nil {
-			log.Error().Err(err).Str("tx_id", tx.ID).Msg("reconcile: re-enqueue transfer failed")
-			continue
-		}
+			newCount, err := s.repo.IncrementRequeueCount(ctx, tx.ID)
+			if err != nil {
+				log.Error().Err(err).Str("tx_id", tx.ID).Msg("reconcile: increment requeue count")
+				continue
+			}
 
-		log.Info().Str("tx_id", tx.ID).Int("requeue_count", newCount).Msg("reconcile: re-enqueued pending transaction")
+			if newCount > maxRequeues {
+				log.Warn().Str("tx_id", tx.ID).Int("requeue_count", newCount).Msg("reconcile: max requeues reached, marking failed")
+				if repoErr := s.repo.UpdateReconciliationStatus(ctx, tx.ID, domain.StatusFailed); repoErr != nil {
+					log.Error().Err(repoErr).Str("tx_id", tx.ID).Msg("reconcile: mark as failed")
+				}
+				s.alerting.Critical(ctx, "Transaction Failed: Max Requeues",
+					fmt.Sprintf("Transaction %s has been re-enqueued %d times without success. Marked as failed.", tx.ID, newCount))
+				continue
+			}
+
+			if err := s.queue.EnqueueTransfer(ctx, tx.ID); err != nil {
+				log.Error().Err(err).Str("tx_id", tx.ID).Msg("reconcile: re-enqueue transfer failed")
+				continue
+			}
+
+			log.Info().Str("tx_id", tx.ID).Int("requeue_count", newCount).Msg("reconcile: re-enqueued pending transaction")
 		}
 
 		if len(txes) < pageSize {

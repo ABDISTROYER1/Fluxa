@@ -31,6 +31,7 @@ type mockRepo struct {
 func (m *mockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return nil, nil
 }
+func (m *mockRepo) RetryFailedTransaction(_ context.Context, _ string) error { return nil }
 func (m *mockRepo) ResetStuckSubmittedToPending(_ context.Context, _ string, _ time.Duration) error {
 	return nil
 }
@@ -486,6 +487,7 @@ type smartMockRepo struct {
 func (m *smartMockRepo) GetConfirmedTxesForReconciliation(_ context.Context, _ time.Duration, _ int) ([]*domain.Transaction, error) {
 	return nil, nil
 }
+func (m *smartMockRepo) RetryFailedTransaction(_ context.Context, _ string) error { return nil }
 func (m *smartMockRepo) ResetStuckSubmittedToPending(_ context.Context, _ string, _ time.Duration) error {
 	return nil
 }

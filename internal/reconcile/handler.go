@@ -1,20 +1,33 @@
 package reconcile
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/api"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
-	svc *Service
+	svc   *Service
+	audit interface {
+		Log(r *http.Request, action, resourceType, resourceID string, metadata map[string]interface{})
+	}
 }
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+func (h *Handler) WithAuditLogger(audit interface {
+	Log(r *http.Request, action, resourceType, resourceID string, metadata map[string]interface{})
+}) *Handler {
+	h.audit = audit
+	return h
 }
 
 func (h *Handler) AdminRoutes() func(r chi.Router) {
@@ -77,14 +90,25 @@ func (h *Handler) forceSettle(w http.ResponseWriter, r *http.Request) {
 		api.Error(w, http.StatusBadRequest, "TRANSFER_ID_REQUIRED", "transferID is required")
 		return
 	}
-
-	actor := api.ActorFromContext(r.Context())
-	if err := h.svc.EnqueueForceSettle(r.Context(), transferID, actor); err != nil {
-		api.InternalError(w, err)
+	if _, err := uuid.Parse(transferID); err != nil {
+		api.Error(w, http.StatusBadRequest, "TRANSFER_ID_INVALID", "transferID must be a valid UUID")
 		return
 	}
 
-	api.JSON(w, http.StatusOK, map[string]interface{}{"status": "enqueued", "transfer_id": transferID})
+	actor := api.ActorFromContext(r.Context())
+	if err := h.svc.EnqueueForceSettle(r.Context(), transferID, actor); err != nil {
+		if errors.Is(err, domain.ErrConcurrentUpdate) {
+			api.Error(w, http.StatusConflict, "CONFLICT", "transfer is not in a retryable state")
+			return
+		}
+		api.WriteError(w, r, err)
+		return
+	}
+	if h.audit != nil {
+		h.audit.Log(r, "transfer.retry", "transfer", transferID, map[string]interface{}{"operation": "retry_failed_settlement"})
+	}
+
+	api.JSON(w, http.StatusAccepted, map[string]interface{}{"status": "retry_queued", "transfer_id": transferID})
 }
 
 func (h *Handler) runReconcile(w http.ResponseWriter, r *http.Request) {
