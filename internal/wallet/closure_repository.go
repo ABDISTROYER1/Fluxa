@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/Savitura/Fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +36,7 @@ func (r *closureRepository) Create(ctx context.Context, closure *domain.AccountC
 		(id, tenant_id, wallet_id, destination_wallet, actor_type, actor_id, status, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, closure.ID, closure.TenantID, closure.WalletID, closure.DestinationWallet,
-	   closure.ActorType, closure.ActorID, closure.Status, closure.CreatedAt)
+		closure.ActorType, closure.ActorID, closure.Status, closure.CreatedAt)
 
 	return err
 }

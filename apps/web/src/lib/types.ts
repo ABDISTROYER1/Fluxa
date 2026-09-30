@@ -175,6 +175,27 @@ export interface FiatWithdrawResponse {
   status: string;
 }
 
+export interface PaymentLink {
+  id: string;
+  token: string;
+  wallet_id: string;
+  amount: string;
+  currency: string;
+  status: string;
+  checkout_url: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface Refund {
+  id: string;
+  original_transaction_id: string;
+  transaction_id?: string;
+  amount: string;
+  reason?: string;
+  status: string;
+}
+
 export interface BatchTransferRequest {
   from_wallet_id: string;
   transfers: {

@@ -19,6 +19,9 @@ const (
 type FiatDeposit struct {
 	ID                string
 	WalletID          string
+	PaymentLinkID     *string
+	TenantID          *string
+	Mode              Mode
 	Provider          string
 	ProviderReference string
 	FiatAmount        decimal.Decimal

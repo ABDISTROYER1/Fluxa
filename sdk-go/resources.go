@@ -15,6 +15,8 @@ type WebhooksResource struct{ client *Client }
 type FeesResource struct{ client *Client }
 type KeysResource struct{ client *Client }
 type FiatResource struct{ client *Client }
+type PaymentLinksResource struct{ client *Client }
+type RefundsResource struct{ client *Client }
 
 func (r *WalletsResource) Create(ctx context.Context, options ...RequestOptions) (CreateWalletResponse, error) {
 	var result CreateWalletResponse
@@ -81,6 +83,47 @@ type ListTransactionsQuery struct {
 	WalletID string
 	Limit    *int64
 	Offset   *int64
+}
+
+func (r *PaymentLinksResource) Create(ctx context.Context, request CreatePaymentLinkRequest, options ...RequestOptions) (PaymentLink, error) {
+	var result PaymentLink
+	err := r.client.request(ctx, http.MethodPost, "/payment-links", request, nil, &result, options...)
+	return result, err
+}
+
+func (r *PaymentLinksResource) List(ctx context.Context, options ...RequestOptions) (PaymentLinksResponse, error) {
+	var result PaymentLinksResponse
+	err := r.client.request(ctx, http.MethodGet, "/payment-links", nil, nil, &result, options...)
+	return result, err
+}
+
+func (r *PaymentLinksResource) Get(ctx context.Context, id string, options ...RequestOptions) (PaymentLink, error) {
+	var result PaymentLink
+	err := r.client.request(ctx, http.MethodGet, "/payment-links/"+url.PathEscape(id), nil, nil, &result, options...)
+	return result, err
+}
+
+func (r *PaymentLinksResource) Cancel(ctx context.Context, id string, options ...RequestOptions) error {
+	return r.client.request(ctx, http.MethodDelete, "/payment-links/"+url.PathEscape(id), nil, nil, nil, options...)
+}
+
+func (r *RefundsResource) Create(ctx context.Context, request CreateRefundRequest, options ...RequestOptions) (Refund, error) {
+	var result Refund
+	err := r.client.request(ctx, http.MethodPost, "/refunds", request, nil, &result, options...)
+	return result, err
+}
+
+func (r *RefundsResource) Get(ctx context.Context, id string, options ...RequestOptions) (Refund, error) {
+	var result Refund
+	err := r.client.request(ctx, http.MethodGet, "/refunds/"+url.PathEscape(id), nil, nil, &result, options...)
+	return result, err
+}
+
+func (r *RefundsResource) List(ctx context.Context, originalID string, options ...RequestOptions) (RefundsResponse, error) {
+	var result RefundsResponse
+	params := url.Values{"original_transaction_id": {originalID}}
+	err := r.client.request(ctx, http.MethodGet, "/refunds", nil, params, &result, options...)
+	return result, err
 }
 
 func (r *FXResource) Quote(ctx context.Context, request QuoteRequest, options ...RequestOptions) (QuoteResponse, error) {

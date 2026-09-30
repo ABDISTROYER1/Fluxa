@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import secrets
+import uuid
 import time
 from typing import Any
 
@@ -56,7 +57,7 @@ class HTTPClient:
         headers = dict(options.headers)
         key = options.idempotency_key or _header(headers, "Idempotency-Key") or _header(headers, "X-Idempotency-Key")
         if not key and method.upper() == "POST" and idempotency_required(path):
-            key = secrets.token_urlsafe(24)
+            key = str(uuid.uuid4())
         if key and not _header(headers, "Idempotency-Key"):
             headers["Idempotency-Key"] = key
 
@@ -106,7 +107,7 @@ class HTTPClient:
 
 
 def idempotency_required(path: str) -> bool:
-    if path in {"/wallets", "/transfers", "/transfers/batch", "/withdrawals", "/fx/convert", "/schedules", "/claimable-balances"}:
+    if path in {"/wallets", "/transfers", "/transfers/batch", "/withdrawals", "/fx/convert", "/schedules", "/claimable-balances", "/payment-links", "/refunds"}:
         return True
     return path.startswith("/wallets/") and path.endswith(("/deposit/fiat", "/withdraw/fiat", "/trustlines")) or path.startswith("/claimable-balances/") and path.endswith("/claim")
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/fx"
+	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/google/uuid"
 )
@@ -83,6 +84,11 @@ func (s *service) validateFiatCurrency(code string) (string, error) {
 	return "", fmt.Errorf("%w: %q", domain.ErrUnsupportedFiatCurrency, code)
 }
 
+func (s *service) SupportsCurrency(code string) bool {
+	_, err := s.validateFiatCurrency(code)
+	return err == nil
+}
+
 func (s *service) InitiateDeposit(ctx context.Context, req DepositRequest) (*DepositResponse, error) {
 	currency, err := s.validateFiatCurrency(req.FiatCurrency)
 	if err != nil {
@@ -114,6 +120,15 @@ func (s *service) InitiateDeposit(ctx context.Context, req DepositRequest) (*Dep
 		USDCAmount:        quote.USDCAmount, // amount of USDC to credit user
 		Status:            domain.FiatStatusPending,
 		CreatedAt:         time.Now().UTC(),
+	}
+	if req.PaymentLinkID != "" {
+		deposit.PaymentLinkID = &req.PaymentLinkID
+	}
+	if tenantID := tenant.IDFromContext(ctx); tenantID != "" {
+		deposit.TenantID = &tenantID
+	}
+	if mode, ok := tenant.ModeFromContext(ctx); ok {
+		deposit.Mode = mode
 	}
 
 	if err := s.repo.CreateDeposit(ctx, deposit); err != nil {
@@ -194,6 +209,12 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, signature s
 		deposit, err := s.repo.GetDepositByReference(ctx, evt.ProviderRef)
 		if err != nil {
 			return fmt.Errorf("get deposit by ref: %w", err)
+		}
+		if deposit.TenantID != nil {
+			ctx = tenant.WithID(ctx, *deposit.TenantID)
+		}
+		if deposit.Mode.Valid() {
+			ctx = tenant.WithMode(ctx, deposit.Mode)
 		}
 
 		if deposit.Status != domain.FiatStatusPending {

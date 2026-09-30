@@ -15,6 +15,7 @@ import {
   Layers,
   Calendar,
   Banknote,
+  Link2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
@@ -28,6 +29,7 @@ const navItems = [
   { name: 'FX', href: '/fx', icon: Coins },
   { name: 'Conversions', href: '/conversions', icon: Coins },
   { name: 'Fiat', href: '/fiat', icon: Banknote },
+  { name: 'Payment Links', href: '/payment-links', icon: Link2 },
   { name: 'API Keys', href: '/api-keys', icon: KeyRound },
   { name: 'Webhooks', href: '/webhooks', icon: Webhook },
   { name: 'Usage', href: '/usage', icon: BarChart3 },

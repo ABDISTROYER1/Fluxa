@@ -2,7 +2,6 @@ package stellar
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -165,10 +164,4 @@ func (c *horizonClient) FindPathsStrict(sourceAccount, destAccount, destAsset, d
 		return nil, fmt.Errorf("find paths: %w", err)
 	}
 	return paths.Embedded.Records, nil
-}
-
-// IsNotFound reports whether err is a Horizon 404 error.
-func IsNotFound(err error) bool {
-	var hErr *horizonclient.Error
-	return errors.As(err, &hErr) && hErr.Response != nil && hErr.Response.StatusCode == http.StatusNotFound
 }

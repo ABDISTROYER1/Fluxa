@@ -58,6 +58,8 @@ function requiresIdempotencyKey(method: string, path: string): boolean {
       '/fx/convert',
       '/schedules',
       '/claimable-balances',
+      '/payment-links',
+      '/refunds',
     ].includes(path)
   ) {
     return true;

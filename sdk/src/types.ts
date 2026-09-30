@@ -226,6 +226,48 @@ export interface WithdrawResponse {
   status: string;
 }
 
+export interface CreatePaymentLinkRequest {
+  wallet_id: string;
+  amount: string;
+  currency: string;
+  expires_at: string;
+}
+
+export interface PaymentLinkResponse {
+  id: string;
+  token: string;
+  wallet_id: string;
+  amount: string;
+  currency: string;
+  status: 'active' | 'processing' | 'paid' | 'failed' | 'cancelled' | 'expired';
+  checkout_url: string;
+  expires_at: string;
+  created_at?: string;
+}
+
+export interface PaymentLinksResponse {
+  payment_links: PaymentLinkResponse[];
+}
+
+export interface CreateRefundRequest {
+  original_transaction_id: string;
+  amount: string;
+  reason?: string;
+}
+
+export interface RefundResponse {
+  id: string;
+  original_transaction_id: string;
+  transaction_id?: string;
+  amount: string;
+  reason?: string;
+  status: 'requested' | 'pending' | 'succeeded' | 'failed';
+}
+
+export interface RefundsResponse {
+  refunds: RefundResponse[];
+}
+
 // ── Webhook ─────────────────────────────────────────────────────────────────
 
 export type EventType =
@@ -275,12 +317,7 @@ export interface ListDeliveriesResponse {
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
 
 export type ScheduleStatus =
-  | 'active'
-  | 'processing'
-  | 'failed'
-  | 'paused'
-  | 'cancelled'
-  | 'completed';
+  'active' | 'processing' | 'failed' | 'paused' | 'cancelled' | 'completed';
 
 export interface CreateScheduleRequest {
   from_wallet_id: string;
@@ -319,12 +356,7 @@ export interface ScheduleResponse {
 }
 
 export type ScheduleRunStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'skipped'
-  | 'cancelled';
+  'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
 
 export interface ScheduleRunResponse {
   id: string;

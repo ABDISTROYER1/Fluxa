@@ -27,9 +27,11 @@ import (
 	"github.com/fluxa/fluxa/internal/indexer"
 	"github.com/fluxa/fluxa/internal/logging"
 	"github.com/fluxa/fluxa/internal/org"
+	"github.com/fluxa/fluxa/internal/paymentlink"
 	"github.com/fluxa/fluxa/internal/postgres"
 	"github.com/fluxa/fluxa/internal/queue"
 	"github.com/fluxa/fluxa/internal/reconcile"
+	"github.com/fluxa/fluxa/internal/refund"
 	"github.com/fluxa/fluxa/internal/schedule"
 	"github.com/fluxa/fluxa/internal/server"
 	"github.com/fluxa/fluxa/internal/server/idempotency"
@@ -256,6 +258,7 @@ func main() {
 	fwProvider := flutterwave.NewProvider(cfg.FlutterwaveSecretKey, cfg.FlutterwaveWebhookHash)
 
 	fiatSvc := fiat.NewService(fiatRepo, fiat.NewRailAdapter(fwProvider), fxSvc, transferSvc, cfg.PlatformWalletID, "flutterwave", fiatRepo)
+	refundSvc := refund.NewService(postgres.NewRefundRepo(repoDB), transferSvc)
 
 	anchorRegistry := anchor.NewRegistry(anchorRepo, nil)
 	if err := anchorRegistry.Load(ctx); err != nil {
@@ -358,6 +361,8 @@ func main() {
 	transferHandler := transfer.NewHandler(transferSvc).WithIdempotency(transferIdemMW)
 	fxHandler := fx.NewHandler(fxSvc).WithIdempotency(idemMW)
 	fiatHandler := fiat.NewHandler(fiatSvc).WithIdempotency(idemMW)
+	paymentLinkHandler := paymentlink.NewHandler(paymentlink.NewService(postgres.NewPaymentLinkRepo(repoDB), fiatSvc)).WithIdempotency(idemMW).WithAuditLogger(auditSvc)
+	refundHandler := refund.NewHandler(refundSvc).WithIdempotency(idemMW).WithAuditLogger(auditSvc)
 	anchorFiatHandler := fiat.NewAnchorHandler(anchorFiatSvc)
 	anchorHandler := anchor.NewHandler(anchorRegistry)
 	feeHandler := fees.NewHandler(feeSvc)
@@ -421,6 +426,8 @@ func main() {
 			AccountBurst: cfg.AuthRateLimitAccountBurst,
 		},
 		beneficiaryHandler,
+		paymentLinkHandler,
+		refundHandler,
 	)
 	server.RegisterDocsRoutes(srv.Router())
 

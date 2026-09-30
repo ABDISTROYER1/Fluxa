@@ -102,6 +102,25 @@ const status = await client.transfers.getBatch(batch.id);
 const csv = await client.transfers.exportBatch(batch.id);
 ```
 
+### Payment Links and Refunds
+
+```ts
+const link = await client.paymentLinks.create({
+  wallet_id: "wallet-id",
+  amount: "2500.00",
+  currency: "NGN",
+  expires_at: "2026-10-07T12:00:00Z",
+});
+await client.paymentLinks.cancel(link.id);
+
+const refund = await client.refunds.create({
+  original_transaction_id: "transaction-id",
+  amount: "20.0000000",
+  reason: "Order returned",
+});
+const current = await client.refunds.get(refund.id);
+```
+
 ### FX (Currency Conversion)
 
 ```ts

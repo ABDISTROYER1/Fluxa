@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/Savitura/Fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -38,9 +38,9 @@ func (r *consolidationRepository) Create(ctx context.Context, op *domain.Consoli
 		(id, tenant_id, source_wallet_ids, destination_wallet, idempotency_key, 
 		 total_fee, reserve_recovered, status, dry_run, actor_type, actor_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	`, op.ID, op.TenantID, pq.Array(op.SourceWalletIDs), op.DestinationWallet, 
-	   op.IdempotencyKey, op.TotalFee, op.ReserveRecovered, op.Status, op.DryRun,
-	   op.ActorType, op.ActorID, op.CreatedAt)
+	`, op.ID, op.TenantID, pq.Array(op.SourceWalletIDs), op.DestinationWallet,
+		op.IdempotencyKey, op.TotalFee, op.ReserveRecovered, op.Status, op.DryRun,
+		op.ActorType, op.ActorID, op.CreatedAt)
 
 	return err
 }

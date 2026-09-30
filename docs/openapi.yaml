@@ -51,11 +51,252 @@ tags:
     description: "Append-only tenant audit events and export"
   - name: "Idempotency"
     description: "Inspection and recovery of idempotent operations"
+  - name: "Payment Links"
+    description: "Fixed-amount hosted checkouts with expiration limits"
+  - name: "Refunds"
+    description: "Refund requests and their transfer settlement lifecycle"
 
 security:
   - BearerAuth: []
 
 paths:
+  /v1/payment-links:
+    get:
+      operationId: listPaymentLinks
+      summary: "List payment links"
+      tags: ["Payment Links"]
+      responses:
+        "200":
+          description: "Tenant payment links"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentLinksResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    post:
+      operationId: createPaymentLink
+      summary: "Create a fixed-amount payment link"
+      description: "Creates a tenant-scoped checkout link. Expiration must be in the next 90 days. A link may be checked out once."
+      tags: ["Payment Links"]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentLinkRequest"
+      responses:
+        "201":
+          description: "Payment link created"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentLink"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/payment-links/{id}:
+    get:
+      operationId: getPaymentLink
+      summary: "Get a payment link"
+      tags: ["Payment Links"]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: "Payment link"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentLink"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      operationId: cancelPaymentLink
+      summary: "Cancel an unused payment link"
+      tags: ["Payment Links"]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: "Payment link cancelled"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/public/payment-links/{token}:
+    get:
+      operationId: getPublicPaymentLink
+      summary: "Get public checkout details"
+      security: []
+      tags: ["Payment Links"]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: "Public checkout details without tenant or wallet identifiers"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicPaymentLink"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/public/payment-links/{token}/checkout:
+    post:
+      operationId: checkoutPaymentLink
+      summary: "Start a hosted payment"
+      security: []
+      tags: ["Payment Links"]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+      responses:
+        "200":
+          description: "Payment provider checkout URL"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepositResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/refunds:
+    get:
+      operationId: listRefunds
+      summary: "List refunds for a transaction"
+      tags: ["Refunds"]
+      parameters:
+        - name: original_transaction_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "200":
+          description: "Refund lifecycle records"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    post:
+      operationId: createRefund
+      summary: "Refund a confirmed transfer"
+      description: "Creates an idempotent reverse transfer. The combined amount of active and completed refunds cannot exceed the original net amount."
+      tags: ["Refunds"]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRefundRequest"
+      responses:
+        "202":
+          description: "Refund transfer initiated"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/refunds/{id}:
+    get:
+      operationId: getRefund
+      summary: "Get a refund lifecycle record"
+      tags: ["Refunds"]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: "Refund status derived from its transfer"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   # ── System & Documentation ────────────────────────────────────────────────
   /:
     get:
@@ -2610,6 +2851,8 @@ components:
                 - "CLAIMABLE_BALANCE_NOT_PENDING"
                 - "REQUEST_IN_PROGRESS"
                 - "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY"
+                - "PAYMENT_LINK_UNAVAILABLE"
+                - "REFUND_CONFLICT"
               description: "Machine-readable error code"
             message:
               type: string
@@ -2871,6 +3114,91 @@ components:
           format: email
         name:
           type: string
+
+    CreatePaymentLinkRequest:
+      type: object
+      required: [wallet_id, amount, currency, expires_at]
+      properties:
+        wallet_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          pattern: "^[0-9]+(\\.[0-9]{1,4})?$"
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 10
+        expires_at:
+          type: string
+          format: date-time
+          description: "Expiry must be within 90 days"
+
+    PaymentLinksResponse:
+      type: object
+      required: [payment_links]
+      properties:
+        payment_links:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentLink"
+
+    PaymentLink:
+      type: object
+      required: [id, token, wallet_id, amount, currency, status, checkout_url, expires_at]
+      properties:
+        id: { type: string, format: uuid }
+        token: { type: string, format: uuid }
+        wallet_id: { type: string, format: uuid }
+        amount: { type: string }
+        currency: { type: string }
+        status:
+          type: string
+          enum: [active, processing, paid, failed, cancelled]
+        checkout_url: { type: string }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+
+    PublicPaymentLink:
+      type: object
+      required: [amount, currency, status, expires_at]
+      properties:
+        amount: { type: string }
+        currency: { type: string }
+        status:
+          type: string
+          enum: [active, processing, paid, failed, cancelled, expired]
+        expires_at: { type: string, format: date-time }
+
+    Refund:
+      type: object
+      required: [id, original_transaction_id, amount, status]
+      properties:
+        id: { type: string, format: uuid }
+        original_transaction_id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        amount: { type: string }
+        reason: { type: string }
+        status:
+          type: string
+          enum: [requested, pending, succeeded, failed]
+
+    CreateRefundRequest:
+      type: object
+      required: [original_transaction_id, amount]
+      properties:
+        original_transaction_id: { type: string, format: uuid }
+        amount: { type: string, example: "20.0000000" }
+        reason: { type: string, maxLength: 500 }
+
+    RefundsResponse:
+      type: object
+      required: [refunds]
+      properties:
+        refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/Refund"
 
     DepositResponse:
       type: object

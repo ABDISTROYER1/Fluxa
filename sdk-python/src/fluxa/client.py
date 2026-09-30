@@ -11,6 +11,8 @@ from .resources import (
     FeesResource,
     FiatResource,
     KeysResource,
+    PaymentLinksResource,
+    RefundsResource,
     SchedulesResource,
     TransfersResource,
     WalletsResource,
@@ -40,6 +42,8 @@ class FluxaClient:
         self.fees = FeesResource(self._http)
         self.keys = KeysResource(self._http)
         self.fiat = FiatResource(self._http)
+        self.payment_links = PaymentLinksResource(self._http)
+        self.refunds = RefundsResource(self._http)
 
     async def health(self, options: RequestOptions | None = None) -> HealthResponse:
         return await self._http.request("GET", "/../health", options=options)

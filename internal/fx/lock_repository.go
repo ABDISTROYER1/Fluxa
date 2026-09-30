@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/Savitura/Fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/google/uuid"
 )
 
@@ -34,8 +34,8 @@ func (r *lockRepository) Create(ctx context.Context, lock *domain.RateLock) erro
 		INSERT INTO fx_rate_locks 
 		(id, tenant_id, from_asset, to_asset, locked_rate, amount, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, lock.ID, lock.TenantID, lock.FromAsset, lock.ToAsset, lock.LockedRate, 
-	   lock.Amount, lock.ExpiresAt, lock.CreatedAt)
+	`, lock.ID, lock.TenantID, lock.FromAsset, lock.ToAsset, lock.LockedRate,
+		lock.Amount, lock.ExpiresAt, lock.CreatedAt)
 
 	return err
 }

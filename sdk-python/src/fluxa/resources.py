@@ -11,17 +11,27 @@ from .models import (
     ConvertRequest,
     CreateBatchRequest,
     CreateKeyRequest,
+    CreatePaymentLinkRequest,
+    CreateRefundRequest,
+    CreatePaymentLinkRequest,
+    CreateRefundRequest,
     CreateScheduleRequest,
     CreateTransferRequest,
     CreateTrustlineRequest,
     DepositResponse,
     FeeScheduleResponse,
     FiatDepositRequest,
+    PaymentLink,
+    PaymentLinksResponse,
+    PaymentLink,
     FiatWithdrawalRequest,
     Quote,
     QuoteRequest,
     RateResponse,
     RegisterWebhookRequest,
+    Refund,
+    RefundsResponse,
+    Refund,
     ScheduleResponse,
     TransferResponse,
     TrustlineResponse,
@@ -160,3 +170,34 @@ class FiatResource:
 
     async def withdraw(self, wallet_id: str, request: FiatWithdrawalRequest, options: RequestOptions | None = None) -> WithdrawResponse:
         return await self._http.request("POST", f"/wallets/{quote(wallet_id, safe='')}/withdraw/fiat", body=request, options=options)
+
+
+class PaymentLinksResource:
+    def __init__(self, http: HTTPClient) -> None:
+        self._http = http
+
+    async def create(self, request: CreatePaymentLinkRequest, options: RequestOptions | None = None) -> PaymentLink:
+        return await self._http.request("POST", "/payment-links", body=request, options=options)
+
+    async def list(self, options: RequestOptions | None = None) -> PaymentLinksResponse:
+        return await self._http.request("GET", "/payment-links", options=options)
+
+    async def get(self, link_id: str, options: RequestOptions | None = None) -> PaymentLink:
+        return await self._http.request("GET", f"/payment-links/{quote(link_id, safe='')}", options=options)
+
+    async def cancel(self, link_id: str, options: RequestOptions | None = None) -> None:
+        await self._http.request("DELETE", f"/payment-links/{quote(link_id, safe='')}", options=options)
+
+
+class RefundsResource:
+    def __init__(self, http: HTTPClient) -> None:
+        self._http = http
+
+    async def create(self, request: CreateRefundRequest, options: RequestOptions | None = None) -> Refund:
+        return await self._http.request("POST", "/refunds", body=request, options=options)
+
+    async def get(self, refund_id: str, options: RequestOptions | None = None) -> Refund:
+        return await self._http.request("GET", f"/refunds/{quote(refund_id, safe='')}", options=options)
+
+    async def list(self, original_transaction_id: str, options: RequestOptions | None = None) -> RefundsResponse:
+        return await self._http.request("GET", "/refunds", query={"original_transaction_id": original_transaction_id}, options=options)

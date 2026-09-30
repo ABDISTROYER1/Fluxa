@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/Savitura/Fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -40,8 +40,8 @@ func (r *alertRepository) Create(ctx context.Context, alert *domain.RateAlert) e
 		INSERT INTO fx_rate_alerts 
 		(id, tenant_id, from_asset, to_asset, target_rate, direction, expires_at, active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, alert.ID, alert.TenantID, alert.FromAsset, alert.ToAsset, alert.TargetRate, 
-	   alert.Direction, alert.ExpiresAt, alert.Active, alert.CreatedAt, alert.UpdatedAt)
+	`, alert.ID, alert.TenantID, alert.FromAsset, alert.ToAsset, alert.TargetRate,
+		alert.Direction, alert.ExpiresAt, alert.Active, alert.CreatedAt, alert.UpdatedAt)
 
 	return err
 }

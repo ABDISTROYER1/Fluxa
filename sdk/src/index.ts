@@ -49,6 +49,12 @@ export type {
   DepositResponse,
   WithdrawRequest,
   WithdrawResponse,
+  CreatePaymentLinkRequest,
+  PaymentLinkResponse,
+  PaymentLinksResponse,
+  CreateRefundRequest,
+  RefundResponse,
+  RefundsResponse,
   // Webhook
   EventType,
   DeliveryStatus,
@@ -84,3 +90,5 @@ export { WebhooksResource } from './resources/webhooks';
 export { FeesResource } from './resources/fees';
 export { KeysResource } from './resources/keys';
 export { FiatResource } from './resources/fiat';
+export { PaymentLinksResource } from './resources/payment_links';
+export { RefundsResource } from './resources/refunds';

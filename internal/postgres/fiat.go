@@ -38,12 +38,12 @@ func (r *FiatRepo) CleanupWebhookEvents(ctx context.Context) error {
 
 func (r *FiatRepo) CreateDeposit(ctx context.Context, d *domain.FiatDeposit) error {
 	query := `
-		INSERT INTO fiat_deposits (id, wallet_id, provider, provider_reference, fiat_amount, fiat_currency, usdc_amount, status, instructions, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			INSERT INTO fiat_deposits (id, wallet_id, payment_link_id, tenant_id, mode, provider, provider_reference, fiat_amount, fiat_currency, usdc_amount, status, instructions, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 	instructionsJSON, _ := json.Marshal(d.Instructions)
 	_, err := r.db.Exec(ctx, query,
-		d.ID, d.WalletID, d.Provider, d.ProviderReference,
+		d.ID, d.WalletID, d.PaymentLinkID, d.TenantID, d.Mode, d.Provider, d.ProviderReference,
 		d.FiatAmount, d.FiatCurrency, d.USDCAmount, d.Status, instructionsJSON, d.CreatedAt,
 	)
 	if err != nil {
@@ -56,13 +56,29 @@ func (r *FiatRepo) UpdateDepositStatus(ctx context.Context, id, status string) e
 	// Allows the pending->processing->{completed,failed} lifecycle: a
 	// deposit may be moved as long as it hasn't already reached a terminal
 	// state. Terminal deposits are left untouched.
-	query := `UPDATE fiat_deposits SET status = $1 WHERE id = $2 AND status NOT IN ('completed', 'failed')`
-	tag, err := r.db.Exec(ctx, query, status, id)
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin deposit status update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE fiat_deposits SET status = $1 WHERE id = $2 AND status NOT IN ('completed', 'failed')`, status, id)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("deposit %s already processed or terminal", id)
+	}
+	linkStatus := "processing"
+	if status == domain.FiatStatusCompleted {
+		linkStatus = "paid"
+	} else if status == domain.FiatStatusFailed {
+		linkStatus = "failed"
+	}
+	if _, err := tx.Exec(ctx, `UPDATE payment_links SET status = $1, updated_at = NOW() WHERE id = (SELECT payment_link_id FROM fiat_deposits WHERE id = $2) AND status = 'processing'`, linkStatus, id); err != nil {
+		return fmt.Errorf("update payment link status: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit deposit status update: %w", err)
 	}
 	return nil
 }
@@ -93,13 +109,13 @@ func (r *FiatRepo) UpdateDepositInstructions(ctx context.Context, id string, ins
 
 func (r *FiatRepo) GetDepositByReference(ctx context.Context, ref string) (*domain.FiatDeposit, error) {
 	query := `
-		SELECT id, wallet_id, provider, provider_reference, fiat_amount, fiat_currency, usdc_amount, COALESCE(instructions, '{}'), status, created_at
+			SELECT id, wallet_id, payment_link_id, tenant_id, mode, provider, provider_reference, fiat_amount, fiat_currency, usdc_amount, COALESCE(instructions, '{}'), status, created_at
 		FROM fiat_deposits WHERE provider_reference = $1
 	`
 	var d domain.FiatDeposit
 	var instructionsJSON []byte
 	err := r.db.QueryRow(ctx, query, ref).Scan(
-		&d.ID, &d.WalletID, &d.Provider, &d.ProviderReference,
+		&d.ID, &d.WalletID, &d.PaymentLinkID, &d.TenantID, &d.Mode, &d.Provider, &d.ProviderReference,
 		&d.FiatAmount, &d.FiatCurrency, &d.USDCAmount, &instructionsJSON, &d.Status, &d.CreatedAt,
 	)
 	if err != nil {
@@ -114,13 +130,13 @@ func (r *FiatRepo) GetDepositByReference(ctx context.Context, ref string) (*doma
 
 func (r *FiatRepo) GetDepositByID(ctx context.Context, id string) (*domain.FiatDeposit, error) {
 	query := `
-		SELECT id, wallet_id, provider, provider_reference, fiat_amount, fiat_currency, usdc_amount, COALESCE(instructions, '{}'), status, created_at
+			SELECT id, wallet_id, payment_link_id, tenant_id, mode, provider, provider_reference, fiat_amount, fiat_currency, usdc_amount, COALESCE(instructions, '{}'), status, created_at
 		FROM fiat_deposits WHERE id = $1
 	`
 	var d domain.FiatDeposit
 	var instructionsJSON []byte
 	err := r.db.QueryRow(ctx, query, id).Scan(
-		&d.ID, &d.WalletID, &d.Provider, &d.ProviderReference,
+		&d.ID, &d.WalletID, &d.PaymentLinkID, &d.TenantID, &d.Mode, &d.Provider, &d.ProviderReference,
 		&d.FiatAmount, &d.FiatCurrency, &d.USDCAmount, &instructionsJSON, &d.Status, &d.CreatedAt,
 	)
 	if err != nil {

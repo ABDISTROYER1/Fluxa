@@ -20,8 +20,10 @@ import (
 	"github.com/fluxa/fluxa/internal/fx"
 	fluxahealth "github.com/fluxa/fluxa/internal/health"
 	"github.com/fluxa/fluxa/internal/org"
+	"github.com/fluxa/fluxa/internal/paymentlink"
 	"github.com/fluxa/fluxa/internal/postgres"
 	"github.com/fluxa/fluxa/internal/reconcile"
+	"github.com/fluxa/fluxa/internal/refund"
 	"github.com/fluxa/fluxa/internal/schedule"
 	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/status"
@@ -72,12 +74,18 @@ func New(
 
 	rateCfg := DefaultAuthRateLimitConfig()
 	var beneficiaryHandler *beneficiary.Handler
+	var paymentLinkHandler *paymentlink.Handler
+	var refundHandler *refund.Handler
 	for _, option := range options {
 		switch value := option.(type) {
 		case AuthRateLimitConfig:
 			rateCfg = value
 		case *beneficiary.Handler:
 			beneficiaryHandler = value
+		case *paymentlink.Handler:
+			paymentLinkHandler = value
+		case *refund.Handler:
+			refundHandler = value
 		}
 	}
 	authLimiter := NewAuthRateLimiter(rateCfg)
@@ -109,6 +117,9 @@ func New(
 
 	r.Route("/v1", func(r chi.Router) {
 		// Unauthenticated public endpoints
+		if paymentLinkHandler != nil {
+			r.Route("/public/payment-links", paymentLinkHandler.PublicRoutes())
+		}
 		r.Route("/auth", func(r chi.Router) {
 			r.With(authLimiter.Limit(ExtractEmail)).Post("/register", authHandler.Register)
 			r.With(authLimiter.Limit(ExtractEmail)).Post("/login", authHandler.Login)
@@ -180,6 +191,18 @@ func New(
 				r.Route("/wallets/{id}/withdraw", fiatHandler.WithdrawRoutes())
 				r.Route("/webhooks/fiat", fiatHandler.WebhookRoutes())
 				r.With(RequireScope(domain.ScopeFiatRead)).Route("/fiat", anchorFiatHandler.Routes())
+				if paymentLinkHandler != nil {
+					r.Route("/payment-links", paymentLinkHandler.Routes(
+						RequireScope(domain.ScopeFiatRead),
+						RequireScope(domain.ScopeFiatWrite),
+					))
+				}
+				if refundHandler != nil {
+					r.Route("/refunds", refundHandler.Routes(
+						RequireScope(domain.ScopeTransfersRead),
+						RequireScope(domain.ScopeTransfersWrite),
+					))
+				}
 				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transfers", transferHandler.Routes())
 				r.With(RequireScope(domain.ScopeTransfersWrite)).Route("/transfers/batch", batchHandler.Routes())
 				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transactions", transferHandler.TransactionRoutes())
