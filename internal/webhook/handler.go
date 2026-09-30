@@ -24,6 +24,7 @@ func NewHandler(svc Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/events", h.ListEventCatalog)
 	r.Get("/", h.ListEndpoints)
 	r.Post("/", h.RegisterEndpoint)
 	r.Delete("/{id}", h.DeleteEndpoint)

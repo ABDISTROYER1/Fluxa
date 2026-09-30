@@ -1563,6 +1563,46 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /v1/webhooks/events:
+    get:
+      operationId: listWebhookEvents
+      summary: Search supported webhook events
+      description: Returns event names, descriptions and example payloads. The optional q parameter searches names and descriptions.
+      tags:
+      - Webhooks
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Matching webhook event contracts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, description, example]
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        example:
+                          type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/webhooks:
     post:
       operationId: registerWebhook

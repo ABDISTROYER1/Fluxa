@@ -172,6 +172,7 @@ func New(
 
 			// Webhooks (Owner & Admin for management, viewer/dev read)
 			r.Route("/webhooks", func(r chi.Router) {
+				r.With(RequireScope(domain.ScopeWebhooksRead)).Get("/events", webhookHandler.ListEventCatalog)
 				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeWebhooksWrite)).Post("/", webhookHandler.RegisterEndpoint)
 				r.With(RequireScope(domain.ScopeWebhooksRead)).Get("/", webhookHandler.ListEndpoints)
 				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeWebhooksWrite)).Delete("/{id}", webhookHandler.DeleteEndpoint)
