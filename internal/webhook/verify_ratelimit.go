@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fluxa/fluxa/internal/api"
 	"golang.org/x/time/rate"
 )
 
@@ -64,7 +65,7 @@ func VerifyRateLimit() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !limiter.allow(r.RemoteAddr) {
-				http.Error(w, `{"error":{"code":"RATE_LIMITED","message":"rate limit exceeded, retry later"}}`, http.StatusTooManyRequests)
+				api.Error(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded, retry later")
 				return
 			}
 			next.ServeHTTP(w, r)

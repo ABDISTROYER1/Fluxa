@@ -50,6 +50,7 @@ export interface CreateTransferRequest {
   to_wallet_id: string;
   asset: string;
   amount: string;
+  idempotency_key?: string;
 }
 
 export interface Conversion {
@@ -88,6 +89,7 @@ export interface FxQuoteResponse {
 export interface FxConvertRequest {
   wallet_id: string;
   quote_id: string;
+  idempotency_key?: string;
 }
 
 export interface FxRatesResponse {
@@ -163,6 +165,7 @@ export interface FiatDepositRequest {
   currency: string;
   email: string;
   name: string;
+  idempotency_key?: string;
 }
 
 export interface FiatDepositResponse {
@@ -175,6 +178,7 @@ export interface FiatWithdrawRequest {
   currency: string;
   account_bank: string;
   account_number: string;
+  idempotency_key?: string;
 }
 
 export interface FiatWithdrawResponse {
@@ -211,6 +215,7 @@ export interface BatchTransferRequest {
     amount: string;
     reference?: string;
   }[];
+  idempotency_key?: string;
 }
 
 export interface BatchTransferResponse {
@@ -246,6 +251,7 @@ export interface ScheduleTransferRequest {
   end_date?: string;
   timezone?: string;
   missed_run_policy?: 'skip' | 'run_once';
+  idempotency_key?: string;
 }
 
 export interface ScheduleTransferResponse {

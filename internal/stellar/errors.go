@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/stellar/go/clients/horizonclient"
 )
@@ -46,6 +47,32 @@ func HTTPStatus(err error) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func RetryAfter(err error) (time.Duration, bool) {
+	var horizonErr *horizonclient.Error
+	if !errors.As(err, &horizonErr) || horizonErr == nil || horizonErr.Response == nil {
+		return 0, false
+	}
+	value := strings.TrimSpace(horizonErr.Response.Header.Get("Retry-After"))
+	if value == "" {
+		return 0, false
+	}
+	if delay, err := time.ParseDuration(value + "s"); err == nil {
+		if delay < 0 {
+			return 0, false
+		}
+		return delay, true
+	}
+	retryAt, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	delay := time.Until(retryAt)
+	if delay < 0 {
+		delay = 0
+	}
+	return delay, true
 }
 
 func IsRetryableTransport(err error) bool {

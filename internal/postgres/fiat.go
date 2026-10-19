@@ -213,3 +213,20 @@ func (r *FiatRepo) GetWithdrawalByID(ctx context.Context, id string) (*domain.Fi
 	}
 	return &w, nil
 }
+
+func (r *FiatRepo) CountDailyWithdrawalsByTenant(ctx context.Context, tenantID string, date time.Time) (int, error) {
+	startDate := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	endDate := startDate.AddDate(0, 0, 1)
+
+	var count int
+	err := r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM fiat_withdrawals fw
+		 JOIN wallets w ON fw.wallet_id = w.id
+		 WHERE w.tenant_id = $1 AND fw.created_at >= $2 AND fw.created_at < $3`,
+		tenantID, startDate, endDate,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count daily withdrawals: %w", err)
+	}
+	return count, nil
+}

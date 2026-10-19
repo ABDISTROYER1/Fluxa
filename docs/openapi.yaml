@@ -11,6 +11,60 @@ info:
 
     All endpoints under `/v1` require a Bearer API key in the `Authorization` header.
 
+
+    ## API key scopes
+
+
+    An API key can be limited to specific resources and actions. Scopes have the
+
+    form `<resource>:<action>`, where action is `read` or `write`:
+
+
+    | Resource | Scopes | Covers |
+
+    |---|---|---|
+
+    | wallets | `wallets:read`, `wallets:write` | `/v1/wallets` (create, trustlines, contract wallet changes) |
+
+    | transfers | `transfers:read`, `transfers:write` | `/v1/transfers`, `/v1/transactions`, `/v1/schedules`, `/v1/refunds` |
+
+    | batches | `batches:read`, `batches:write` | `/v1/transfers/batch` |
+
+    | webhooks | `webhooks:read`, `webhooks:write` | `/v1/webhooks` |
+
+    | reports | `reports:read`, `reports:write` | `/v1/usage` (`reports:write` is reserved for report generation) |
+
+
+    Other scopes: `keys:*`, `audit:read`, `fiat:*`, `fx:*`, `fees:read`,
+
+    `beneficiaries:*`, `compliance:*`. `<resource>:*` grants both actions on one
+
+    resource and `*` grants everything.
+
+
+    On scoped resource groups, `GET`/`HEAD` need the `read` scope and every other
+
+    method needs the `write` scope. A key without the required scope gets `403`
+
+    with the stable error code `INSUFFICIENT_SCOPE`, and the denial is written to
+
+    the audit log as `api_key.scope_denied` (key id, required scope, method and
+
+    path only; never the key itself).
+
+
+    **Compatibility:** keys created without scopes (including every key that
+
+    existed before scopes were introduced) have an empty scope list and keep full
+
+    access. `transfers:read`/`transfers:write` continue to grant
+
+    `batches:read`/`batches:write`, so keys issued before the batches scope keep
+
+    working. A scoped key that holds `keys:write` can only create keys with scopes
+
+    it holds itself. Dashboard (JWT) sessions are governed by roles, not scopes.
+
     '
   contact:
     name: Fluxa Engineering
@@ -51,6 +105,8 @@ tags:
   description: Claimable balance lookup and claiming
 - name: Audit
   description: Append-only tenant audit events and export
+- name: Data
+  description: Tenant compliance exports
 - name: Idempotency
   description: Inspection and recovery of idempotent operations
 security:
@@ -282,7 +338,11 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateKeyRequest'
             example:
-              label: CI deploy key
+              label: Payouts integration
+              scopes:
+              - wallets:read
+              - transfers:read
+              - batches:write
       responses:
         '201':
           description: API key created
@@ -294,10 +354,26 @@ paths:
                 id: k_9a8b7c6d
                 key: sk_live_a1b2c3d4e5f6g7h8
                 prefix: sk_live_a1b2
-                label: CI deploy key
+                label: Payouts integration
+                scopes:
+                - wallets:read
+                - transfers:read
+                - batches:write
                 created_at: '2026-01-15T10:00:00Z'
+        '400':
+          description: One or more scopes are not recognised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: BAD_REQUEST
+                  message: 'invalid scope: wallets:delete'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InsufficientScope'
         '500':
           $ref: '#/components/responses/InternalServerError'
     get:
@@ -319,6 +395,9 @@ paths:
               - id: k_9a8b7c6d
                 prefix: sk_live_a1b2
                 label: CI deploy key
+                scopes:
+                - wallets:read
+                - transfers:read
                 last_used_at: '2026-01-15T12:00:00Z'
                 revoked_at: null
                 created_at: '2026-01-15T10:00:00Z'
@@ -1123,6 +1202,8 @@ paths:
                 error:
                   code: QUOTE_EXPIRED
                   message: quote expired
+                  status: 422
+                  request_id: req-example
         '500':
           $ref: '#/components/responses/InternalServerError'
   /v1/fx/rates:
@@ -1557,6 +1638,66 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The balance has already been claimed, revoked or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /v1/webhooks/secret:
+    get:
+      operationId: listWebhookSigningSecrets
+      summary: Inspect webhook signing secret versions
+      description: Returns version metadata only. Secret material is never returned by this endpoint.
+      tags:
+      - Webhooks
+      responses:
+        '200':
+          description: Signing-secret metadata for the authenticated tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSigningSecretsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /v1/webhooks/secret/rotate:
+    post:
+      operationId: rotateWebhookSigningSecret
+      summary: Rotate the tenant webhook signing secret
+      description: Generates a new secret and returns its plaintext once. A bounded overlap lets in-flight deliveries signed with the prior version remain verifiable.
+      tags:
+      - Webhooks
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RotateWebhookSigningSecretRequest'
+      responses:
+        '200':
+          description: New signing secret, disclosed once for this idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotateWebhookSigningSecretResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Another request with the same idempotency key is still processing.
           content:
             application/json:
               schema:
@@ -2088,19 +2229,20 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
-  /v1/transfer-approvals:
+  /v1/admin/reconciliation/discrepancies:
     get:
-      operationId: listTransferApprovals
-      summary: List tenant transfer approvals
-      tags: [Transfers]
+      operationId: listReconciliationDiscrepancies
+      summary: List tenant reconciliation discrepancies
+      tags: [Admin]
       security:
-      - BearerAuth: []
+      - AdminAuth: []
       parameters:
       - name: status
         in: query
-        schema:
-          type: string
-          enum: [pending, approved, rejected, expired, all]
+        schema: {type: string, enum: [open, acknowledged, resolved]}
+      - name: category
+        in: query
+        schema: {type: string}
       - name: limit
         in: query
         schema: {type: integer, minimum: 1, maximum: 100}
@@ -2108,98 +2250,49 @@ paths:
         in: query
         schema: {type: integer, minimum: 0}
       responses:
-        '200': {description: Tenant transfer approval requests}
+        '200': {description: Paginated tenant discrepancies with transaction and audit details}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
-  /v1/transfer-approvals/{id}/approve:
-    post:
-      operationId: approveTransfer
-      summary: Record an approval vote
-      tags: [Transfers]
-      security:
-      - BearerAuth: []
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema: {type: string, format: uuid}
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties: {note: {type: string}}
-      responses:
-        '200': {description: Approval recorded}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '409': {$ref: '#/components/responses/Conflict'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '500': {$ref: '#/components/responses/InternalServerError'}
-  /v1/transfer-approvals/{id}/reject:
-    post:
-      operationId: rejectTransfer
-      summary: Reject a transfer
-      tags: [Transfers]
-      security:
-      - BearerAuth: []
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema: {type: string, format: uuid}
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties: {note: {type: string}}
-      responses:
-        '200': {description: Rejection recorded}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '409': {$ref: '#/components/responses/Conflict'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '500': {$ref: '#/components/responses/InternalServerError'}
-  /v1/approval-policies:
+  /v1/admin/reconciliation/discrepancies/summary:
     get:
-      operationId: getTransferApprovalPolicy
-      summary: Get a tenant asset approval policy
-      tags: [Transfers]
+      operationId: getReconciliationDiscrepancyMetrics
+      summary: Get unresolved reconciliation discrepancy metrics
+      tags: [Admin]
       security:
-      - BearerAuth: []
-      parameters:
-      - name: asset
-        in: query
-        required: true
-        schema: {type: string}
+      - AdminAuth: []
       responses:
-        '200': {description: Approval policy}
-        '404': {$ref: '#/components/responses/NotFound'}
+        '200': {description: Counts by state and category, unresolved count, oldest unresolved timestamp}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
-    put:
-      operationId: putTransferApprovalPolicy
-      summary: Set a tenant asset approval policy
-      tags: [Transfers]
+  /v1/admin/reconciliation/discrepancies/{id}:
+    patch:
+      operationId: updateReconciliationDiscrepancy
+      summary: Acknowledge, assign, annotate, or resolve a discrepancy
+      tags: [Admin]
       security:
-      - BearerAuth: []
+      - AdminAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [asset, threshold, required_approvals, expires_after_seconds]
+              required: [action]
               properties:
-                asset: {type: string}
-                threshold: {type: string}
-                required_approvals: {type: integer, minimum: 1, maximum: 10}
-                expires_after_seconds: {type: integer, minimum: 60, maximum: 2592000}
-                enabled: {type: boolean}
+                action: {type: string, enum: [acknowledged, assigned, annotated, resolved]}
+                note: {type: string}
+                assigned_to: {type: string, format: uuid}
       responses:
-        '200': {description: Approval policy updated}
+        '200': {description: Updated discrepancy with audit history}
         '400': {$ref: '#/components/responses/BadRequest'}
-        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '500': {$ref: '#/components/responses/InternalServerError'}
   /v1/admin/reconciliation/summary:
@@ -2496,6 +2589,8 @@ paths:
                 error:
                   code: REVIEW_ALREADY_DECIDED
                   message: compliance review has already been decided
+                  status: 409
+                  request_id: req-example
         '500':
           $ref: '#/components/responses/InternalServerError'
   /v1/admin/compliance/reviews/{id}/reject:
@@ -2550,6 +2645,8 @@ paths:
                 error:
                   code: REVIEW_ALREADY_DECIDED
                   message: compliance review has already been decided
+                  status: 409
+                  request_id: req-example
         '500':
           $ref: '#/components/responses/InternalServerError'
   /v1/admin/compliance/sanctions-status:
@@ -2673,6 +2770,8 @@ components:
             error:
               code: BAD_REQUEST
               message: invalid request body
+              status: 400
+              request_id: req-example
     Unauthorized:
       description: Unauthorized — missing or invalid API key
       content:
@@ -2683,6 +2782,8 @@ components:
             error:
               code: UNAUTHORIZED
               message: missing or invalid authorization header
+              status: 401
+              request_id: req-example
     NotFound:
       description: Resource not found
       content:
@@ -2693,6 +2794,8 @@ components:
             error:
               code: NOT_FOUND
               message: resource not found
+              status: 404
+              request_id: req-example
     Forbidden:
       description: Forbidden — admin access required
       content:
@@ -2703,6 +2806,8 @@ components:
             error:
               code: FORBIDDEN
               message: admin access required
+              status: 403
+              request_id: req-example
     Conflict:
       description: Conflict — a request with this Idempotency-Key is still in flight
       content:
@@ -2713,6 +2818,8 @@ components:
             error:
               code: REQUEST_IN_PROGRESS
               message: a request with this Idempotency-Key is still in progress
+              status: 409
+              request_id: req-example
     UnprocessableEntity:
       description: Unprocessable — the Idempotency-Key was reused with a different body
       content:
@@ -2723,6 +2830,8 @@ components:
             error:
               code: IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY
               message: this Idempotency-Key was already used with a different request body
+              status: 409
+              request_id: req-example
     InternalServerError:
       description: Internal server error
       content:
@@ -2733,6 +2842,8 @@ components:
             error:
               code: INTERNAL_ERROR
               message: an unexpected error occurred
+              status: 500
+              request_id: req-example
   schemas:
     Beneficiary:
       type: object
@@ -2864,25 +2975,72 @@ components:
           required:
           - code
           - message
+          - status
+          - request_id
           properties:
             code:
               type: string
               enum:
               - BAD_REQUEST
+              - ANCHOR_DEPOSIT_FAILED
+              - ANCHOR_REGISTRATION_FAILED
+              - ANCHOR_TRANSACTION_NOT_FOUND
+              - ANCHOR_WITHDRAWAL_FAILED
+              - API_KEY_NOT_FOUND
+              - API_KEY_REVOKED
+              - API_KEY_EXPIRED
+              - BENEFICIARY_EXISTS
+              - BENEFICIARY_NOT_ACTIVE
+              - BENEFICIARY_NOT_ALLOWED
+              - CONFIG_NOT_FOUND
+              - CONFLICT
+              - COOLING_OFF
+              - CROSS_MODE_KEY_OPERATION
+              - ENVIRONMENT_REQUIRED
+              - IDEMPOTENCY_KEY_REQUIRED
+              - IDEMPOTENCY_RECORD_PERSISTENCE_FAILED
+              - IDEMPOTENCY_RESPONSE_TOO_LARGE
+              - INSUFFICIENT_SCOPE
+              - INVALID_ENVIRONMENT_MODE
+              - INVALID_PREDICATE
+              - INVALID_REQUEST
+              - LAST_ORG_OWNER
+              - METHOD_NOT_ALLOWED
+              - MISSING_TRUSTLINE
+              - NOT_IMPLEMENTED
+              - PAYMENT_LINK_UNAVAILABLE
+              - PREDICATE_NOT_SATISFIABLE
+              - RATE_LIMITED
+              - REFUND_CONFLICT
+              - TEST_MODE_REQUIRED
+              - TRANSFER_ID_INVALID
+              - TRANSFER_ID_REQUIRED
+              - TRANSFER_NOT_CANCELLABLE
+              - UNSUPPORTED_FIAT_CURRENCY
+              - WALLET_ID_REQUIRED
               - NOT_FOUND
               - UNAUTHORIZED
               - FORBIDDEN
+              - INSUFFICIENT_SCOPE
               - INTERNAL_ERROR
+              - INSUFFICIENT_SWEEPABLE_BALANCE
               - QUOTE_EXPIRED
               - QUOTE_ALREADY_USED
               - REVIEW_ALREADY_DECIDED
               - CLAIMABLE_BALANCE_NOT_PENDING
               - REQUEST_IN_PROGRESS
-              - IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY
               description: Machine-readable error code
             message:
               type: string
               description: Human-readable error message
+            status:
+              type: integer
+              description: HTTP status code; matches the response status
+              minimum: 400
+              maximum: 599
+            request_id:
+              type: string
+              description: Effective X-Request-ID response header value
     HealthResponse:
       type: object
       properties:
@@ -2976,8 +3134,52 @@ components:
         scopes:
           type: array
           items:
-            type: string
-          description: Granular permission scopes for the API key (e.g. transfers:read, transfers:write, wallets:read, wallets:write)
+            $ref: '#/components/schemas/APIKeyScope'
+          description: 'Scopes to grant. Omit or send an empty list for a full-access key
+
+            (not allowed when the caller is itself a scoped key). See "API key scopes" above.
+
+            '
+    APIKeyScope:
+      type: string
+      description: A permission an API key can hold, as `<resource>:<action>`, `<resource>:*`, or `*`.
+      enum:
+      - '*'
+      - admin
+      - wallets:read
+      - wallets:write
+      - wallets:*
+      - transfers:read
+      - transfers:write
+      - transfers:*
+      - batches:read
+      - batches:write
+      - batches:*
+      - webhooks:read
+      - webhooks:write
+      - webhooks:*
+      - reports:read
+      - reports:write
+      - reports:*
+      - keys:read
+      - keys:write
+      - keys:*
+      - audit:read
+      - audit:*
+      - fiat:read
+      - fiat:write
+      - fiat:*
+      - fx:read
+      - fx:write
+      - fx:*
+      - fees:read
+      - fees:*
+      - beneficiaries:read
+      - beneficiaries:write
+      - beneficiaries:*
+      - compliance:read
+      - compliance:write
+      - compliance:*
     APIKeyCreated:
       type: object
       properties:
@@ -3730,6 +3932,57 @@ components:
         created_at:
           type: string
           format: date-time
+    WebhookSigningSecretMetadata:
+      type: object
+      required:
+      - key_id
+      - created_at
+      - activated_at
+      - status
+      properties:
+        key_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        activated_at:
+          type: string
+          format: date-time
+        retired_at:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [active, overlapping, retired]
+    WebhookSigningSecretsResponse:
+      type: object
+      required: [secrets]
+      properties:
+        secrets:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookSigningSecretMetadata'
+    RotateWebhookSigningSecretRequest:
+      type: object
+      properties:
+        overlap_window_seconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          default: 300
+    RotateWebhookSigningSecretResponse:
+      allOf:
+      - $ref: '#/components/schemas/WebhookSigningSecretMetadata'
+      - type: object
+        required: [secret]
+        properties:
+          secret:
+            type: string
+            description: Plaintext signing secret; disclosed only by this rotation response.
+          overlap_window_seconds:
+            type: integer
     RegisterWebhookRequest:
       type: object
       required:

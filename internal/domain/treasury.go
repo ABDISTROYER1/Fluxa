@@ -46,6 +46,7 @@ type IdempotencyRecord struct {
 	Status          string
 	LeaseToken      string
 	LeaseExpiresAt  time.Time
+	CreatedAt       time.Time
 	ExpiresAt       time.Time
 	ResponseStatus  int
 	ResponseHeaders http.Header

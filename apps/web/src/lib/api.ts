@@ -74,6 +74,12 @@ export interface WebhookDelivery {
   created_at: string;
 }
 
+export interface WebhookEventCatalogEntry {
+  name: string;
+  description: string;
+  example: Record<string, unknown>;
+}
+
 export interface HealthResponse {
   status: string;
   services?: Record<string, string>;
@@ -157,6 +163,13 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listWebhookEvents: (query = '') => {
+    const search = new URLSearchParams();
+    if (query.trim()) search.set('q', query.trim());
+    const encoded = search.toString();
+    const suffix = encoded ? `?${encoded}` : '';
+    return request<{ events: WebhookEventCatalogEntry[] }>(`/v1/webhooks/events${suffix}`);
+  },
   getHealth: () => request<HealthResponse>('/health'),
   getFeeSchedule: () => request<FeeSchedule>('/v1/fees'),
   listWallets: () => request<{ wallets: Wallet[] }>('/v1/wallets'),

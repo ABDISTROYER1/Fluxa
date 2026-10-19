@@ -9,7 +9,11 @@ export {
   ValidationError,
   RateLimitError,
   ConflictError,
+  RepeatedCursorError,
 } from './errors';
+
+export { createPage, paginate, paginatePages, paginateAll } from './pagination';
+export type { Page, PageFetcher, PaginateOptions } from './pagination';
 
 export type {
   // Wallet
@@ -63,6 +67,11 @@ export type {
   ListWebhooksResponse,
   WebhookDeliveryResponse,
   ListDeliveriesResponse,
+  WebhookSigningSecretStatus,
+  WebhookSigningSecretMetadata,
+  ListWebhookSigningSecretsResponse,
+  RotateWebhookSigningSecretRequest,
+  RotateWebhookSigningSecretResponse,
   // Schedule
   ScheduleFrequency,
   ScheduleStatus,
@@ -74,6 +83,8 @@ export type {
   ScheduleRunResponse,
   ListScheduleRunsResponse,
   // API Key
+  APIKeyScope,
+  APIKeyScopeResource,
   CreateKeyRequest,
   CreateKeyResponse,
   APIKeyResponse,

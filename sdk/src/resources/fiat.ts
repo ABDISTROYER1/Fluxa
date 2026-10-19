@@ -1,4 +1,4 @@
-import { HttpClient, RequestOptions } from '../http';
+import { HttpClient, RequestOptions, makeIdempotencyKey } from '../http';
 import { DepositRequest, DepositResponse, WithdrawRequest, WithdrawResponse } from '../types';
 
 export class FiatResource {
@@ -14,7 +14,7 @@ export class FiatResource {
       path: `/wallets/${encodeURIComponent(walletId)}/deposit/fiat`,
       body: request,
       signal: options?.signal,
-      idempotencyKey: options?.idempotencyKey,
+      idempotencyKey: options?.idempotencyKey ?? makeIdempotencyKey(),
     });
     return res.data;
   }
@@ -29,7 +29,7 @@ export class FiatResource {
       path: `/wallets/${encodeURIComponent(walletId)}/withdraw/fiat`,
       body: request,
       signal: options?.signal,
-      idempotencyKey: options?.idempotencyKey,
+      idempotencyKey: options?.idempotencyKey ?? makeIdempotencyKey(),
     });
     return res.data;
   }

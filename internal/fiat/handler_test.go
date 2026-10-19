@@ -33,6 +33,10 @@ func (s *stubService) InitiateWithdrawal(context.Context, WithdrawRequest) (*Wit
 
 func (s *stubService) HandleWebhook(context.Context, []byte, string) error { return nil }
 
+func (s *stubService) HandleWebhookWithHeaders(context.Context, []byte, http.Header) error {
+	return nil
+}
+
 func newFiatRouter(svc Service) http.Handler {
 	h := NewHandler(svc)
 	r := chi.NewRouter()

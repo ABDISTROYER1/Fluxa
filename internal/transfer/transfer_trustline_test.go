@@ -3,6 +3,7 @@ package transfer_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/fluxa/fluxa/internal/fees"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/shopspring/decimal"
+	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/protocols/horizon/base"
 	"github.com/stellar/go/protocols/horizon/operations"
@@ -47,9 +49,12 @@ func (m *mockWalletRepo) UpdateSyncCursor(ctx context.Context, walletID, cursor 
 	return nil
 }
 
-type mockTxRepo struct{}
+type mockTxRepo struct{ created int }
 
-func (m *mockTxRepo) Create(ctx context.Context, tx *domain.Transaction) error { return nil }
+func (m *mockTxRepo) Create(ctx context.Context, tx *domain.Transaction) error {
+	m.created++
+	return nil
+}
 func (m *mockTxRepo) CreateWithMonthlyLimit(ctx context.Context, tx *domain.Transaction, tenantID string, year int, month time.Month, limit int) error {
 	return nil
 }
@@ -83,9 +88,13 @@ func (m *mockTxRepo) ListByBatch(ctx context.Context, batchID string) ([]*domain
 
 type mockStellarClient struct {
 	balances []horizon.Balance
+	loadErr  error
 }
 
 func (m *mockStellarClient) LoadAccount(accountID string) (horizon.Account, error) {
+	if m.loadErr != nil {
+		return horizon.Account{}, m.loadErr
+	}
 	return horizon.Account{Balances: m.balances}, nil
 }
 func (m *mockStellarClient) SubmitTransaction(tx *txnbuild.Transaction) (horizon.Transaction, error) {
@@ -146,7 +155,7 @@ func TestTransferMissingTrustlineReturns422Error(t *testing.T) {
 		},
 	}
 
-	svc := transfer.NewService(txRepo, wRepo, feeSvc, nil).WithStellarClient(stClient)
+	svc := transfer.ConfigureStellarClient(transfer.NewService(txRepo, wRepo, feeSvc, nil), stClient)
 
 	_, err := svc.InitiateTransfer(context.Background(), "w-from", "w-to", "USDC", decimal.NewFromInt(10))
 	if err == nil {
@@ -179,7 +188,7 @@ func TestTransferXLMRequiresNoTrustline(t *testing.T) {
 		},
 	}
 
-	svc := transfer.NewService(txRepo, wRepo, feeSvc, nil).WithStellarClient(stClient)
+	svc := transfer.ConfigureStellarClient(transfer.NewService(txRepo, wRepo, feeSvc, nil), stClient)
 
 	tx, err := svc.InitiateTransfer(context.Background(), "w-from", "w-to", "XLM", decimal.NewFromInt(10))
 	if err != nil {
@@ -187,5 +196,25 @@ func TestTransferXLMRequiresNoTrustline(t *testing.T) {
 	}
 	if tx == nil || tx.Asset != "XLM" {
 		t.Fatalf("expected valid XLM transaction, got %v", tx)
+	}
+}
+
+func TestTransferRejectsNonexistentDestinationBeforePersisting(t *testing.T) {
+	txRepo := &mockTxRepo{}
+	walletRepo := &mockWalletRepo{wallets: map[string]*domain.Wallet{
+		"from": {ID: "from", PublicKey: "GBSRC123"},
+		"to":   {ID: "to", PublicKey: "GBDST456"},
+	}}
+	client := &mockStellarClient{loadErr: &horizonclient.Error{
+		Response: &http.Response{StatusCode: http.StatusNotFound},
+	}}
+	svc := transfer.ConfigureStellarClient(transfer.NewService(txRepo, walletRepo, fees.NewService(&mockFeeRepo{}), nil), client)
+
+	_, err := svc.InitiateTransfer(context.Background(), "from", "to", "XLM", decimal.NewFromInt(1))
+	if !errors.Is(err, domain.ErrBeneficiaryAccountNotFound) {
+		t.Fatalf("error = %v, want nonexistent destination error", err)
+	}
+	if txRepo.created != 0 {
+		t.Fatalf("persisted %d transfer(s) for nonexistent destination", txRepo.created)
 	}
 }

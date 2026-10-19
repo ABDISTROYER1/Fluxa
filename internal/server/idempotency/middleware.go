@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/fluxa/fluxa/internal/api"
+	fluxacrypto "github.com/fluxa/fluxa/internal/crypto"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/google/uuid"
@@ -63,6 +64,7 @@ type Options struct {
 	AllowLeaseRecovery bool
 	// Now is injectable for tests.
 	Now func() time.Time
+	ResponseEncryptionKey []byte
 }
 
 func (o Options) withDefaults() Options {
@@ -149,7 +151,15 @@ func MiddlewareWithOptions(repo Repository, opts Options) func(http.Handler) htt
 
 			switch acquisition.State {
 			case Replay:
-				writeResponse(w, acquisition.Record.ResponseStatus, acquisition.Record.ResponseHeaders, acquisition.Record.ResponseBody, true)
+				responseBody := acquisition.Record.ResponseBody
+				if len(opts.ResponseEncryptionKey) > 0 {
+					responseBody, err = fluxacrypto.Decrypt(responseBody, opts.ResponseEncryptionKey)
+					if err != nil {
+						api.Error(w, http.StatusInternalServerError, "IDEMPOTENCY_RESPONSE_UNAVAILABLE", "the stored operation response could not be recovered")
+						return
+					}
+				}
+				writeResponse(w, acquisition.Record.ResponseStatus, acquisition.Record.ResponseHeaders, responseBody, true)
 				return
 			case BodyMismatch:
 				// Issue #151: the same key with a different body is a conflict.
@@ -179,8 +189,16 @@ func MiddlewareWithOptions(repo Repository, opts Options) func(http.Handler) htt
 
 			response := recorder.response()
 			response.Headers = replayableHeader(response.Headers)
+			recordedResponse := response
+			if len(opts.ResponseEncryptionKey) > 0 {
+				recordedResponse.Body, err = fluxacrypto.Encrypt(response.Body, opts.ResponseEncryptionKey)
+				if err != nil {
+					api.Error(w, http.StatusInternalServerError, "IDEMPOTENCY_RESPONSE_ENCRYPTION_FAILED", "the operation response could not be stored securely")
+					return
+				}
+			}
 			completeCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), opts.CompletionTimeout)
-			err = repo.Complete(completeCtx, acquisition.Record.ID, acquisition.Record.LeaseToken, response, opts.Now().UTC().Add(opts.TTL))
+			err = repo.Complete(completeCtx, acquisition.Record.ID, acquisition.Record.LeaseToken, recordedResponse, opts.Now().UTC().Add(opts.TTL))
 			cancel()
 			if err != nil {
 				zerolog.Ctx(r.Context()).Error().Err(err).Str("idempotency_key", key).Msg("failed to persist idempotent response")

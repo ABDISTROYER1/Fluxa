@@ -1,35 +1,64 @@
 package webhook
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/tenant"
+	"github.com/fluxa/fluxa/internal/tracing"
 	"github.com/go-chi/chi/v5"
 )
 
 type Handler struct {
-	svc Service
+	svc   Service
+	audit interface {
+		Record(context.Context, *domain.AuditEvent) error
+	}
+	idempotencyMW func(http.Handler) http.Handler
 }
 
 func NewHandler(svc Service) *Handler {
 	return &Handler{svc: svc}
 }
 
+func (h *Handler) WithAuditLogger(audit interface {
+	Record(context.Context, *domain.AuditEvent) error
+}) *Handler {
+	h.audit = audit
+	return h
+}
+
+func (h *Handler) WithIdempotency(mw func(http.Handler) http.Handler) *Handler {
+	h.idempotencyMW = mw
+	return h
+}
+
+func (h *Handler) IdempotencyMiddleware() func(http.Handler) http.Handler {
+	if h.idempotencyMW != nil {
+		return h.idempotencyMW
+	}
+	return func(next http.Handler) http.Handler { return next }
+}
+
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/events", h.ListEventCatalog)
 	r.Get("/", h.ListEndpoints)
 	r.Post("/", h.RegisterEndpoint)
 	r.Delete("/{id}", h.DeleteEndpoint)
 	r.Get("/{id}/deliveries", h.ListDeliveries)
 	r.Get("/secret", h.GetSigningSecret)
-	r.Post("/secret/rotate", h.RotateSigningSecret)
+	r.With(h.IdempotencyMiddleware()).Post("/secret/rotate", h.RotateSigningSecret)
 	r.With(VerifyRateLimit()).Post("/verify", h.VerifySignature)
 
 	r.Post("/subscriptions", h.CreateSubscription)
@@ -63,13 +92,8 @@ func (h *Handler) TriggerTestEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowed := map[string]bool{
-		"transfer.settled": true,
-		"transfer.failed":  true,
-		"wallet.funded":    true,
-	}
-	if !allowed[req.Event] {
-		api.BadRequest(w, "event must be transfer.settled, transfer.failed, or wallet.funded")
+	if !domain.IsSupportedEventType(req.Event) {
+		api.BadRequest(w, "unsupported event type")
 		return
 	}
 
@@ -88,7 +112,7 @@ func (h *Handler) TriggerTestEvent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListEndpoints(w http.ResponseWriter, r *http.Request) {
 	eps, err := h.svc.ListEndpoints(r.Context())
 	if err != nil {
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	api.JSON(w, http.StatusOK, map[string]interface{}{"endpoints": eps})
@@ -104,22 +128,35 @@ func (h *Handler) RegisterEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ep, _, err := h.svc.RegisterEndpoint(r.Context(), req.URL, req.Events)
+	ep, secret, err := h.svc.RegisterEndpoint(r.Context(), req.URL, req.Events)
 	if err != nil {
-		if errors.Is(err, ErrUnsafeWebhookURL) {
+		if errors.Is(err, ErrUnsafeWebhookURL) || errors.Is(err, ErrUnsupportedEventType) {
 			api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 			return
 		}
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
-	api.JSON(w, http.StatusCreated, ep)
+	api.JSON(w, http.StatusCreated, map[string]interface{}{
+		"id":                ep.ID,
+		"tenant_id":         ep.TenantID,
+		"url":               ep.URL,
+		"secret":            secret,
+		"events":            ep.Events,
+		"active":            ep.Active,
+		"success_count":     ep.SuccessCount,
+		"failure_count":     ep.FailureCount,
+		"last_delivered_at": ep.LastDeliveredAt,
+		"notified_failing":  ep.NotifiedFailing,
+		"created_at":        ep.CreatedAt,
+		"updated_at":        ep.UpdatedAt,
+	})
 }
 
 func (h *Handler) DeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.DeleteEndpoint(r.Context(), id); err != nil {
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -136,18 +173,94 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 	}
 	deliveries, err := h.svc.ListDeliveries(r.Context(), id, limit)
 	if err != nil {
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	api.JSON(w, http.StatusOK, map[string]interface{}{"deliveries": deliveries})
 }
 
 func (h *Handler) GetSigningSecret(w http.ResponseWriter, r *http.Request) {
-	api.Error(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "signing secret management not yet available")
+	if tenant.IDFromContext(r.Context()) == "" {
+		api.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "tenant required")
+		return
+	}
+	cs, ok := h.svc.(ConfigService)
+	if !ok {
+		api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook secret service unavailable")
+		return
+	}
+	secrets, err := cs.ListSigningSecrets(r.Context())
+	if err != nil {
+		writeSecretServiceError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, map[string]interface{}{"secrets": secrets})
 }
 
 func (h *Handler) RotateSigningSecret(w http.ResponseWriter, r *http.Request) {
-	api.Error(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "signing secret rotation not yet available")
+	if tenant.IDFromContext(r.Context()) == "" {
+		api.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "tenant required")
+		return
+	}
+	cs, ok := h.svc.(ConfigService)
+	if !ok {
+		api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook secret service unavailable")
+		return
+	}
+	var req struct {
+		OverlapWindowSeconds *int `json:"overlap_window_seconds,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+	seconds := 300
+	if req.OverlapWindowSeconds != nil {
+		seconds = *req.OverlapWindowSeconds
+	}
+	if seconds < 0 || seconds > int((24*time.Hour)/time.Second) {
+		api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "overlap_window_seconds must be between 0 and 86400")
+		return
+	}
+	metadata, secret, err := cs.RotateSigningSecret(r.Context(), time.Duration(seconds)*time.Second)
+	if err != nil {
+		writeSecretServiceError(w, err)
+		return
+	}
+	if h.audit != nil {
+		if auditErr := h.audit.Record(r.Context(), &domain.AuditEvent{
+			Action:       "webhook.signing_secret.rotated",
+			ResourceType: "webhook_signing_secret",
+			ResourceID:   metadata.KeyID,
+			Metadata: map[string]interface{}{
+				"key_id":                 metadata.KeyID,
+				"overlap_window_seconds": seconds,
+			},
+		}); auditErr != nil {
+			tracing.Logger(r.Context()).Error().Msg("webhook signing secret rotated but audit record failed")
+		}
+	}
+	api.JSON(w, http.StatusOK, map[string]interface{}{
+		"key_id":                 metadata.KeyID,
+		"secret":                 secret,
+		"created_at":             metadata.CreatedAt,
+		"activated_at":           metadata.ActivatedAt,
+		"retired_at":             metadata.RetiredAt,
+		"status":                 metadata.Status,
+		"overlap_window_seconds": seconds,
+	})
+}
+
+func writeSecretServiceError(w http.ResponseWriter, err error) {
+	if errors.Is(err, domain.ErrWebhookConfigNotFound) {
+		api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook signing secret unavailable")
+		return
+	}
+	if strings.Contains(err.Error(), "overlap window") {
+		api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid overlap window")
+		return
+	}
+	api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "webhook signing secret operation failed")
 }
 
 func (h *Handler) VerifySignature(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +281,7 @@ func (h *Handler) VerifySignature(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 	subs, err := h.svc.ListSubscriptions(r.Context())
 	if err != nil {
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	api.JSON(w, http.StatusOK, map[string]interface{}{"subscriptions": subs})
@@ -186,11 +299,11 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 
 	sub, err := h.svc.CreateSubscription(r.Context(), req.EventType, req.WebhookURL)
 	if err != nil {
-		if errors.Is(err, ErrUnsafeWebhookURL) {
+		if errors.Is(err, ErrUnsafeWebhookURL) || errors.Is(err, ErrUnsupportedEventType) {
 			api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 			return
 		}
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	api.JSON(w, http.StatusCreated, sub)
@@ -199,7 +312,7 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.DeleteSubscription(r.Context(), id); err != nil {
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -222,7 +335,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 			api.Error(w, http.StatusNotFound, "CONFIG_NOT_FOUND", "webhook config not found")
 			return
 		}
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 
@@ -265,11 +378,11 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 			api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config unavailable")
 			return
 		}
-		if errors.Is(err, ErrUnsafeWebhookURL) {
+		if errors.Is(err, ErrUnsafeWebhookURL) || errors.Is(err, ErrUnsupportedEventType) {
 			api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 			return
 		}
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 
@@ -317,7 +430,7 @@ func (h *Handler) ListConfigDeliveries(w http.ResponseWriter, r *http.Request) {
 			api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config unavailable")
 			return
 		}
-		api.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	api.JSON(w, http.StatusOK, map[string]interface{}{"deliveries": deliveries})
@@ -335,7 +448,7 @@ func (h *Handler) TestConfigDelivery(w http.ResponseWriter, r *http.Request) {
 			api.Error(w, http.StatusNotFound, "NOT_FOUND", "webhook config unavailable")
 			return
 		}
-		api.Error(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		api.InternalError(w, err)
 		return
 	}
 	api.JSON(w, http.StatusOK, delivery)

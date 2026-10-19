@@ -12,20 +12,8 @@ type Client struct {
 	inner *asynq.Client
 }
 
-func NewClient(redisURL string) *Client {
-	return NewClientWithOptions(MustRedisOptions(redisURL, "", nil, ""))
-}
-
 func NewClientWithOptions(opt asynq.RedisConnOpt) *Client {
 	return &Client{inner: asynq.NewClient(opt)}
-}
-
-func MustRedisOptions(redisURL, master string, addrs []string, password string) asynq.RedisConnOpt {
-	opt, err := AsynqRedisOptions(redisURL, master, addrs, password)
-	if err != nil {
-		panic(err)
-	}
-	return opt
 }
 
 func (c *Client) Close() error {
@@ -44,35 +32,6 @@ func (c *Client) EnqueueTransfer(ctx context.Context, txID string) error {
 	_, err = c.inner.EnqueueContext(ctx, task,
 		asynq.MaxRetry(5),
 		asynq.Queue("critical"),
-	)
-	return err
-}
-
-func (c *Client) EnqueueLedgerSync(ctx context.Context, walletID, cursor string) error {
-	payload, err := json.Marshal(SyncLedgerPayload{
-		WalletID: walletID,
-		Cursor:   cursor,
-		Trace:    traceContext(ctx),
-	})
-	if err != nil {
-		return fmt.Errorf("marshal sync payload: %w", err)
-	}
-	task := asynq.NewTask(TypeSyncLedger, payload)
-	_, err = c.inner.EnqueueContext(ctx, task,
-		asynq.MaxRetry(3),
-		asynq.Queue("default"),
-	)
-	return err
-}
-
-// EnqueueSanctionsRefresh triggers an out-of-band OFAC SDN refresh. The daily
-// run is registered on the scheduler; this exists for manual re-runs. It uses
-// the low queue so a refresh never competes with live settlement.
-func (c *Client) EnqueueSanctionsRefresh(ctx context.Context) error {
-	task := asynq.NewTask(TypeRefreshSanctions, nil)
-	_, err := c.inner.EnqueueContext(ctx, task,
-		asynq.MaxRetry(3),
-		asynq.Queue("low"),
 	)
 	return err
 }

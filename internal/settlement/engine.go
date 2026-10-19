@@ -35,8 +35,6 @@ type Engine struct {
 	network        string
 	assetIssuers   map[string]string
 	feeWallet      string
-	maxAttempts    int
-	backoffSeconds int
 }
 
 func NewEngine(
@@ -58,17 +56,6 @@ func NewEngine(
 		network:        network,
 		assetIssuers:   assetIssuers,
 		feeWallet:      feeWallet,
-		maxAttempts:    3,
-		backoffSeconds: 2,
-	}
-}
-
-func (e *Engine) SetRetryPolicy(attempts, backoffSeconds int) {
-	if attempts > 0 {
-		e.maxAttempts = attempts
-	}
-	if backoffSeconds > 0 {
-		e.backoffSeconds = backoffSeconds
 	}
 }
 
@@ -353,20 +340,13 @@ type submitOutcome struct {
 // produce a second on-chain payment.
 func (e *Engine) submitWithRetry(ctx context.Context, tx *txnbuild.Transaction) submitOutcome {
 	var lastErr error
-	maxAtt := e.maxAttempts
-	if maxAtt <= 0 {
-		maxAtt = 3
-	}
-	backoff := e.backoffSeconds
-	if backoff <= 0 {
-		backoff = 2
-	}
-	for attempt := 0; attempt < maxAtt; attempt++ {
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return submitOutcome{class: stellar.ClassifySubmitError(ctx.Err()), err: ctx.Err()}
-			case <-time.After(time.Duration(attempt) * time.Duration(backoff) * time.Second):
+			case <-time.After(time.Duration(attempt*2) * time.Second):
 			}
 		}
 
@@ -380,7 +360,7 @@ func (e *Engine) submitWithRetry(ctx context.Context, tx *txnbuild.Transaction) 
 		if class == stellar.SubmitDefinite {
 			return submitOutcome{class: class, err: lastErr}
 		}
-		if attempt == maxAtt-1 {
+		if attempt == maxAttempts-1 {
 			return submitOutcome{class: class, err: lastErr}
 		}
 	}

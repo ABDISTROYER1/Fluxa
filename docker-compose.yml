@@ -82,9 +82,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    ports:
+      - "${INDEXER_METRICS_PORT:-9090}:${INDEXER_METRICS_PORT:-9090}"
     environment:
       PORT: "3001"
       ENV: development
+      INDEXER_STREAM_CONCURRENCY: ${INDEXER_STREAM_CONCURRENCY:-32}
+      INDEXER_STREAM_MAX_WALLETS: ${INDEXER_STREAM_MAX_WALLETS:-32}
+      INDEXER_STREAM_SHARD_COUNT: ${INDEXER_STREAM_SHARD_COUNT:-1}
+      INDEXER_STREAM_SHARD_INDEX: ${INDEXER_STREAM_SHARD_INDEX:-0}
+      INDEXER_METRICS_PORT: ${INDEXER_METRICS_PORT:-9090}
       WORKER_ENABLED: ${WORKER_ENABLED:-true}
       DATABASE_URL: postgresql://fluxa:password@postgres:5432/fluxa?sslmode=disable
       REPLICA_DATABASE_URL: ${REPLICA_DATABASE_URL:-}

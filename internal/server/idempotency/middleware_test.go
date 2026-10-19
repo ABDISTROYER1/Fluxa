@@ -643,3 +643,35 @@ func TestDeleteExpiredLeavesLiveRecordsAlone(t *testing.T) {
 		t.Fatal("expected live idempotency record to remain after DeleteExpired")
 	}
 }
+
+func TestEncryptedResponseIsEncryptedAtRestAndReplayed(t *testing.T) {
+	repo := newMockRepo()
+	key := uuid.New().String()
+	secret := "whsec-one-time-plaintext"
+	responseBody := []byte(`{"secret":"` + secret + `"}`)
+	mw := idempotency.MiddlewareWithOptions(repo, idempotency.Options{
+		Required:              true,
+		ResponseEncryptionKey: bytes.Repeat([]byte{7}, 32),
+	})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(responseBody)
+	}))
+
+	first := httptest.NewRecorder()
+	h.ServeHTTP(first, newRequest(t, key, `{}`))
+	if !bytes.Equal(first.Body.Bytes(), responseBody) {
+		t.Fatalf("first response = %s, want original plaintext response", first.Body.Bytes())
+	}
+	stored := repo.record("org-1", key)
+	if stored == nil || bytes.Contains(stored.ResponseBody, []byte(secret)) {
+		t.Fatal("durable idempotency response must not contain plaintext secret material")
+	}
+
+	replay := httptest.NewRecorder()
+	h.ServeHTTP(replay, newRequest(t, key, `{}`))
+	if replay.Code != http.StatusOK || !bytes.Equal(replay.Body.Bytes(), responseBody) {
+		t.Fatalf("replayed response = %d %s, want original response", replay.Code, replay.Body.Bytes())
+	}
+}

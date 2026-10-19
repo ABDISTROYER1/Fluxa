@@ -24,7 +24,7 @@ import (
 	"github.com/fluxa/fluxa/internal/fiat"
 	"github.com/fluxa/fluxa/internal/fiat/flutterwave"
 	"github.com/fluxa/fluxa/internal/fx"
-	"github.com/fluxa/fluxa/internal/health"
+	fluxahealth "github.com/fluxa/fluxa/internal/health"
 	"github.com/fluxa/fluxa/internal/indexer"
 	"github.com/fluxa/fluxa/internal/logging"
 	"github.com/fluxa/fluxa/internal/org"
@@ -39,11 +39,13 @@ import (
 	"github.com/fluxa/fluxa/internal/settlement"
 	"github.com/fluxa/fluxa/internal/status"
 	"github.com/fluxa/fluxa/internal/stellar"
+	"github.com/fluxa/fluxa/internal/tenantdata"
 	"github.com/fluxa/fluxa/internal/tracing"
 	"github.com/fluxa/fluxa/internal/transfer"
 	"github.com/fluxa/fluxa/internal/transferapproval"
 	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/fluxa/fluxa/internal/wallet"
+	"github.com/fluxa/fluxa/internal/wallet_balance_alert"
 	"github.com/fluxa/fluxa/internal/webhook"
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -179,20 +181,22 @@ func main() {
 	orgSvc := org.NewService(repoDB, orgRepo, userRepo, tenantRepo, jwtSecretBytes)
 
 	feeSvc := fees.NewService(feeRepo)
-	walletSvc := wallet.NewService(walletRepo, stellarClient, cfg.MasterEncryptionKey, tenantRepo).
+	walletSvc := wallet.NewServiceWithNetwork(walletRepo, stellarClient, cfg.MasterEncryptionKey, cfg.StellarLiveNetwork, tenantRepo).
 		WithSigner(signer).
 		WithClientResolver(clientResolver).
 		WithSignerResolver(signerResolver).
 		WithTestnetProvisioner(wallet.NewFriendbotProvisioner(cfg.FriendbotURL)).
 		WithIssuers(cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer)
 	transferSvc := transfer.ConfigureClientResolver(
-		transfer.NewService(txRepo, walletRepo, feeSvc, queueClient, tenantRepo).
-			WithStellarClient(stellarClient),
+		transfer.ConfigureStellarClient(transfer.NewService(txRepo, walletRepo, feeSvc, queueClient, tenantRepo), stellarClient),
 		clientResolver,
 	)
-	transferApprovalSvc := transferapproval.NewService(postgres.NewTransferApprovalRepo(repoDB), queueClient)
-	transferSvc = transfer.ConfigureApprovalGate(transferSvc, transferApprovalSvc)
-	webhookSvc := webhook.NewService(webhookRepo, redisClient, queueClient, 120, cfg.WebhookAllowPrivateNetworks)
+	webhookSvc := webhook.NewService(webhookRepo, redisClient, queueClient, 120, cfg.WebhookAllowPrivateNetworks, cfg.MasterEncryptionKey)
+	if configSvc, ok := webhookSvc.(webhook.ConfigService); ok {
+		if err := configSvc.MigrateLegacySigningSecrets(ctx); err != nil {
+			log.Fatal().Err(err).Msg("migrate tenant webhook signing secrets")
+		}
+	}
 
 	// Compliance screening sits in front of settlement, so it is wired before
 	// the services that initiate transfers. When disabled, no screener is
@@ -233,7 +237,7 @@ func main() {
 
 		complianceSvc := compliance.NewService(complianceRepo, screener, sanctionsSet, txRepo, queueClient, webhookSvc)
 		complianceHandler = compliance.NewHandler(complianceSvc)
-		transferSvc = transferSvc.WithScreener(complianceSvc)
+		transferSvc = transfer.ConfigureScreener(transferSvc, complianceSvc)
 	}
 
 	batchSvc := batch.NewService(batchRepo, txRepo, transferSvc)
@@ -262,7 +266,11 @@ func main() {
 	fwProvider := flutterwave.NewProvider(cfg.FlutterwaveSecretKey, cfg.FlutterwaveWebhookHash)
 
 	fiatSvc := fiat.NewService(fiatRepo, fiat.NewRailAdapter(fwProvider), fxSvc, transferSvc, cfg.PlatformWalletID, "flutterwave", fiatRepo)
-	refundSvc := refund.NewService(postgres.NewRefundRepo(repoDB), transferSvc)
+	refundTransferSvc, ok := transferSvc.(refund.TransferService)
+	if !ok {
+		log.Fatal().Msg("transfer service does not support extended transfers")
+	}
+	refundSvc := refund.NewService(postgres.NewRefundRepo(repoDB), refundTransferSvc)
 
 	anchorRegistry := anchor.NewRegistry(anchorRepo, nil)
 	if err := anchorRegistry.Load(ctx); err != nil {
@@ -361,8 +369,10 @@ func main() {
 	usageHandler := server.NewUsageHandler(repoDB)
 	beneficiarySvc := beneficiary.NewService(postgres.NewBeneficiaryRepo(repoDB), auditSvc)
 	transferSvc = transfer.ConfigureBeneficiaryChecker(transferSvc, beneficiarySvc)
+	walletBalanceAlertSvc := wallet_balance_alert.NewService(postgres.NewWalletBalanceAlertRepo(repoDB), auditSvc)
 
 	transferHandler := transfer.NewHandler(transferSvc).WithIdempotency(transferIdemMW)
+	transferApprovalSvc := transferapproval.NewService(postgres.NewTransferApprovalRepo(repoDB), queueClient)
 	transferApprovalHandler := transferapproval.NewHandler(transferApprovalSvc)
 	fxHandler := fx.NewHandler(fxSvc).WithIdempotency(idemMW)
 	fiatHandler := fiat.NewHandler(fiatSvc).WithIdempotency(idemMW)
@@ -372,7 +382,12 @@ func main() {
 	anchorHandler := anchor.NewHandler(anchorRegistry)
 	feeHandler := fees.NewHandler(feeSvc)
 	apikeyHandler := apikey.NewHandler(apiKeyRepo).WithAuditLogger(auditSvc)
-	webhookHandler := webhook.NewHandler(webhookSvc)
+	webhookHandler := webhook.NewHandler(webhookSvc).
+		WithIdempotency(idempotency.MiddlewareWithOptions(idempotencyRepo, idempotency.Options{
+			Required:              true,
+			ResponseEncryptionKey: cfg.MasterEncryptionKey,
+		})).
+		WithAuditLogger(auditSvc)
 	assetRegistry := assets.NewRegistry(cfg.StellarUSDCIssuer, cfg.StellarEURCIssuer)
 	batchHandler := batch.NewHandler(batchSvc).WithIdempotency(batchIdemMW).WithAssetValidator(assetRegistry.IsSupported)
 	scheduleHandler := schedule.NewHandler(scheduleSvc).
@@ -393,8 +408,14 @@ func main() {
 	dependencyNames := []string{"postgres", "replica", "redis", "horizon", "worker"}
 	statusSvc := status.NewService(incidentRepo).WithDependencyHistory(healthHistoryRepo, dependencyNames)
 	statusHandler := status.NewHandler(statusSvc)
-	fluxahealth.NewSampler(healthChecks, healthHistoryRepo).Start(ctx)
+	healthSamplerChecks := make(map[string]fluxahealth.DependencyCheck, len(healthChecks))
+	for name, check := range healthChecks {
+		healthSamplerChecks[name] = fluxahealth.DependencyCheck(check)
+	}
+	fluxahealth.NewSampler(healthSamplerChecks, healthHistoryRepo).Start(ctx)
 	beneficiaryHandler := beneficiary.NewHandler(beneficiarySvc)
+	walletBalanceAlertHandler := wallet_balance_alert.NewHandler(walletBalanceAlertSvc)
+	tenantDataHandler := tenantdata.NewHandler(tenantdata.NewService(repoDB))
 
 	// Claimable balances move real funds in both directions, so the mutating
 	// routes share the Owner/Admin gate used by /v1/keys and the treasury.
@@ -421,7 +442,7 @@ func main() {
 		anchorFiatHandler, anchorHandler,
 		feeHandler, reconcileHandler, apikeyHandler, apiKeyRepo,
 		webhookHandler, batchHandler, scheduleHandler, treasuryHandler, claimableHandler,
-		statusHandler, complianceHandler, auditHandler, usageHandler, idempotencyHandler, jwtSecretBytes, cfg.Port,
+		statusHandler, complianceHandler, auditHandler, usageHandler, jwtSecretBytes, cfg.Port,
 		healthChecks,
 
 		orgRepo,
@@ -433,9 +454,13 @@ func main() {
 			AccountBurst: cfg.AuthRateLimitAccountBurst,
 		},
 		beneficiaryHandler,
+		walletBalanceAlertHandler,
 		paymentLinkHandler,
 		refundHandler,
+		idempotencyHandler,
 		transferApprovalHandler,
+		tenantDataHandler,
+		server.AuditScopeDenials(auditSvc),
 	)
 	server.RegisterDocsRoutes(srv.Router())
 

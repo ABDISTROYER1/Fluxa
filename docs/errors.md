@@ -1,12 +1,14 @@
 # Error Reference
 
-All API errors follow a consistent JSON envelope:
+Every `/v1` error uses this JSON envelope. The HTTP response status equals `error.status`; `error.request_id` equals the `X-Request-ID` response header. A supplied non-empty request ID is echoed, otherwise the server generates one. Endpoint examples that omit `status` or `request_id` are abbreviated; actual responses always include both fields.
 
 ```json
 {
   "error": {
     "code": "ERROR_CODE",
-    "message": "Human-readable description of what went wrong."
+    "message": "Human-readable description of what went wrong.",
+    "status": 400,
+    "request_id": "<effective-request-id>"
   }
 }
 ```
@@ -22,29 +24,29 @@ Errors are grouped by domain. Each entry includes the HTTP status code, the `cod
 | Field | Value |
 |---|---|
 | **HTTP Status** | `401 Unauthorized` |
-| **Code** | _(plain text body, not JSON)_ |
+| **Code** | `UNAUTHORIZED` |
 | **Description** | The `Authorization` header is missing, doesn't use the `Bearer` scheme, or is malformed. |
 | **Resolution** | Include a valid `Authorization: Bearer <api_key>` header on every request. |
 
 **Example response:**
-```
-missing or invalid authorization header
+```json
+{"error":{"code":"UNAUTHORIZED","message":"missing or invalid authorization header","status":401,"request_id":"<effective-request-id>"}}
 ```
 
 ---
 
-### `401` — `invalid api key`
+### `401` — `invalid api key or authentication token`
 
 | Field | Value |
 |---|---|
 | **HTTP Status** | `401 Unauthorized` |
-| **Code** | _(plain text body, not JSON)_ |
-| **Description** | The provided API key does not match any key on record. Keys are stored as SHA-256 hashes; the raw key was either mistyped, truncated, or never issued. |
-| **Resolution** | Verify the key value. If lost, create a new key via `POST /v1/keys`. The raw key is shown only once on creation. |
+| **Code** | `UNAUTHORIZED` |
+| **Description** | The bearer credential does not match a valid API key or authentication token. |
+| **Resolution** | Verify the bearer credential and use an active API key or access token. |
 
 **Example response:**
-```
-invalid api key
+```json
+{"error":{"code":"UNAUTHORIZED","message":"invalid api key or authentication token","status":401,"request_id":"<effective-request-id>"}}
 ```
 
 ---
@@ -54,29 +56,50 @@ invalid api key
 | Field | Value |
 |---|---|
 | **HTTP Status** | `401 Unauthorized` |
-| **Code** | _(plain text body, not JSON)_ |
+| **Code** | `API_KEY_REVOKED` |
 | **Description** | The API key has been revoked via `DELETE /v1/keys/:id` and can no longer be used. |
 | **Resolution** | Create a new API key via `POST /v1/keys`. |
 
 **Example response:**
-```
-revoked api key
+```json
+{"error":{"code":"API_KEY_REVOKED","message":"revoked api key","status":401,"request_id":"<effective-request-id>"}}
 ```
 
 ---
 
-### `401` — `tenant not found in context`
+### `401` — `tenant environment is required`
 
 | Field | Value |
 |---|---|
 | **HTTP Status** | `401 Unauthorized` |
-| **Code** | _(plain text body, not JSON)_ |
-| **Description** | The tenant could not be resolved from the request context. This typically occurs when creating API keys if the authentication context is missing. |
+| **Code** | `UNAUTHORIZED` |
+| **Description** | The tenant or environment could not be resolved from the authenticated request context. |
 | **Resolution** | Ensure you are authenticated and your session has a valid tenant context. Re-authenticate if the issue persists. |
 
 **Example response:**
+```json
+{"error":{"code":"UNAUTHORIZED","message":"tenant environment is required","status":401,"request_id":"<effective-request-id>"}}
 ```
-tenant not found in context
+
+---
+
+### `403` — `INSUFFICIENT_SCOPE` | `API key does not have the required scope: <scope>`
+
+| Field | Value |
+|---|---|
+| **HTTP Status** | `403 Forbidden` |
+| **Code** | `INSUFFICIENT_SCOPE` |
+| **Description** | The API key is valid but was not granted the scope this operation needs. Reads (`GET`/`HEAD`) need `<resource>:read`; anything that changes state needs `<resource>:write`. The message names the missing scope. The code is stable, so match on it rather than the message. The denial is recorded in the audit log as `api_key.scope_denied`. |
+| **Resolution** | Create a key with the missing scope, or use one that has it. See [API key scopes](api-key-scopes.md). A scoped key creating another key gets the same error if it asks for a scope it doesn't hold itself. |
+
+**Example response:**
+```json
+{
+  "error": {
+    "code": "INSUFFICIENT_SCOPE",
+    "message": "API key does not have the required scope: transfers:write"
+  }
+}
 ```
 
 ---
@@ -425,11 +448,11 @@ tenant not found in context
 
 ## Rate Limit Errors
 
-> Rate limiting is not yet implemented in the current version. This section is a placeholder for future error codes.
+Rate limits return the same JSON envelope as other `/v1` errors and include `Retry-After` where applicable.
 
 | HTTP Status | Code | Description | Resolution |
 |---|---|---|---|
-| `429` | `RATE_LIMITED` | Request quota exceeded for the current period. | Wait for the rate limit window to reset or upgrade your plan. |
+| `429` | `RATE_LIMITED` | Request quota exceeded for the current period. | Wait for the rate limit window to reset before retrying. |
 
 ---
 
@@ -463,10 +486,13 @@ When the Stellar network returns an error during transaction submission, Fluxa m
 | `400` | `BAD_REQUEST` | `invalid amount` | Fiat |
 | `403` | `TRANSFER_BLOCKED_SANCTIONS` | `transfer blocked: destination matches a sanctions list entry` | Compliance |
 | `409` | `REVIEW_ALREADY_DECIDED` | `compliance review has already been decided` | Compliance |
-| `401` | — | `missing or invalid authorization header` | Auth |
-| `401` | — | `invalid api key` | Auth |
-| `401` | — | `revoked api key` | Auth |
-| `401` | — | `tenant not found in context` | Auth |
+| `409` | `LAST_ORG_OWNER` | `organization must keep at least one owner` | Organization |
+| `401` | `UNAUTHORIZED` | `missing or invalid authorization header` | Auth |
+| `401` | `UNAUTHORIZED` | `invalid api key or authentication token` | Auth |
+| `401` | `API_KEY_REVOKED` | `revoked api key` | Auth |
+| `401` | `UNAUTHORIZED` | `invalid or expired refresh token` | Auth |
+| `401` | `UNAUTHORIZED` | `tenant environment is required` | Auth |
+| `405` | `METHOD_NOT_ALLOWED` | `method not allowed` | General |
 | `404` | `NOT_FOUND` | `wallet not found` | Wallets |
 | `404` | `NOT_FOUND` | `transaction not found` | Transfers |
 | `404` | `NOT_FOUND` | `webhook endpoint not found` | Webhooks |
@@ -475,22 +501,24 @@ When the Stellar network returns an error during transaction submission, Fluxa m
 | `500` | `INTERNAL_ERROR` | `an unexpected error occurred` | General |
 | `500` | `INTERNAL_ERROR` | `an unexpected error occurred` (Stellar submission failure) | Stellar |
 | `500` | `INTERNAL_ERROR` | `an unexpected error occurred` (decryption failure) | Crypto |
-| `500` | — | `internal server error` (panic recovery) | General |
-| `429` | `RATE_LIMITED` | _(future)_ | Rate Limits |
+| `500` | `INTERNAL_ERROR` | `an unexpected error occurred` (panic recovery) | General |
+| `429` | `RATE_LIMITED` | `rate limit exceeded` | Rate Limits |
 
 ---
 
 ## Error Response Format
 
-All structured error responses follow this schema:
+All `/v1` errors follow this schema (including auth, authorization, rate-limit, and middleware failures):
 
 ```json
 {
   "error": {
     "code": "ERROR_CODE",
-    "message": "Human-readable description"
+    "message": "Human-readable description",
+    "status": 400,
+    "request_id": "<effective-request-id>"
   }
 }
 ```
 
-Auth-level errors (401) currently return plain text bodies rather than JSON. This is a known inconsistency and will be standardised in a future release.
+The `request_id` value matches the `X-Request-ID` response header and can be used to correlate an error with server logs. `/health`, `/health/ready`, and `/health/live` retain their documented probe response formats; they are not versioned API routes.

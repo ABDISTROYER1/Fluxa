@@ -96,6 +96,11 @@ type Config struct {
 	IndexerStreamMinBackoff  string
 	IndexerStreamMaxBackoff  string
 	IndexerSyncPageSize      int
+	IndexerStreamConcurrency int
+	IndexerStreamMaxWallets  int
+	IndexerStreamShardCount  int
+	IndexerStreamShardIndex  int
+	IndexerMetricsPort       string
 
 	// Auth rate limiting configuration for /v1/auth/register, /v1/auth/login, /v1/org/invites/accept
 	AuthRateLimitIPRPS        float64
@@ -286,6 +291,11 @@ func Load() (*Config, error) {
 	viper.SetDefault("INDEXER_STREAM_MIN_BACKOFF", "1s")
 	viper.SetDefault("INDEXER_STREAM_MAX_BACKOFF", "30s")
 	viper.SetDefault("INDEXER_SYNC_PAGE_SIZE", "100")
+	viper.SetDefault("INDEXER_STREAM_CONCURRENCY", 32)
+	viper.SetDefault("INDEXER_STREAM_MAX_WALLETS", 32)
+	viper.SetDefault("INDEXER_STREAM_SHARD_COUNT", 1)
+	viper.SetDefault("INDEXER_STREAM_SHARD_INDEX", 0)
+	viper.SetDefault("INDEXER_METRICS_PORT", "9090")
 	viper.SetDefault("AUTH_RATE_LIMIT_IP_RPS", "5")
 	viper.SetDefault("AUTH_RATE_LIMIT_IP_BURST", "10")
 	viper.SetDefault("AUTH_RATE_LIMIT_ACCOUNT_RPS", "1")
@@ -420,6 +430,11 @@ func Load() (*Config, error) {
 		IndexerStreamMinBackoff:         viper.GetString("INDEXER_STREAM_MIN_BACKOFF"),
 		IndexerStreamMaxBackoff:         viper.GetString("INDEXER_STREAM_MAX_BACKOFF"),
 		IndexerSyncPageSize:             viper.GetInt("INDEXER_SYNC_PAGE_SIZE"),
+		IndexerStreamConcurrency:        viper.GetInt("INDEXER_STREAM_CONCURRENCY"),
+		IndexerStreamMaxWallets:         viper.GetInt("INDEXER_STREAM_MAX_WALLETS"),
+		IndexerStreamShardCount:         viper.GetInt("INDEXER_STREAM_SHARD_COUNT"),
+		IndexerStreamShardIndex:         viper.GetInt("INDEXER_STREAM_SHARD_INDEX"),
+		IndexerMetricsPort:              viper.GetString("INDEXER_METRICS_PORT"),
 		ClaimableBalanceSourceWalletID:  viper.GetString("CLAIMABLE_BALANCE_SOURCE_WALLET_ID"),
 		IdempotencyTTLHours: func() int {
 			h := viper.GetInt("IDEMPOTENCY_TTL_HOURS")
@@ -492,7 +507,7 @@ func validateKeyEntropy(key []byte) error {
 	// never exceed 5 bits/byte however random it is, so comparing the raw figure
 	// against the 8-bit ceiling would reject every possible key. Compare against
 	// the maximum this key length can actually reach instead.
-	maxEntropy := log2(float64(len(key)))
+	maxEntropy := math.Log2(float64(len(key)))
 	if maxEntropy > 8 {
 		maxEntropy = 8
 	}
@@ -502,8 +517,4 @@ func validateKeyEntropy(key []byte) error {
 	}
 
 	return nil
-}
-
-func log2(x float64) float64 {
-	return math.Log(x) / math.Log(2)
 }

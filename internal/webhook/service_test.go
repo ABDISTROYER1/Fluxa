@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/fluxa/fluxa/internal/domain"
@@ -131,6 +132,29 @@ func (f *fakeRepo) GetSubscriptionsForEvent(_ context.Context, tenantID *string,
 		}
 	}
 	return res, nil
+}
+
+func TestWebhookService_EncryptsEndpointSecretAndRedactsList(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, nil, nil, 120, false)
+	endpoint, secret, err := svc.RegisterEndpoint(context.Background(), "https://example.com/webhook", nil)
+	if err != nil {
+		t.Fatalf("RegisterEndpoint: %v", err)
+	}
+	if endpoint.Secret != secret || secret == "" {
+		t.Fatal("registration should disclose the generated secret once")
+	}
+	stored := repo.endpoints[endpoint.ID]
+	if stored.Secret == secret || !strings.HasPrefix(stored.Secret, "v1::") {
+		t.Fatal("endpoint secret must be encrypted at rest")
+	}
+	listed, err := svc.ListEndpoints(context.Background())
+	if err != nil {
+		t.Fatalf("ListEndpoints: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Secret != "" {
+		t.Fatalf("endpoint listing must redact secrets, got %+v", listed)
+	}
 }
 
 func TestWebhookService_MaxAttemptsAndDeadLetter(t *testing.T) {

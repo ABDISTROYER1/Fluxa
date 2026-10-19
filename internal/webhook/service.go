@@ -6,10 +6,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	fluxacrypto "github.com/fluxa/fluxa/internal/crypto"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/fluxa/fluxa/internal/queue"
 	"github.com/fluxa/fluxa/internal/tenant"
@@ -60,7 +63,12 @@ type Service interface {
 type ConfigRepository interface {
 	GetConfig(ctx context.Context, tenantID string) (*domain.TenantWebhookConfig, error)
 	UpsertConfig(ctx context.Context, config *domain.TenantWebhookConfig) error
+	ListConfigs(ctx context.Context) ([]*domain.TenantWebhookConfig, error)
 	ListEnabledConfigs(ctx context.Context) ([]*domain.TenantWebhookConfig, error)
+	ListSigningSecrets(ctx context.Context, tenantID string) ([]*domain.WebhookSigningSecret, error)
+	ImportLegacySigningSecret(ctx context.Context, tenantID, keyID, encryptedSecret string, now time.Time) (*domain.WebhookSigningSecret, error)
+	RotateSigningSecret(ctx context.Context, tenantID, keyID, encryptedSecret, legacyKeyID, legacyEncryptedSecret string, overlap time.Duration, now time.Time) (*domain.WebhookSigningSecret, error)
+	GetSigningSecret(ctx context.Context, tenantID, keyID string) (string, error)
 	CreateConfigDelivery(ctx context.Context, delivery *domain.TenantWebhookDelivery) error
 	UpdateConfigDelivery(ctx context.Context, delivery *domain.TenantWebhookDelivery) error
 	GetConfigDelivery(ctx context.Context, id, tenantID string) (*domain.TenantWebhookDelivery, error)
@@ -75,6 +83,9 @@ type ConfigRepository interface {
 type ConfigService interface {
 	GetConfig(ctx context.Context) (*domain.TenantWebhookConfig, error)
 	UpdateConfig(ctx context.Context, update domain.WebhookConfigUpdate) (*domain.WebhookConfigResult, error)
+	MigrateLegacySigningSecrets(ctx context.Context) error
+	ListSigningSecrets(ctx context.Context) ([]*domain.WebhookSigningSecret, error)
+	RotateSigningSecret(ctx context.Context, overlap time.Duration) (*domain.WebhookSigningSecret, string, error)
 	ListConfigDeliveries(ctx context.Context, limit, offset int) ([]*domain.TenantWebhookDelivery, error)
 	TestDelivery(ctx context.Context) (*domain.TenantWebhookDelivery, error)
 	DeliverConfig(ctx context.Context, deliveryID, tenantID string) error
@@ -90,6 +101,7 @@ type service struct {
 	maxPerMinute         int
 	maxAttempts          int
 	allowPrivateNetworks bool
+	encryptionKey        []byte
 }
 
 func defaultBackoffSchedule() []time.Duration {
@@ -110,7 +122,7 @@ func backoffFor(attempt int) time.Duration {
 	return schedule[attempt-1]
 }
 
-func NewService(repo Repository, rdb redis.UniversalClient, queueClient *queue.Client, maxPerMinute int, allowPrivateNetworks bool) Service {
+func NewService(repo Repository, rdb redis.UniversalClient, queueClient *queue.Client, maxPerMinute int, allowPrivateNetworks bool, encryptionKey ...[]byte) Service {
 	if maxPerMinute <= 0 {
 		maxPerMinute = 120
 	}
@@ -121,6 +133,8 @@ func NewService(repo Repository, rdb redis.UniversalClient, queueClient *queue.C
 		maxPerMinute:         maxPerMinute,
 		maxAttempts:          len(defaultBackoffSchedule()),
 		allowPrivateNetworks: allowPrivateNetworks,
+		configRepo:           configRepository(repo),
+		encryptionKey:        serviceEncryptionKey(encryptionKey),
 	}
 	s.client = s.newSafeHTTPClient()
 	return s
@@ -130,25 +144,52 @@ func NewService(repo Repository, rdb redis.UniversalClient, queueClient *queue.C
 // webhook configuration API. The config repository is an explicit, required
 // argument so a caller exposing the config endpoints cannot forget to wire it;
 // NewService remains available for deployments without tenant webhook storage.
-func NewConfigService(repo Repository, configRepo ConfigRepository, q *queue.Client) Service {
+func NewConfigService(repo Repository, configRepo ConfigRepository, q *queue.Client, encryptionKey ...[]byte) Service {
 	s := &service{
-		repo:         repo,
-		configRepo:   configRepo,
-		queueClient:  q,
-		maxPerMinute: 120,
-		maxAttempts:  len(defaultBackoffSchedule()),
+		repo:          repo,
+		configRepo:    configRepo,
+		queueClient:   q,
+		maxPerMinute:  120,
+		maxAttempts:   len(defaultBackoffSchedule()),
+		encryptionKey: serviceEncryptionKey(encryptionKey),
 	}
 	s.client = s.newSafeHTTPClient()
 	return s
 }
 
-func generateSecret() string {
+func configRepository(repo Repository) ConfigRepository {
+	configRepo, _ := repo.(ConfigRepository)
+	return configRepo
+}
+
+func serviceEncryptionKey(keys [][]byte) []byte {
+	if len(keys) > 0 {
+		if len(keys[0]) != 32 {
+			panic("webhook encryption key must be 32 bytes")
+		}
+		return append([]byte(nil), keys[0]...)
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic("unable to initialize webhook encryption key")
+	}
+	return key
+}
+
+func generateSecret() (string, error) {
 	buf := make([]byte, 24)
-	_, _ = rand.Read(buf)
-	return "whsec_" + hex.EncodeToString(buf)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate webhook signing secret")
+	}
+	return "whsec_" + hex.EncodeToString(buf), nil
 }
 
 func (s *service) RegisterEndpoint(ctx context.Context, url string, events []string) (*domain.WebhookEndpoint, string, error) {
+	for _, eventType := range events {
+		if eventType != "*" && !domain.IsSupportedEventType(eventType) {
+			return nil, "", fmt.Errorf("%w: %q", ErrUnsupportedEventType, eventType)
+		}
+	}
 	if err := s.validateWebhookURL(ctx, url); err != nil {
 		return nil, "", err
 	}
@@ -160,10 +201,13 @@ func (s *service) RegisterEndpoint(ctx context.Context, url string, events []str
 	}
 
 	if len(events) == 0 {
-		events = []string{"transfer.initiated", "transfer.settled", "transfer.failed", "wallet.funded", "conversion.completed"}
+		events = append([]string(nil), domain.SupportedEventTypes...)
 	}
 
-	secret := generateSecret()
+	secret, err := generateSecret()
+	if err != nil {
+		return nil, "", err
+	}
 	ep := &domain.WebhookEndpoint{
 		ID:              uuid.New().String(),
 		TenantID:        tenantPtr,
@@ -178,7 +222,12 @@ func (s *service) RegisterEndpoint(ctx context.Context, url string, events []str
 		UpdatedAt:       time.Now().UTC(),
 	}
 
-	if err := s.repo.CreateEndpoint(ctx, ep); err != nil {
+	stored := *ep
+	stored.Secret, err = s.encryptSecret(secret)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := s.repo.CreateEndpoint(ctx, &stored); err != nil {
 		return nil, "", err
 	}
 	return ep, secret, nil
@@ -190,7 +239,21 @@ func (s *service) ListEndpoints(ctx context.Context) ([]*domain.WebhookEndpoint,
 	if tid != "" {
 		tenantPtr = &tid
 	}
-	return s.repo.ListEndpoints(ctx, tenantPtr)
+	endpoints, err := s.repo.ListEndpoints(ctx, tenantPtr)
+	if err != nil {
+		return nil, err
+	}
+	for index, endpoint := range endpoints {
+		copy := *endpoint
+		if copy.Secret != "" && !strings.HasPrefix(copy.Secret, "v1::") {
+			if err := s.persistEndpoint(ctx, &copy); err != nil {
+				return nil, err
+			}
+		}
+		copy.Secret = ""
+		endpoints[index] = &copy
+	}
+	return endpoints, nil
 }
 
 func (s *service) DeleteEndpoint(ctx context.Context, id string) error {
@@ -198,6 +261,9 @@ func (s *service) DeleteEndpoint(ctx context.Context, id string) error {
 }
 
 func (s *service) CreateSubscription(ctx context.Context, eventType, webhookURL string) (*domain.WebhookSubscription, error) {
+	if !domain.IsSupportedEventType(eventType) {
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedEventType, eventType)
+	}
 	if err := s.validateWebhookURL(ctx, webhookURL); err != nil {
 		return nil, err
 	}
@@ -380,6 +446,16 @@ func (s *service) Deliver(ctx context.Context, deliveryID string) error {
 	if err != nil {
 		return err
 	}
+	storedSecret := ep.Secret
+	ep.Secret, err = s.decryptSecret(ep.Secret)
+	if err != nil {
+		return err
+	}
+	if ep.Secret != "" && !strings.HasPrefix(storedSecret, "v1::") {
+		if err := s.persistEndpoint(ctx, ep); err != nil {
+			return err
+		}
+	}
 
 	allowed, err := s.checkRateLimit(ctx, ep.URL)
 	if err != nil {
@@ -440,7 +516,7 @@ func (s *service) Deliver(ctx context.Context, deliveryID string) error {
 			ep.NotifiedFailing = false // reset on recovery
 		}
 		ep.UpdatedAt = time.Now().UTC()
-		_ = s.repo.UpdateEndpoint(ctx, ep)
+		_ = s.persistEndpoint(ctx, ep)
 		return nil
 	}
 
@@ -474,7 +550,7 @@ func (s *service) handleDeliveryFailure(ctx context.Context, deliv *domain.Webho
 		).Msg("TENANT NOTIFICATION: Deliveries to webhook endpoint are failing consistently.")
 	}
 
-	_ = s.repo.UpdateEndpoint(ctx, ep)
+	_ = s.persistEndpoint(ctx, ep)
 
 	if deliv.AttemptCount >= s.maxAttempts {
 		deliv.Status = "dead_lettered"
@@ -543,6 +619,16 @@ func (s *service) GetConfig(ctx context.Context) (*domain.TenantWebhookConfig, e
 	if err != nil {
 		return nil, err
 	}
+	storedSecret := config.Secret
+	config.Secret, err = s.decryptSecret(config.Secret)
+	if err != nil {
+		return nil, err
+	}
+	if config.Secret != "" && !strings.HasPrefix(storedSecret, "v1::") {
+		if err := s.persistConfig(ctx, config); err != nil {
+			return nil, err
+		}
+	}
 	redactConfigSecret(config)
 	return config, nil
 }
@@ -556,6 +642,178 @@ func redactConfigSecret(config *domain.TenantWebhookConfig) {
 	}
 	config.SecretConfigured = config.SecretConfigured || config.Secret != ""
 	config.Secret = ""
+}
+
+func (s *service) persistConfig(ctx context.Context, config *domain.TenantWebhookConfig) error {
+	stored := *config
+	encrypted, err := s.encryptSecret(config.Secret)
+	if err != nil {
+		return err
+	}
+	stored.Secret = encrypted
+	return s.configRepo.UpsertConfig(ctx, &stored)
+}
+
+func (s *service) persistEndpoint(ctx context.Context, endpoint *domain.WebhookEndpoint) error {
+	stored := *endpoint
+	if stored.Secret != "" && !strings.HasPrefix(stored.Secret, "v1::") {
+		encrypted, err := s.encryptSecret(stored.Secret)
+		if err != nil {
+			return err
+		}
+		stored.Secret = encrypted
+	}
+	return s.repo.UpdateEndpoint(ctx, &stored)
+}
+
+func (s *service) MigrateLegacySigningSecrets(ctx context.Context) error {
+	if s.configRepo == nil {
+		return domain.ErrWebhookConfigNotFound
+	}
+	configs, err := s.configRepo.ListConfigs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, config := range configs {
+		storedSecret := config.Secret
+		config.Secret, err = s.decryptSecret(config.Secret)
+		if err != nil {
+			return err
+		}
+		if config.Secret != "" && !strings.HasPrefix(storedSecret, "v1::") {
+			if err := s.persistConfig(ctx, config); err != nil {
+				return err
+			}
+		}
+		if err := s.ensureSigningSecretVersion(ctx, config); err != nil {
+			return err
+		}
+	}
+	if s.repo == nil {
+		return nil
+	}
+	for _, mode := range []domain.Mode{domain.ModeLive, domain.ModeTest} {
+		modeCtx := tenant.WithMode(ctx, mode)
+		endpoints, err := s.repo.ListEndpoints(modeCtx, nil)
+		if err != nil {
+			return err
+		}
+		for _, endpoint := range endpoints {
+			if endpoint.Secret == "" || strings.HasPrefix(endpoint.Secret, "v1::") {
+				continue
+			}
+			if err := s.persistEndpoint(modeCtx, endpoint); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *service) encryptSecret(secret string) (string, error) {
+	ciphertext, err := fluxacrypto.Encrypt([]byte(secret), s.encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("encrypt webhook signing secret")
+	}
+	return string(ciphertext), nil
+}
+
+func (s *service) decryptSecret(stored string) (string, error) {
+	if !strings.HasPrefix(stored, "v1::") {
+		return stored, nil
+	}
+	plaintext, err := fluxacrypto.Decrypt([]byte(stored), s.encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("decrypt webhook signing secret")
+	}
+	return string(plaintext), nil
+}
+
+func (s *service) ListSigningSecrets(ctx context.Context) ([]*domain.WebhookSigningSecret, error) {
+	tenantID, err := requireTenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.configRepo == nil {
+		return nil, domain.ErrWebhookConfigNotFound
+	}
+	config, err := s.configRepo.GetConfig(ctx, tenantID)
+	if errors.Is(err, domain.ErrWebhookConfigNotFound) {
+		return []*domain.WebhookSigningSecret{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureSigningSecretVersion(ctx, config); err != nil {
+		return nil, err
+	}
+	return s.configRepo.ListSigningSecrets(ctx, tenantID)
+}
+
+func (s *service) ensureSigningSecretVersion(ctx context.Context, config *domain.TenantWebhookConfig) error {
+	if config.SigningKeyID != "" || config.Secret == "" {
+		return nil
+	}
+	secret, err := s.decryptSecret(config.Secret)
+	if err != nil {
+		return err
+	}
+	encrypted, err := s.encryptSecret(secret)
+	if err != nil {
+		return err
+	}
+	metadata, err := s.configRepo.ImportLegacySigningSecret(ctx, config.TenantID, uuid.NewString(), encrypted, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if metadata == nil {
+		return nil
+	}
+	config.Secret = secret
+	config.SigningKeyID = metadata.KeyID
+	return nil
+}
+
+func (s *service) RotateSigningSecret(ctx context.Context, overlap time.Duration) (*domain.WebhookSigningSecret, string, error) {
+	tenantID, err := requireTenantID(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if s.configRepo == nil {
+		return nil, "", domain.ErrWebhookConfigNotFound
+	}
+	if overlap < 0 || overlap > 24*time.Hour {
+		return nil, "", fmt.Errorf("overlap window must be between 0 and 24 hours")
+	}
+	secret, err := generateSecret()
+	if err != nil {
+		return nil, "", err
+	}
+	encrypted, err := s.encryptSecret(secret)
+	if err != nil {
+		return nil, "", err
+	}
+	legacyKeyID := ""
+	legacySecret := ""
+	current, currentErr := s.configRepo.GetConfig(ctx, tenantID)
+	if currentErr == nil && current.SigningKeyID == "" && current.Secret != "" {
+		plaintext, decryptErr := s.decryptSecret(current.Secret)
+		if decryptErr != nil {
+			return nil, "", decryptErr
+		}
+		legacySecret, err = s.encryptSecret(plaintext)
+		if err != nil {
+			return nil, "", err
+		}
+		legacyKeyID = uuid.NewString()
+	} else if currentErr != nil && !errors.Is(currentErr, domain.ErrWebhookConfigNotFound) {
+		return nil, "", currentErr
+	}
+	metadata, err := s.configRepo.RotateSigningSecret(ctx, tenantID, uuid.NewString(), encrypted, legacyKeyID, legacySecret, overlap, time.Now().UTC())
+	if err != nil {
+		return nil, "", err
+	}
+	return metadata, secret, nil
 }
 
 func (s *service) UpdateConfig(ctx context.Context, update domain.WebhookConfigUpdate) (*domain.WebhookConfigResult, error) {
@@ -580,6 +838,11 @@ func (s *service) UpdateConfig(ctx context.Context, update domain.WebhookConfigU
 			SigningAlgorithm: defaultSigningAlgorithm,
 			CreatedAt:        time.Now().UTC(),
 		}
+	} else {
+		config.Secret, err = s.decryptSecret(config.Secret)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	revealedSecret := ""
@@ -590,6 +853,11 @@ func (s *service) UpdateConfig(ctx context.Context, update domain.WebhookConfigU
 		config.URL = *update.URL
 	}
 	if update.Events != nil {
+		for _, eventType := range *update.Events {
+			if !domain.IsSupportedEventType(eventType) {
+				return nil, fmt.Errorf("%w: %q", ErrUnsupportedEventType, eventType)
+			}
+		}
 		config.Events = append([]string{}, *update.Events...)
 	}
 	if update.Enabled != nil {
@@ -607,8 +875,12 @@ func (s *service) UpdateConfig(ctx context.Context, update domain.WebhookConfigU
 	// with otherwise. Rotation always mints a fresh one and invalidates the
 	// previous secret for the tenant's endpoint.
 	if config.Secret == "" || update.RotateSecret {
-		secret := generateSecret()
+		metadata, secret, rotateErr := s.RotateSigningSecret(ctx, 0)
+		if rotateErr != nil {
+			return nil, rotateErr
+		}
 		config.Secret = secret
+		config.SigningKeyID = metadata.KeyID
 		revealedSecret = secret
 	}
 
@@ -626,7 +898,7 @@ func (s *service) UpdateConfig(ctx context.Context, update domain.WebhookConfigU
 		config.CreatedAt = config.UpdatedAt
 	}
 
-	if err := s.configRepo.UpsertConfig(ctx, config); err != nil {
+	if err := s.persistConfig(ctx, config); err != nil {
 		return nil, err
 	}
 
@@ -668,6 +940,13 @@ func (s *service) TestDelivery(ctx context.Context) (*domain.TenantWebhookDelive
 	if err != nil {
 		return nil, err
 	}
+	config.Secret, err = s.decryptSecret(config.Secret)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureSigningSecretVersion(ctx, config); err != nil {
+		return nil, err
+	}
 	if config.URL == "" {
 		return nil, fmt.Errorf("%w: no webhook url configured", domain.ErrWebhookConfigDisabled)
 	}
@@ -684,13 +963,14 @@ func (s *service) TestDelivery(ctx context.Context) (*domain.TenantWebhookDelive
 
 	now := time.Now().UTC()
 	delivery := &domain.TenantWebhookDelivery{
-		ID:        uuid.New().String(),
-		TenantID:  tenantID,
-		EventType: domain.EventType("webhook.test"),
-		Payload:   payload,
-		Status:    domain.DeliveryPending,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:           uuid.New().String(),
+		TenantID:     tenantID,
+		SigningKeyID: config.SigningKeyID,
+		EventType:    domain.EventType("webhook.test"),
+		Payload:      payload,
+		Status:       domain.DeliveryPending,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	if err := s.configRepo.CreateConfigDelivery(ctx, delivery); err != nil {
 		return nil, err
@@ -714,9 +994,24 @@ func (s *service) DeliverConfig(ctx context.Context, deliveryID, tenantID string
 	if err != nil {
 		return err
 	}
+	config.Secret, err = s.decryptSecret(config.Secret)
+	if err != nil {
+		return err
+	}
 	delivery, err := s.configRepo.GetConfigDelivery(ctx, deliveryID, tenantID)
 	if err != nil {
 		return err
+	}
+	deliverySecret := config.Secret
+	if delivery.SigningKeyID != "" {
+		storedSecret, secretErr := s.configRepo.GetSigningSecret(ctx, tenantID, delivery.SigningKeyID)
+		if secretErr != nil {
+			return secretErr
+		}
+		deliverySecret, secretErr = s.decryptSecret(storedSecret)
+		if secretErr != nil {
+			return secretErr
+		}
 	}
 
 	// Re-check the pause switch at delivery time. A scheduled resume that has
@@ -726,7 +1021,7 @@ func (s *service) DeliverConfig(ctx context.Context, deliveryID, tenantID string
 			config.Paused = false
 			config.ResumeAt = nil
 			config.UpdatedAt = time.Now().UTC()
-			if err := s.configRepo.UpsertConfig(ctx, config); err != nil {
+			if err := s.persistConfig(ctx, config); err != nil {
 				return err
 			}
 		} else {
@@ -745,7 +1040,9 @@ func (s *service) DeliverConfig(ctx context.Context, deliveryID, tenantID string
 		return fmt.Errorf("%w: no webhook url configured", domain.ErrWebhookConfigDisabled)
 	}
 
-	s.attemptConfigDelivery(ctx, config, delivery)
+	deliveryConfig := *config
+	deliveryConfig.Secret = deliverySecret
+	s.attemptConfigDelivery(ctx, &deliveryConfig, delivery)
 	return nil
 }
 
@@ -768,19 +1065,33 @@ func (s *service) DispatchToTenants(ctx context.Context, eventType domain.EventT
 	eventName := string(eventType)
 
 	for _, config := range configs {
+		storedSecret := config.Secret
+		config.Secret, err = s.decryptSecret(config.Secret)
+		if err != nil {
+			return err
+		}
+		if config.Secret != "" && !strings.HasPrefix(storedSecret, "v1::") {
+			if err := s.persistConfig(ctx, config); err != nil {
+				return err
+			}
+		}
+		if err := s.ensureSigningSecretVersion(ctx, config); err != nil {
+			return err
+		}
 		if !subscribedTo(config.Events, eventName) {
 			continue
 		}
 
 		now := time.Now().UTC()
 		delivery := &domain.TenantWebhookDelivery{
-			ID:        uuid.New().String(),
-			TenantID:  config.TenantID,
-			EventType: eventType,
-			Payload:   body,
-			Status:    domain.DeliveryPending,
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:           uuid.New().String(),
+			TenantID:     config.TenantID,
+			SigningKeyID: config.SigningKeyID,
+			EventType:    eventType,
+			Payload:      body,
+			Status:       domain.DeliveryPending,
+			CreatedAt:    now,
+			UpdatedAt:    now,
 		}
 
 		// A scheduled resume that has elapsed lifts the pause before we decide.
@@ -790,7 +1101,7 @@ func (s *service) DispatchToTenants(ctx context.Context, eventType domain.EventT
 			config.Paused = false
 			config.ResumeAt = nil
 			config.UpdatedAt = now
-			if err := s.configRepo.UpsertConfig(ctx, config); err != nil {
+			if err := s.persistConfig(ctx, config); err != nil {
 				return err
 			}
 		}
@@ -850,6 +1161,9 @@ func (s *service) attemptConfigDelivery(ctx context.Context, config *domain.Tena
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Fluxa-Signature", signBody(config.Secret, delivery.Payload))
+	if delivery.SigningKeyID != "" {
+		req.Header.Set("X-Fluxa-Key-ID", delivery.SigningKeyID)
+	}
 	req.Header.Set("X-Fluxa-Event", string(delivery.EventType))
 	req.Header.Set("X-Fluxa-Tenant-ID", delivery.TenantID)
 

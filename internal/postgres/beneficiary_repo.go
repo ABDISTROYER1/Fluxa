@@ -65,6 +65,19 @@ func (r *BeneficiaryRepo) List(ctx context.Context) ([]*domain.Beneficiary, erro
 	return items, rows.Err()
 }
 
+func (r *BeneficiaryRepo) Check(ctx context.Context, account string) (configured, active bool, err error) {
+	var status string
+	err = r.db.QueryRow(ctx, `SELECT status FROM beneficiaries
+		WHERE tenant_id=$1 AND mode=$2 AND account=$3`, tenant.IDFromContext(ctx), tenant.ModeOrDefault(ctx, domain.ModeLive), account).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("check beneficiary: %w", err)
+	}
+	return true, status == string(domain.BeneficiaryActive), nil
+}
+
 func (r *BeneficiaryRepo) Activate(ctx context.Context, id string, now time.Time) (*domain.Beneficiary, error) {
 	b := &domain.Beneficiary{}
 	err := r.db.QueryRow(ctx, `UPDATE beneficiaries SET status='active', updated_at=$4

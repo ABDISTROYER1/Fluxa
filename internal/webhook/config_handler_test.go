@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,15 @@ import (
 	"github.com/fluxa/fluxa/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
+
+type captureSecretAudit struct {
+	events []*domain.AuditEvent
+}
+
+func (a *captureSecretAudit) Record(_ context.Context, event *domain.AuditEvent) error {
+	a.events = append(a.events, event)
+	return nil
+}
 
 // newConfigTestRouter mounts the real Routes() under a chi router and injects
 // the tenant for each request, so the tests exercise the actual HTTP surface:
@@ -119,6 +129,88 @@ func TestConfigHandler_GetConfigNotFoundBeforeCreation(t *testing.T) {
 	}
 }
 
+func TestSigningSecretHandlers_DiscloseOnlyOnRotationAndScopeByTenant(t *testing.T) {
+	repo := newMockConfigRepo()
+	svc := newConfigTestService(t, repo)
+	tenantA := newConfigTestRouter(t, svc, "tenant-a")
+	tenantB := newConfigTestRouter(t, svc, "tenant-b")
+
+	code, rotated := doJSON(t, tenantA, http.MethodPost, "/webhooks/secret/rotate", `{"overlap_window_seconds":60}`)
+	if code != http.StatusOK {
+		t.Fatalf("rotation status = %d, want 200", code)
+	}
+	secret, ok := rotated["secret"].(string)
+	if !ok || secret == "" {
+		t.Fatalf("rotation response must reveal secret once, body=%v", rotated)
+	}
+	if rotated["status"] != "active" {
+		t.Fatalf("new secret status = %v, want active", rotated["status"])
+	}
+
+	code, inspected := doJSON(t, tenantA, http.MethodGet, "/webhooks/secret", "")
+	if code != http.StatusOK {
+		t.Fatalf("inspection status = %d, want 200", code)
+	}
+	if _, exists := inspected["secret"]; exists {
+		t.Fatalf("inspection must never reveal secret material: %v", inspected)
+	}
+	metadata, ok := inspected["secrets"].([]interface{})
+	if !ok || len(metadata) != 1 {
+		t.Fatalf("inspection metadata = %v, want one version", inspected["secrets"])
+	}
+	version, ok := metadata[0].(map[string]interface{})
+	if !ok || version["key_id"] != rotated["key_id"] {
+		t.Fatalf("inspection did not identify the rotated version: %v", metadata[0])
+	}
+
+	code, otherTenant := doJSON(t, tenantB, http.MethodGet, "/webhooks/secret", "")
+	if code != http.StatusOK {
+		t.Fatalf("other tenant inspection status = %d, want 200", code)
+	}
+	if items, _ := otherTenant["secrets"].([]interface{}); len(items) != 0 {
+		t.Fatalf("other tenant must not see tenant-a versions: %v", items)
+	}
+	code, otherRotation := doJSON(t, tenantB, http.MethodPost, "/webhooks/secret/rotate", `{}`)
+	if code != http.StatusOK || otherRotation["key_id"] == rotated["key_id"] {
+		t.Fatalf("tenant-b rotation should create an isolated version: status=%d body=%v", code, otherRotation)
+	}
+	code, inspected = doJSON(t, tenantA, http.MethodGet, "/webhooks/secret", "")
+	remaining, ok := inspected["secrets"].([]interface{})
+	if code != http.StatusOK || !ok || len(remaining) != 1 {
+		t.Fatalf("tenant-b rotation changed tenant-a metadata: status=%d body=%v", code, inspected)
+	}
+}
+
+func TestSigningSecretRotationAuditDoesNotContainSecret(t *testing.T) {
+	svc := newConfigTestService(t, newMockConfigRepo())
+	audit := &captureSecretAudit{}
+	r := chi.NewRouter()
+	handler := NewHandler(svc).WithAuditLogger(audit)
+	r.Post("/webhooks/secret/rotate", handler.RotateSigningSecret)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/secret/rotate", strings.NewReader(`{}`))
+	req = req.WithContext(tenant.WithID(req.Context(), "tenant-a"))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rotation status = %d, want 200", rec.Code)
+	}
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode rotation response: %v", err)
+	}
+	secret, _ := response["secret"].(string)
+	if secret == "" || len(audit.events) != 1 {
+		t.Fatalf("rotation should return secret and record one audit event: response=%v audit=%v", response, audit.events)
+	}
+	encodedAudit, err := json.Marshal(audit.events[0])
+	if err != nil {
+		t.Fatalf("marshal audit event: %v", err)
+	}
+	if strings.Contains(string(encodedAudit), secret) {
+		t.Fatal("audit event must not contain plaintext signing secret")
+	}
+}
+
 // TestConfigHandler_RequiresTenantContext ensures the endpoints refuse to serve
 // a request that carries no tenant.
 func TestConfigHandler_RequiresTenantContext(t *testing.T) {
@@ -131,6 +223,12 @@ func TestConfigHandler_RequiresTenantContext(t *testing.T) {
 	}
 	if code, _ := doJSON(t, h, http.MethodPut, "/webhooks/config", `{"enabled":true}`); code == http.StatusOK {
 		t.Fatal("PUT /webhooks/config without a tenant must not succeed")
+	}
+	if code, _ := doJSON(t, h, http.MethodGet, "/webhooks/secret", ""); code != http.StatusUnauthorized {
+		t.Fatalf("GET /webhooks/secret without a tenant = %d, want 401", code)
+	}
+	if code, _ := doJSON(t, h, http.MethodPost, "/webhooks/secret/rotate", `{}`); code != http.StatusUnauthorized {
+		t.Fatalf("POST /webhooks/secret/rotate without a tenant = %d, want 401", code)
 	}
 }
 

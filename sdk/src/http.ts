@@ -6,6 +6,8 @@ export interface HttpClientConfig {
   timeout: number;
   maxRetries: number;
   retryDelay: number;
+  idempotencyKey?: string;
+  requireIdempotencyKey?: boolean;
 }
 
 export interface RequestOptions {
@@ -21,6 +23,12 @@ export interface HttpRequestOptions extends RequestOptions {
   query?: Record<string, any>;
   headers?: Record<string, string>;
   timeout?: number;
+  /**
+   * Opt in to retrying a mutation that the server does not support
+   * idempotency for. When false (default), a mutation without an
+   * idempotency key will fail fast instead of being silently replayed.
+   */
+  allowUnsafeRetry?: boolean;
 }
 
 export interface HttpResponse<T> {
@@ -31,7 +39,8 @@ export interface HttpResponse<T> {
 
 function buildQueryString(
   params?:
-    Record<string, string | number | undefined> | { [key: string]: string | number | undefined },
+    | Record<string, string | number | undefined>
+    | { [key: string]: string | number | undefined },
 ): string {
   if (!params) return '';
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
@@ -60,6 +69,7 @@ function requiresIdempotencyKey(method: string, path: string): boolean {
       '/claimable-balances',
       '/payment-links',
       '/refunds',
+      '/webhooks/secret/rotate',
     ].includes(path)
   ) {
     return true;
@@ -79,8 +89,23 @@ function parseRetryAfter(value: string | null): number | undefined {
   return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 }
 
-function makeIdempotencyKey(): string {
-  return globalThis.crypto.randomUUID();
+export function makeIdempotencyKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  // RFC4122 v4 fallback for environments without web crypto.
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -107,12 +132,19 @@ export class HttpClient {
     const existingKey = Object.entries(headers).find(([name]) =>
       ['idempotency-key', 'x-idempotency-key'].includes(name.toLowerCase()),
     )?.[1];
+    const mutating = !['GET', 'HEAD'].includes(method.toUpperCase());
+    const needsKey = requiresIdempotencyKey(method, path);
     const idempotencyKey =
       options.idempotencyKey ||
       existingKey ||
-      (requiresIdempotencyKey(method, path) ? makeIdempotencyKey() : undefined);
+      this.config.idempotencyKey ||
+      (needsKey ? makeIdempotencyKey() : undefined);
     if (idempotencyKey && !existingKey) headers['Idempotency-Key'] = idempotencyKey;
-    const safeToRetry = ['GET', 'HEAD'].includes(method.toUpperCase()) || Boolean(idempotencyKey);
+
+    // Mutations are only retryable when they carry an idempotency key.
+    // Otherwise a lost response could duplicate a financial operation.
+    const safeToRetry =
+      !mutating || Boolean(idempotencyKey) || Boolean(options.allowUnsafeRetry);
 
     let lastError: Error | undefined;
     let nextRetryDelay: number | undefined;

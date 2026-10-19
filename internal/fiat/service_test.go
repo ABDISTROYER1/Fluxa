@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -185,6 +186,10 @@ func (m *mockRail) HandleWebhook(ctx context.Context, payload []byte, signature 
 		return nil, m.webhookErr
 	}
 	return m.webhookEvt, nil
+}
+
+func (m *mockRail) HandleWebhookWithHeaders(ctx context.Context, payload []byte, headers http.Header) (*RailEvent, error) {
+	return m.HandleWebhook(ctx, payload, "")
 }
 
 // mockFXService implements fx.Service for testing

@@ -94,6 +94,12 @@ type DriftRepository interface {
 	ListCurrentDrift(ctx context.Context) ([]*DriftSnapshot, error)
 }
 
+type DiscrepancyWorkflowRepository interface {
+	ListReconciliationDiscrepancies(context.Context, string, string, string, int, int) ([]*domain.ReconciliationDiscrepancy, int, error)
+	UpdateReconciliationDiscrepancy(context.Context, string, string, string, string, string) (*domain.ReconciliationDiscrepancy, error)
+	ReconciliationDiscrepancySummary(context.Context, string) (*domain.ReconciliationDiscrepancySummary, error)
+}
+
 type taskQueue interface {
 	EnqueueTransfer(context.Context, string) error
 	Enqueue(context.Context, string, interface{}) error
@@ -168,6 +174,44 @@ func NewService(
 func (s *Service) WithDriftThreshold(threshold decimal.Decimal) *Service {
 	s.driftThreshold = threshold
 	return s
+}
+
+func (s *Service) discrepancyWorkflow() (DiscrepancyWorkflowRepository, error) {
+	repo, ok := s.repo.(DiscrepancyWorkflowRepository)
+	if !ok {
+		return nil, errors.New("reconciliation discrepancy workflow is unavailable")
+	}
+	return repo, nil
+}
+
+func (s *Service) ListDiscrepancies(ctx context.Context, tenantID, status, category string, limit, offset int) ([]*domain.ReconciliationDiscrepancy, int, error) {
+	repo, err := s.discrepancyWorkflow()
+	if err != nil {
+		return nil, 0, err
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return repo.ListReconciliationDiscrepancies(ctx, tenantID, status, category, limit, offset)
+}
+
+func (s *Service) UpdateDiscrepancy(ctx context.Context, tenantID, id, action, note, assignedTo string) (*domain.ReconciliationDiscrepancy, error) {
+	repo, err := s.discrepancyWorkflow()
+	if err != nil {
+		return nil, err
+	}
+	return repo.UpdateReconciliationDiscrepancy(ctx, tenantID, id, action, note, assignedTo)
+}
+
+func (s *Service) DiscrepancySummary(ctx context.Context, tenantID string) (*domain.ReconciliationDiscrepancySummary, error) {
+	repo, err := s.discrepancyWorkflow()
+	if err != nil {
+		return nil, err
+	}
+	return repo.ReconciliationDiscrepancySummary(ctx, tenantID)
 }
 
 // DefaultDriftThresholdUSD is used when RECONCILIATION_DRIFT_THRESHOLD_USD is
@@ -438,7 +482,7 @@ func (s *Service) checkTransaction(ctx context.Context, tx *domain.Transaction) 
 				return fmt.Errorf("update status to reconciliation_failed: %w", repoErr)
 			}
 
-			s.writeAudit(ctx, tx, "HTTP 404", false, false, false, AuditNotFound, "transaction not found on Horizon")
+			s.writeAudit(ctx, tx, "HTTP 404", false, false, false, domain.AuditNotFound, "transaction not found on Horizon")
 			s.alerting.Critical(ctx, "Reconciliation Failed: Missing Transaction",
 				fmt.Sprintf("Transaction %s (hash: %s) is marked confirmed in DB but returned 404 on Horizon. Possible ledger loss or fork.", tx.ID, hash))
 			return nil
@@ -452,7 +496,7 @@ func (s *Service) checkTransaction(ctx context.Context, tx *domain.Transaction) 
 			return fmt.Errorf("update status to reconciliation_failed: %w", repoErr)
 		}
 
-		s.writeAudit(ctx, tx, "unsuccessful", false, false, false, AuditNotFound,
+		s.writeAudit(ctx, tx, "unsuccessful", false, false, false, domain.AuditNotFound,
 			fmt.Sprintf("transaction successful=false on Horizon (result: %s)", horizonTx.ResultXdr))
 		s.alerting.Critical(ctx, "Reconciliation Failed: Unsuccessful Transaction",
 			fmt.Sprintf("Transaction %s (hash: %s) is marked confirmed in DB but Horizon reports it as unsuccessful.", tx.ID, hash))
@@ -480,13 +524,13 @@ func (s *Service) checkTransaction(ctx context.Context, tx *domain.Transaction) 
 			return fmt.Errorf("update status to reconciliation_failed: %w", repoErr)
 		}
 
-		s.writeAudit(ctx, tx, horizonStatus(&horizonTx), amountVerified, assetVerified, feeVerified, AuditMismatch, details)
+		s.writeAudit(ctx, tx, horizonStatus(&horizonTx), amountVerified, assetVerified, feeVerified, domain.AuditMismatch, details)
 		s.alerting.Critical(ctx, "Reconciliation Failed: Payment Mismatch",
 			fmt.Sprintf("Transaction %s (hash: %s): %s", tx.ID, hash, details))
 		return nil
 	}
 
-	s.writeAudit(ctx, tx, horizonStatus(&horizonTx), true, true, true, AuditOK, "all checks passed")
+	s.writeAudit(ctx, tx, horizonStatus(&horizonTx), true, true, true, domain.AuditOK, "all checks passed")
 	if err := s.repo.UpdateReconciledAt(ctx, tx.ID); err != nil {
 		log.Error().Err(err).Str("tx_id", tx.ID).Msg("reconcile: update reconciled_at")
 	}

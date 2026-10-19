@@ -16,6 +16,8 @@ import (
 // metadata endpoints).
 var ErrUnsafeWebhookURL = errors.New("webhook url is not allowed")
 
+var ErrUnsupportedEventType = errors.New("unsupported webhook event type")
+
 // allowedWebhookSchemes restricts registrations to plain HTTP(S) delivery,
 // blocking schemes such as file://, gopher://, or javascript: that Go's
 // http.Client would otherwise happily attempt to dereference.

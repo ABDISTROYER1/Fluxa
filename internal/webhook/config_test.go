@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,13 +21,120 @@ type mockConfigRepo struct {
 	mu         sync.Mutex
 	configs    map[string]*domain.TenantWebhookConfig
 	deliveries map[string]*domain.TenantWebhookDelivery
+	secrets    map[string]map[string]*domain.WebhookSigningSecret
+	values     map[string]map[string]string
 }
 
 func newMockConfigRepo() *mockConfigRepo {
 	return &mockConfigRepo{
 		configs:    make(map[string]*domain.TenantWebhookConfig),
 		deliveries: make(map[string]*domain.TenantWebhookDelivery),
+		secrets:    make(map[string]map[string]*domain.WebhookSigningSecret),
+		values:     make(map[string]map[string]string),
 	}
+}
+
+func (m *mockConfigRepo) ListSigningSecrets(_ context.Context, tenantID string) ([]*domain.WebhookSigningSecret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*domain.WebhookSigningSecret
+	for _, secret := range m.secrets[tenantID] {
+		copied := *secret
+		if copied.Status == "overlapping" && copied.RetiredAt != nil && !time.Now().Before(*copied.RetiredAt) {
+			copied.Status = "retired"
+			secret.Status = "retired"
+		}
+		out = append(out, &copied)
+	}
+	return out, nil
+}
+
+func (m *mockConfigRepo) ImportLegacySigningSecret(_ context.Context, tenantID, keyID, encryptedSecret string, now time.Time) (*domain.WebhookSigningSecret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	config, ok := m.configs[tenantID]
+	if !ok {
+		return nil, domain.ErrWebhookConfigNotFound
+	}
+	if config.SigningKeyID != "" {
+		if metadata := m.secrets[tenantID][config.SigningKeyID]; metadata != nil {
+			copied := *metadata
+			return &copied, nil
+		}
+	}
+	if config.Secret == "" {
+		return nil, nil
+	}
+	if m.secrets[tenantID] == nil {
+		m.secrets[tenantID] = make(map[string]*domain.WebhookSigningSecret)
+		m.values[tenantID] = make(map[string]string)
+	}
+	metadata := &domain.WebhookSigningSecret{KeyID: keyID, CreatedAt: now, ActivatedAt: now, Status: "active"}
+	m.secrets[tenantID][keyID] = metadata
+	m.values[tenantID][keyID] = encryptedSecret
+	config.Secret = encryptedSecret
+	config.SigningKeyID = keyID
+	for _, delivery := range m.deliveries {
+		if delivery.TenantID == tenantID && delivery.SigningKeyID == "" {
+			delivery.SigningKeyID = keyID
+		}
+	}
+	return metadata, nil
+}
+
+func (m *mockConfigRepo) RotateSigningSecret(_ context.Context, tenantID, keyID, encryptedSecret, legacyKeyID, legacyEncryptedSecret string, overlap time.Duration, now time.Time) (*domain.WebhookSigningSecret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, existing := range m.secrets[tenantID] {
+		if existing.Status == "active" {
+			if overlap > 0 {
+				existing.Status = "overlapping"
+				retireAt := now.Add(overlap)
+				existing.RetiredAt = &retireAt
+			} else {
+				existing.Status = "retired"
+				retireAt := now
+				existing.RetiredAt = &retireAt
+			}
+		}
+	}
+	if m.secrets[tenantID] == nil {
+		m.secrets[tenantID] = make(map[string]*domain.WebhookSigningSecret)
+		m.values[tenantID] = make(map[string]string)
+	}
+	if legacyKeyID != "" && legacyEncryptedSecret != "" {
+		legacyStatus := "retired"
+		retiredAt := now
+		if overlap > 0 {
+			legacyStatus = "overlapping"
+			retiredAt = now.Add(overlap)
+		}
+		m.secrets[tenantID][legacyKeyID] = &domain.WebhookSigningSecret{
+			KeyID: legacyKeyID, CreatedAt: now, ActivatedAt: now, RetiredAt: &retiredAt, Status: legacyStatus,
+		}
+		m.values[tenantID][legacyKeyID] = legacyEncryptedSecret
+	}
+	metadata := &domain.WebhookSigningSecret{KeyID: keyID, CreatedAt: now, ActivatedAt: now, Status: "active"}
+	m.secrets[tenantID][keyID] = metadata
+	m.values[tenantID][keyID] = encryptedSecret
+	config := m.configs[tenantID]
+	if config == nil {
+		config = &domain.TenantWebhookConfig{TenantID: tenantID, CreatedAt: now}
+		m.configs[tenantID] = config
+	}
+	config.Secret = encryptedSecret
+	config.SigningKeyID = keyID
+	return metadata, nil
+}
+
+func (m *mockConfigRepo) GetSigningSecret(_ context.Context, tenantID, keyID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	secret, ok := m.values[tenantID][keyID]
+	if !ok {
+		return "", domain.ErrWebhookConfigNotFound
+	}
+	return secret, nil
 }
 
 func (m *mockConfigRepo) GetConfig(_ context.Context, tenantID string) (*domain.TenantWebhookConfig, error) {
@@ -61,6 +169,18 @@ func (m *mockConfigRepo) ListEnabledConfigs(_ context.Context) ([]*domain.Tenant
 		}
 	}
 	return out, nil
+}
+
+func (m *mockConfigRepo) ListConfigs(_ context.Context) ([]*domain.TenantWebhookConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	configs := make([]*domain.TenantWebhookConfig, 0, len(m.configs))
+	for _, config := range m.configs {
+		copied := *config
+		copied.Events = append([]string{}, config.Events...)
+		configs = append(configs, &copied)
+	}
+	return configs, nil
 }
 
 func (m *mockConfigRepo) CreateConfigDelivery(_ context.Context, delivery *domain.TenantWebhookDelivery) error {
@@ -190,8 +310,12 @@ func TestUpdateConfig_CreatesAndRevealsSecretOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetConfig() error: %v", err)
 	}
-	if stored.Secret != result.Secret {
-		t.Fatal("the stored secret must be preserved when not rotating")
+	if stored.Secret == result.Secret || !strings.HasPrefix(stored.Secret, "v1::") {
+		t.Fatal("the stored secret must be encrypted at rest")
+	}
+	decrypted, err := svc.decryptSecret(stored.Secret)
+	if err != nil || decrypted != result.Secret {
+		t.Fatal("the encrypted secret must remain usable for signing")
 	}
 
 	// Reading the config back must not expose the secret either.
@@ -226,6 +350,149 @@ func TestUpdateConfig_SecretRotation(t *testing.T) {
 	}
 	if rotated.Secret == first.Secret {
 		t.Fatal("expected the rotated secret to differ from the original")
+	}
+}
+
+func TestRotateSigningSecret_OverlapExpires(t *testing.T) {
+	repo := newMockConfigRepo()
+	svc := newConfigTestService(t, repo)
+	ctx := tenantCtx("tenant-1")
+	first, _, err := svc.RotateSigningSecret(ctx, 0)
+	if err != nil {
+		t.Fatalf("initial rotation: %v", err)
+	}
+	second, _, err := svc.RotateSigningSecret(ctx, time.Minute)
+	if err != nil {
+		t.Fatalf("rotation with overlap: %v", err)
+	}
+	third, _, err := svc.RotateSigningSecret(ctx, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("subsequent rotation with overlap: %v", err)
+	}
+	secrets, err := svc.ListSigningSecrets(ctx)
+	if err != nil {
+		t.Fatalf("list secrets: %v", err)
+	}
+	if len(secrets) != 3 {
+		t.Fatalf("secret versions = %d, want 3", len(secrets))
+	}
+	for _, secret := range secrets {
+		if secret.KeyID != third.KeyID && secret.Status != "overlapping" {
+			t.Fatalf("unexpired previous status = %q, want overlapping", secret.Status)
+		}
+		if secret.KeyID == third.KeyID && secret.Status != "active" {
+			t.Fatalf("latest status = %q, want active", secret.Status)
+		}
+	}
+	repo.mu.Lock()
+	retiredAt := time.Now().Add(-time.Second)
+	repo.secrets["tenant-1"][first.KeyID].RetiredAt = &retiredAt
+	repo.mu.Unlock()
+	secrets, err = svc.ListSigningSecrets(ctx)
+	if err != nil {
+		t.Fatalf("list expired secrets: %v", err)
+	}
+	for _, secret := range secrets {
+		if secret.KeyID == first.KeyID && secret.Status != "retired" {
+			t.Fatalf("expired previous status = %q, want retired", secret.Status)
+		}
+		if secret.KeyID == second.KeyID && secret.Status != "overlapping" {
+			t.Fatalf("unexpired second version status = %q, want overlapping", secret.Status)
+		}
+	}
+}
+
+func TestRotateSigningSecret_ConcurrentOnlyOneActive(t *testing.T) {
+	repo := newMockConfigRepo()
+	svc := newConfigTestService(t, repo)
+	ctx := tenantCtx("tenant-1")
+	const rotations = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, rotations)
+	for rotation := 0; rotation < rotations; rotation++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := svc.RotateSigningSecret(ctx, time.Minute)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent rotation: %v", err)
+		}
+	}
+	secrets, err := svc.ListSigningSecrets(ctx)
+	if err != nil {
+		t.Fatalf("list secrets: %v", err)
+	}
+	active := 0
+	for _, secret := range secrets {
+		if secret.Status == "active" {
+			active++
+		}
+	}
+	if active != 1 {
+		t.Fatalf("active versions = %d, want exactly one", active)
+	}
+}
+
+func TestListSigningSecrets_ImportsLegacySecretEncrypted(t *testing.T) {
+	repo := newMockConfigRepo()
+	legacySecret := "whsec_existing-legacy-secret"
+	if err := repo.UpsertConfig(context.Background(), &domain.TenantWebhookConfig{
+		TenantID: "tenant-legacy", Secret: legacySecret, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed legacy config: %v", err)
+	}
+	svc := newConfigTestService(t, repo)
+	secrets, err := svc.ListSigningSecrets(tenantCtx("tenant-legacy"))
+	if err != nil {
+		t.Fatalf("list imported secret: %v", err)
+	}
+	if len(secrets) != 1 || secrets[0].Status != "active" {
+		t.Fatalf("imported metadata = %v, want one active version", secrets)
+	}
+	config, err := repo.GetConfig(context.Background(), "tenant-legacy")
+	if err != nil {
+		t.Fatalf("read migrated config: %v", err)
+	}
+	if config.SigningKeyID != secrets[0].KeyID || config.Secret == legacySecret || !strings.HasPrefix(config.Secret, "v1::") {
+		t.Fatal("legacy secret should be encrypted and linked to its active key ID")
+	}
+	stored, err := repo.GetSigningSecret(context.Background(), "tenant-legacy", secrets[0].KeyID)
+	if err != nil {
+		t.Fatalf("read imported key: %v", err)
+	}
+	plaintext, err := svc.decryptSecret(stored)
+	if err != nil || plaintext != legacySecret {
+		t.Fatal("imported key should preserve the original secret")
+	}
+}
+
+func TestMigrateLegacySigningSecrets_EncryptsAllConfigs(t *testing.T) {
+	repo := newMockConfigRepo()
+	for _, tenantID := range []string{"tenant-a", "tenant-b"} {
+		if err := repo.UpsertConfig(context.Background(), &domain.TenantWebhookConfig{
+			TenantID: tenantID, Secret: "whsec_legacy_" + tenantID, CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("seed %s: %v", tenantID, err)
+		}
+	}
+	svc := newConfigTestService(t, repo)
+	if err := svc.MigrateLegacySigningSecrets(context.Background()); err != nil {
+		t.Fatalf("migrate legacy secrets: %v", err)
+	}
+	for _, tenantID := range []string{"tenant-a", "tenant-b"} {
+		config, err := repo.GetConfig(context.Background(), tenantID)
+		if err != nil {
+			t.Fatalf("read %s: %v", tenantID, err)
+		}
+		if config.SigningKeyID == "" || !strings.HasPrefix(config.Secret, "v1::") {
+			t.Fatalf("%s was not encrypted and versioned: %+v", tenantID, config)
+		}
 	}
 }
 
@@ -470,13 +737,14 @@ func TestDeliverConfig_PausedRecordsWithoutSending(t *testing.T) {
 }
 
 func TestDispatchToTenants_SendsSignedPayloadAndRecordsSuccess(t *testing.T) {
-	var gotSig, gotTimestamp, gotEvent, gotTenant string
+	var gotSig, gotTimestamp, gotEvent, gotTenant, gotKeyID string
 	var gotBody []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSig = r.Header.Get("X-Fluxa-Signature")
 		gotTimestamp = r.Header.Get("X-Fluxa-Timestamp")
 		gotEvent = r.Header.Get("X-Fluxa-Event")
 		gotTenant = r.Header.Get("X-Fluxa-Tenant-ID")
+		gotKeyID = r.Header.Get("X-Fluxa-Key-ID")
 		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusAccepted)
 	}))
@@ -505,6 +773,9 @@ func TestDispatchToTenants_SendsSignedPayloadAndRecordsSuccess(t *testing.T) {
 	if len(deliveries) != 1 {
 		t.Fatalf("expected 1 delivery, got %d", len(deliveries))
 	}
+	if _, _, err := svc.RotateSigningSecret(ctx, time.Minute); err != nil {
+		t.Fatalf("rotate before retry: %v", err)
+	}
 	// No queue is wired in tests, so drive the delivery directly.
 	if err := svc.DeliverConfig(ctx, deliveries[0].ID, "tenant-1"); err != nil {
 		t.Fatalf("DeliverConfig() error: %v", err)
@@ -514,6 +785,12 @@ func TestDispatchToTenants_SendsSignedPayloadAndRecordsSuccess(t *testing.T) {
 	// value returned to the caller is redacted.
 	if want := signBody(created.Secret, deliveries[0].Payload); gotSig != want {
 		t.Fatalf("signature = %q, want %q", gotSig, want)
+	}
+	if gotKeyID != deliveries[0].SigningKeyID {
+		t.Fatalf("key ID header = %q, want pinned delivery key %q", gotKeyID, deliveries[0].SigningKeyID)
+	}
+	if gotTimestamp == "" {
+		t.Fatal("timestamp header is empty")
 	}
 	if gotEvent != string(domain.EventTransferSettled) {
 		t.Fatalf("event header = %q", gotEvent)
@@ -682,8 +959,8 @@ func TestConfig_IsolatedPerTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetConfig() error: %v", err)
 	}
-	if storedA.Secret != a.Secret || storedB.Secret != b.Secret {
-		t.Fatal("each tenant's stored secret must match the one returned at creation")
+	if storedA.Secret == a.Secret || storedB.Secret == b.Secret {
+		t.Fatal("tenant secrets must not be stored in plaintext")
 	}
 	if storedA.Secret == storedB.Secret {
 		t.Fatal("each tenant must get a distinct stored secret")

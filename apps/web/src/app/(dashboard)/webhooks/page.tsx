@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { api, type WebhookEndpoint } from '@/lib/api';
+import { api, type WebhookEndpoint, type WebhookEventCatalogEntry } from '@/lib/api';
 import { useToast } from '@/lib/toast-context';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,45 @@ export default function WebhooksPage() {
   const [signingSecret, setSigningSecret] = useState<string | null>(null);
   const [showSecret, setShowSecret] = useState(false);
   const [rotating, setRotating] = useState(false);
+  const [eventSearch, setEventSearch] = useState('');
+  const [catalogResult, setCatalogResult] = useState<{
+    query: string;
+    events: WebhookEventCatalogEntry[];
+    error: string;
+    loading: boolean;
+  }>({ query: '', events: [], error: '', loading: true });
+  const catalogLoading = catalogResult.query !== eventSearch || catalogResult.loading;
+  const catalog = catalogResult.query === eventSearch ? catalogResult.events : [];
+  const catalogError = catalogResult.query === eventSearch ? catalogResult.error : '';
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listWebhookEvents(eventSearch)
+      .then((res) => {
+        if (!cancelled) {
+          setCatalogResult({
+            query: eventSearch,
+            events: res.events || [],
+            error: '',
+            loading: false,
+          });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCatalogResult({
+            query: eventSearch,
+            events: [],
+            error: err instanceof Error ? err.message : 'Failed to load event catalogue',
+            loading: false,
+          });
+        }
+      })
+    return () => {
+      cancelled = true;
+    };
+  }, [eventSearch]);
 
   const fetchEndpoints = useCallback(async () => {
     setLoading(true);
@@ -149,6 +188,40 @@ export default function WebhooksPage() {
           )}
         </Button>
       </PageHeader>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Webhook event catalogue</CardTitle>
+          <CardDescription>Search supported events and inspect their example payloads.</CardDescription>
+          <Input
+            aria-label="Search webhook events"
+            placeholder="Search by event name or description"
+            value={eventSearch}
+            onChange={(e) => setEventSearch(e.target.value)}
+          />
+        </CardHeader>
+        <CardContent>
+          {catalogLoading ? (
+            <p role="status" className="text-sm text-muted-foreground">Loading events…</p>
+          ) : catalogError ? (
+            <p role="alert" className="text-sm text-destructive">{catalogError}</p>
+          ) : catalog.length === 0 ? (
+            <p role="status" className="text-sm text-muted-foreground">No matching webhook events.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3">
+              {catalog.map((event) => (
+                <details key={event.name} className="rounded-lg border border-border p-4">
+                  <summary className="cursor-pointer font-mono text-sm font-medium">{event.name}</summary>
+                  <p className="mt-2 text-sm text-muted-foreground">{event.description}</p>
+                  <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">
+                    <code>{JSON.stringify(event.example, null, 2)}</code>
+                  </pre>
+                </details>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

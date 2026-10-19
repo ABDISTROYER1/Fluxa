@@ -9,6 +9,7 @@ import (
 
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/domain"
+	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 )
 
