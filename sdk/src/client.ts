@@ -16,6 +16,16 @@ export interface FluxaClientConfig {
   timeout?: number;
   maxRetries?: number;
   retryDelay?: number;
+  /**
+   * Default idempotency key to use for financial mutations when the caller does not
+   * supply one. Useful for cross-process retries where the key must be stable.
+   */
+  idempotencyKey?: string;
+  /**
+   * When true, requests without an idempotency key will throw before being sent.
+   * Defaults to false.
+   */
+  requireIdempotencyKey?: boolean;
 }
 
 const DEFAULT_BASE_URL = 'https://api.fluxa.io';
@@ -48,6 +58,8 @@ export class FluxaClient {
       timeout: config.timeout && config.timeout > 0 ? config.timeout : DEFAULT_TIMEOUT,
       maxRetries: Math.max(0, config.maxRetries ?? DEFAULT_MAX_RETRIES),
       retryDelay: Math.max(0, config.retryDelay ?? DEFAULT_RETRY_DELAY),
+      idempotencyKey: config.idempotencyKey,
+      requireIdempotencyKey: config.requireIdempotencyKey ?? false,
     };
 
     this.http = new HttpClient(httpConfig);

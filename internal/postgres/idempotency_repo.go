@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -21,28 +22,21 @@ const (
 )
 
 // AcquisitionState describes what happened when a key was looked up.
-type AcquisitionState uint8
+type AcquisitionState = idempotency.AcquisitionState
 
 const (
-	Acquired AcquisitionState = iota
-	Replay
-	InProgress
-	LeaseExpired
-	BodyMismatch
+	Acquired     = idempotency.Acquired
+	Replay       = idempotency.Replay
+	InProgress   = idempotency.InProgress
+	LeaseExpired = idempotency.LeaseExpired
+	BodyMismatch = idempotency.BodyMismatch
 )
 
 // Acquisition is the result of atomically acquiring an idempotency key.
-type Acquisition struct {
-	State  AcquisitionState
-	Record domain.IdempotencyRecord
-}
+type Acquisition = idempotency.Acquisition
 
 // Response is the durable HTTP response returned by the original request.
-type Response struct {
-	Status  int
-	Headers http.Header
-	Body    []byte
-}
+type Response = idempotency.Response
 
 type IdempotencyRepo struct {
 	db DB

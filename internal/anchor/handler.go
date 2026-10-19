@@ -8,6 +8,7 @@ import (
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 )
 
 type Handler struct {
@@ -69,7 +70,8 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 
 	a, err := h.registry.Register(r.Context(), req.HomeDomain)
 	if err != nil {
-		api.Error(w, http.StatusBadGateway, "ANCHOR_REGISTRATION_FAILED", err.Error())
+		log.Error().Err(err).Msg("anchor registration failed")
+		api.Error(w, http.StatusBadGateway, "ANCHOR_REGISTRATION_FAILED", "anchor registration failed")
 		return
 	}
 

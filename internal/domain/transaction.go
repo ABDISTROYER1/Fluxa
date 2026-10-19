@@ -22,6 +22,7 @@ const (
 	// must reset it to StatusPending first, because settlement.Engine
 	// silently no-ops on any status other than pending.
 	StatusComplianceHold TransactionStatus = "compliance_hold"
+	StatusApprovalPending TransactionStatus = "approval_pending"
 	StatusCancelled      TransactionStatus = "cancelled"
 
 	TypeTransfer   TransactionType = "transfer"

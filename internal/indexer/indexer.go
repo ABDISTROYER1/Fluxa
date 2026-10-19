@@ -3,7 +3,10 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/domain"
@@ -22,6 +25,10 @@ type Config struct {
 	StreamMinBackoff  time.Duration
 	StreamMaxBackoff  time.Duration
 	SyncPageSize      int
+	StreamConcurrency int
+	StreamMaxWallets  int
+	StreamShardCount  int
+	StreamShardIndex  int
 }
 
 func DefaultConfig() Config {
@@ -30,14 +37,18 @@ func DefaultConfig() Config {
 		StreamMinBackoff:  1 * time.Second,
 		StreamMaxBackoff:  30 * time.Second,
 		SyncPageSize:      100,
+		StreamConcurrency: 32,
+		StreamMaxWallets:  32,
+		StreamShardCount:  1,
 	}
 }
 
 type Indexer struct {
-	walletRepo wallet.Repository
-	txRepo     transfer.Repository
-	stellar    stellar.Client
-	config     Config
+	walletRepo    wallet.Repository
+	txRepo        transfer.Repository
+	stellar       stellar.Client
+	config        Config
+	activeStreams atomic.Int64
 }
 
 func New(walletRepo wallet.Repository, txRepo transfer.Repository, stellarClient stellar.Client) *Indexer {
@@ -56,6 +67,18 @@ func NewWithConfig(walletRepo wallet.Repository, txRepo transfer.Repository, ste
 	}
 	if config.SyncPageSize <= 0 {
 		config.SyncPageSize = DefaultConfig().SyncPageSize
+	}
+	if config.StreamConcurrency <= 0 {
+		config.StreamConcurrency = DefaultConfig().StreamConcurrency
+	}
+	if config.StreamMaxWallets <= 0 {
+		config.StreamMaxWallets = DefaultConfig().StreamMaxWallets
+	}
+	if config.StreamShardCount <= 0 {
+		config.StreamShardCount = DefaultConfig().StreamShardCount
+	}
+	if config.StreamShardIndex < 0 || config.StreamShardIndex >= config.StreamShardCount {
+		config.StreamShardIndex = 0
 	}
 	return &Indexer{
 		walletRepo: walletRepo,
@@ -162,19 +185,39 @@ func (idx *Indexer) persistBalances(ctx context.Context, walletID string, acct h
 	return nil
 }
 
-// StreamAll starts a real-time Horizon payment stream for every wallet and
-// blocks until ctx is canceled. It pages through all wallets using limit/offset.
-// Each wallet streams on its own goroutine so a reconnect loop on one wallet
-// never blocks or is affected by another.
+// StreamAll starts bounded Horizon payment streams for this process's wallet
+// shard and blocks until ctx is canceled. Wallets outside the stream cap remain
+// covered by the periodic sync worker.
 func (idx *Indexer) StreamAll(ctx context.Context) error {
 	limit := idx.config.SyncPageSize
 	offset := 0
+	workerCount := idx.config.StreamConcurrency
+	if idx.config.StreamMaxWallets < workerCount {
+		workerCount = idx.config.StreamMaxWallets
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	walletsToStream := make(chan *domain.Wallet)
 
 	var wg sync.WaitGroup
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for w := range walletsToStream {
+				idx.StreamWallet(streamCtx, w)
+			}
+		}()
+	}
+
+	var streamErr error
+	var selected, shardSkipped, syncOnly int
+	walletLoop:
 	for {
 		wallets, err := idx.walletRepo.List(ctx, limit, offset)
 		if err != nil {
-			return fmt.Errorf("list wallets: %w", err)
+			streamErr = fmt.Errorf("list wallets: %w", err)
+			break
 		}
 
 		if len(wallets) == 0 {
@@ -182,11 +225,20 @@ func (idx *Indexer) StreamAll(ctx context.Context) error {
 		}
 
 		for _, w := range wallets {
-			wg.Add(1)
-			go func(w *domain.Wallet) {
-				defer wg.Done()
-				idx.StreamWallet(ctx, w)
-			}(w)
+			if idx.streamShard(w.ID) != idx.config.StreamShardIndex {
+				shardSkipped++
+				continue
+			}
+			if selected >= workerCount {
+				syncOnly++
+				continue
+			}
+			select {
+			case walletsToStream <- w:
+				selected++
+			case <-ctx.Done():
+				break walletLoop
+			}
 		}
 
 		if len(wallets) < limit {
@@ -195,8 +247,26 @@ func (idx *Indexer) StreamAll(ctx context.Context) error {
 		offset += limit
 	}
 
+	if streamErr != nil {
+		cancel()
+	}
+	close(walletsToStream)
 	wg.Wait()
-	return nil
+	if shardSkipped > 0 || syncOnly > 0 {
+		log.Info().Int("streaming", selected).Int("shard_skipped", shardSkipped).
+			Int("sync_only", syncOnly).Msg("indexer: wallet stream admission complete")
+	}
+	return streamErr
+}
+
+func (idx *Indexer) streamShard(walletID string) int {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(walletID))
+	return int(hash.Sum32() % uint32(idx.config.StreamShardCount))
+}
+
+func (idx *Indexer) ActiveStreams() int64 {
+	return idx.activeStreams.Load()
 }
 
 // StreamWallet streams new payment operations for a single wallet via Horizon
@@ -214,6 +284,7 @@ func (idx *Indexer) StreamWallet(ctx context.Context, w *domain.Wallet) {
 		default:
 		}
 
+		idx.activeStreams.Add(1)
 		err := stellar.StreamPaymentsWithContext(ctx, idx.stellar, w.PublicKey, cursor, func(op operations.Operation) error {
 			if procErr := idx.processPayment(ctx, w, op); procErr != nil {
 				log.Error().Err(procErr).Str("wallet_id", w.ID).Str("op_id", op.GetID()).
@@ -228,19 +299,43 @@ func (idx *Indexer) StreamWallet(ctx context.Context, w *domain.Wallet) {
 			backoff = idx.config.StreamMinBackoff // connection is healthy; reset for the next disconnect
 			return nil
 		})
+		idx.activeStreams.Add(-1)
 
 		if ctx.Err() != nil {
 			return
 		}
+		if stellar.IsNotFound(err) {
+			log.Info().Str("wallet_id", w.ID).Msg("indexer: wallet not found on Horizon; stream disabled")
+			return
+		}
+		retryDelay := backoff
+		retryAfterHonored := false
+		status, hasStatus := 0, false
 		if err != nil {
-			log.Error().Err(err).Str("wallet_id", w.ID).Dur("retry_in", backoff).
-				Msg("indexer: payment stream disconnected, reconnecting")
+			status, hasStatus = stellar.HTTPStatus(err)
+			if status == 429 {
+				if retryAfter, ok := stellar.RetryAfter(err); ok {
+					retryDelay = retryAfter
+					retryAfterHonored = true
+				}
+			}
+		}
+		if !retryAfterHonored && backoff > 0 {
+			jitterRange := backoff / 2
+			retryDelay = backoff - jitterRange + time.Duration(rand.Int63n(int64(jitterRange+1)))
+		}
+		if err != nil {
+			entry := log.Error().Err(err).Str("wallet_id", w.ID).Dur("retry_in", retryDelay)
+			if hasStatus {
+				entry = entry.Int("http_status", status)
+			}
+			entry.Msg("indexer: payment stream disconnected, reconnecting")
 		}
 
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff):
+		case <-time.After(retryDelay):
 		}
 
 		backoff *= 2

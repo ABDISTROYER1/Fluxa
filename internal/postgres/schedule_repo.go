@@ -126,11 +126,11 @@ func (r *ScheduleRepo) ListDue(ctx context.Context, now time.Time) ([]*domain.Sc
 	return schedules, rows.Err()
 }
 
-type rowScanner interface {
+type scheduleRowScanner interface {
 	Scan(dest ...interface{}) error
 }
 
-func scanSchedule(row rowScanner) (*domain.Schedule, error) {
+func scanSchedule(row scheduleRowScanner) (*domain.Schedule, error) {
 	s := &domain.Schedule{}
 	var amount string
 	if err := row.Scan(

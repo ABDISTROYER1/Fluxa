@@ -55,7 +55,7 @@ func (r *closureRepository) Get(ctx context.Context, id, tenantID string) (*doma
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, domain.ErrNotFound
+		return nil, domain.ErrWalletNotFound
 	}
 	return closure, err
 }

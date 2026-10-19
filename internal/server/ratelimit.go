@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/tenant"
 	"golang.org/x/time/rate"
 )
@@ -108,9 +109,7 @@ func RateLimit(rps float64, burst int) func(http.Handler) http.Handler {
 				w.Header().Set("RateLimit-Limit", strconv.Itoa(burst))
 				w.Header().Set("RateLimit-Remaining", "0")
 				w.Header().Set("RateLimit-Reset", "1")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"global rate limit exceeded"}}`))
+				api.Error(w, http.StatusTooManyRequests, "RATE_LIMITED", "global rate limit exceeded")
 				return
 			}
 
@@ -135,9 +134,7 @@ func RateLimit(rps float64, burst int) func(http.Handler) http.Handler {
 				w.Header().Set("RateLimit-Limit", strconv.Itoa(effectiveBurst))
 				w.Header().Set("RateLimit-Remaining", "0")
 				w.Header().Set("RateLimit-Reset", strconv.Itoa(delaySec))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"rate limit exceeded"}}`))
+				api.Error(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
 				return
 			}
 

@@ -117,5 +117,6 @@ docker-logs:
 
 # CI locally (mimics GitHub Actions)
 ci: fmt-check format-check lint test openapi-check
+	go vet ./...
 	cd apps/web && npm ci && npm run typecheck && npm run lint && npm run format:check && npm run build
 	cd sdk && npm ci --ignore-scripts && npm run typecheck && npm run format:check && npm run test && npm run build

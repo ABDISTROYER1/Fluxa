@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/fluxa/fluxa/internal/domain"
+	"github.com/fluxa/fluxa/internal/requestctx"
 )
 
 type contextKey struct{}
-type userIDKey struct{}
 type roleKey struct{}
 type modeKey struct{}
 type scopesKey struct{}
@@ -48,14 +48,13 @@ func ModeOrDefault(ctx context.Context, fallback domain.Mode) domain.Mode {
 
 // WithUser attaches a user ID and role to context.
 func WithUser(ctx context.Context, userID, role string) context.Context {
-	ctx = context.WithValue(ctx, userIDKey{}, userID)
+	ctx = requestctx.WithUserID(ctx, userID)
 	return context.WithValue(ctx, roleKey{}, role)
 }
 
 // UserIDFromContext returns the user ID from context, or empty if unset.
 func UserIDFromContext(ctx context.Context) string {
-	id, _ := ctx.Value(userIDKey{}).(string)
-	return id
+	return requestctx.UserID(ctx)
 }
 
 // RoleFromContext returns the user role from context, or empty if unset.

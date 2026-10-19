@@ -10,7 +10,6 @@ import (
 
 const (
 	TypeProcessTransfer  = "transfer:process"
-	TypeConfirmTx        = "transfer:confirm"
 	TypeSyncLedger       = "indexer:sync"
 	TypeReconcile        = "reconcile:run"
 	TypeBalanceReconcile = "reconcile:balance"
@@ -41,12 +40,6 @@ type TraceContext struct {
 // jobs enqueued by an older build still decode cleanly.
 type ProcessTransferPayload struct {
 	TransactionID string        `json:"transaction_id"`
-	Trace         *TraceContext `json:"trace,omitempty"`
-}
-
-type ConfirmTxPayload struct {
-	TransactionID string        `json:"transaction_id"`
-	TxHash        string        `json:"tx_hash"`
 	Trace         *TraceContext `json:"trace,omitempty"`
 }
 

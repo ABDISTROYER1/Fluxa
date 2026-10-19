@@ -157,7 +157,7 @@ func (w *Worker) runOne(ctx context.Context, sch *domain.Schedule) {
 	// crashed between payout initiation and result recording; the idempotency
 	// key allows safe recovery on the next retry.
 	// -----------------------------------------------------------------------
-	now := time.Now().UTC()
+	now = time.Now().UTC()
 	run.Status = domain.ScheduleRunStatusRunning
 	run.StartedAt = &now
 	if updateErr := w.repo.UpdateRun(runCtx, run); updateErr != nil {

@@ -4,6 +4,7 @@ import {
   AuthenticationError,
   NotFoundError,
   ConflictError,
+  PermissionError,
   RateLimitError,
   ValidationError,
   FluxaError,
@@ -73,6 +74,19 @@ describe('classifyError', () => {
     expect(err.statusCode).toBe(401);
   });
 
+  it('preserves the response request ID and embedded status', () => {
+    const err = classifyError(401, {
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'invalid api key',
+        status: 401,
+        request_id: 'req-sdk-test',
+      },
+    });
+    expect(err.statusCode).toBe(401);
+    expect(err.requestId).toBe('req-sdk-test');
+  });
+
   it('returns a plain FluxaError with code and message on 422', () => {
     const err = classifyError(422, envelope('QUOTE_EXPIRED', 'quote has expired'));
     expect(err).toBeInstanceOf(FluxaError);
@@ -90,5 +104,24 @@ describe('classifyError', () => {
   it('returns UNKNOWN_ERROR when body is not an object', () => {
     const err = classifyError(500, null);
     expect(err.code).toBe('UNKNOWN_ERROR');
+  });
+
+  it('returns PermissionError naming the missing scope on 403 INSUFFICIENT_SCOPE', () => {
+    const err = classifyError(
+      403,
+      envelope('INSUFFICIENT_SCOPE', 'API key does not have the required scope: transfers:write'),
+    );
+    expect(err).toBeInstanceOf(PermissionError);
+    expect(err).toBeInstanceOf(FluxaError);
+    expect(err.code).toBe('INSUFFICIENT_SCOPE');
+    expect(err.statusCode).toBe(403);
+    expect((err as PermissionError).requiredScope).toBe('transfers:write');
+  });
+
+  it('keeps other 403s as a plain FluxaError', () => {
+    const err = classifyError(403, envelope('TRANSFER_BLOCKED_SANCTIONS', 'transfer blocked'));
+    expect(err).not.toBeInstanceOf(PermissionError);
+    expect(err.statusCode).toBe(403);
+    expect(err.code).toBe('TRANSFER_BLOCKED_SANCTIONS');
   });
 });

@@ -4,6 +4,9 @@ import {
   WebhookEndpointResponse,
   ListWebhooksResponse,
   ListDeliveriesResponse,
+  ListWebhookSigningSecretsResponse,
+  RotateWebhookSigningSecretRequest,
+  RotateWebhookSigningSecretResponse,
 } from '../types';
 
 export class WebhooksResource {
@@ -51,6 +54,29 @@ export class WebhooksResource {
       path: `/webhooks/${encodeURIComponent(webhookId)}/deliveries`,
       query,
       signal: options?.signal,
+    });
+    return res.data;
+  }
+
+  async getSigningSecrets(options?: RequestOptions): Promise<ListWebhookSigningSecretsResponse> {
+    const res = await this.http.request<ListWebhookSigningSecretsResponse>({
+      method: 'GET',
+      path: '/webhooks/secret',
+      signal: options?.signal,
+    });
+    return res.data;
+  }
+
+  async rotateSigningSecret(
+    request: RotateWebhookSigningSecretRequest = {},
+    options?: RequestOptions,
+  ): Promise<RotateWebhookSigningSecretResponse> {
+    const res = await this.http.request<RotateWebhookSigningSecretResponse>({
+      method: 'POST',
+      path: '/webhooks/secret/rotate',
+      body: request,
+      signal: options?.signal,
+      idempotencyKey: options?.idempotencyKey,
     });
     return res.data;
   }

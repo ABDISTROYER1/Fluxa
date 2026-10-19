@@ -34,26 +34,12 @@ const (
 // Record is a persisted idempotency request and, once complete, its exact
 // response. ID and LeaseToken fence stale owners from overwriting a recovered
 // record.
-type Record struct {
-	ID              string
-	OrgID           string
-	Mode            domain.Mode
-	Key             string
-	RequestHash     string
-	Status          string
-	LeaseToken      string
-	LeaseExpiresAt  time.Time
-	CreatedAt       time.Time
-	ExpiresAt       time.Time
-	ResponseStatus  int
-	ResponseHeaders http.Header
-	ResponseBody    []byte
-}
+type Record = domain.IdempotencyRecord
 
 // Acquisition is the result of atomically acquiring an idempotency key.
 type Acquisition struct {
 	State  AcquisitionState
-	Record domain.IdempotencyRecord
+	Record Record
 }
 
 // Response is the durable HTTP response returned by the original request.
@@ -84,9 +70,8 @@ type Repository interface {
 	// batched to avoid long-held locks; the caller controls batch size.
 	// Returns the number of rows deleted.
 	DeleteExpired(ctx context.Context, batchSize int) (int64, error)
-	// Lookup returns the current state of a single (orgID, mode, key) record
-	// without acquiring any lease or mutating any row. A record whose
-	// expires_at has passed is treated as not found, matching client-visible
-	// retention semantics. It is safe to call from a read-only API path.
+}
+
+type LookupRepository interface {
 	Lookup(ctx context.Context, orgID string, mode domain.Mode, key string) (LookupResult, error)
 }

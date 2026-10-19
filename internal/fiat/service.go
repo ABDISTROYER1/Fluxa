@@ -2,7 +2,9 @@ package fiat
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -36,7 +38,18 @@ type Service interface {
 	GetQuote(ctx context.Context, req QuoteRequest) (*FiatQuote, error)
 	InitiateDeposit(ctx context.Context, req DepositRequest) (*DepositResponse, error)
 	InitiateWithdrawal(ctx context.Context, req WithdrawRequest) (*WithdrawResponse, error)
+	// HandleWebhook is the legacy single-signature form (kept for backward
+	// compatibility with existing tests and the Rail adapter).
 	HandleWebhook(ctx context.Context, payload []byte, signature string) error
+	// HandleWebhookWithHeaders is the preferred form used by the HTTP handler:
+	// it passes the full request headers so each provider can read its own
+	// signature header(s) (e.g. "verif-hash", "x-yellowcard-signature") without
+	// the HTTP layer hard-coding provider-specific header names.
+	HandleWebhookWithHeaders(ctx context.Context, payload []byte, headers http.Header) error
+}
+
+type TenantGetter interface {
+	GetByID(ctx context.Context, id string) (*domain.Tenant, error)
 }
 
 type service struct {
@@ -47,6 +60,7 @@ type service struct {
 	transferSvc      transfer.Service
 	platformWalletID string
 	providerName     string
+	tenantRepo       TenantGetter
 }
 
 func NewService(repo Repository, rail Rail, fxSvc fx.Service, transferSvc transfer.Service, platformWalletID, providerName string, eventRepos ...WebhookEventRepository) Service {
@@ -62,6 +76,23 @@ func NewService(repo Repository, rail Rail, fxSvc fx.Service, transferSvc transf
 		transferSvc:      transferSvc,
 		platformWalletID: platformWalletID,
 		providerName:     providerName,
+	}
+}
+
+func NewServiceWithTenant(repo Repository, rail Rail, fxSvc fx.Service, transferSvc transfer.Service, platformWalletID, providerName string, tenantRepo TenantGetter, eventRepos ...WebhookEventRepository) Service {
+	var eventRepo WebhookEventRepository
+	if len(eventRepos) > 0 {
+		eventRepo = eventRepos[0]
+	}
+	return &service{
+		repo:             repo,
+		eventRepo:        eventRepo,
+		rail:             rail,
+		fxSvc:            fxSvc,
+		transferSvc:      transferSvc,
+		platformWalletID: platformWalletID,
+		providerName:     providerName,
+		tenantRepo:       tenantRepo,
 	}
 }
 
@@ -151,6 +182,31 @@ func (s *service) InitiateWithdrawal(ctx context.Context, req WithdrawRequest) (
 	}
 	req.FiatCurrency = currency
 
+	// Check daily withdrawal limit if tenant repo is available
+	tenantID := tenant.IDFromContext(ctx)
+	if tenantID != "" && s.tenantRepo != nil {
+		t, err := s.tenantRepo.GetByID(ctx, tenantID)
+		if err == nil && t != nil {
+			dailyLimit := t.GetDailyWithdrawalLimit()
+			if dailyLimit > 0 {
+				now := time.Now().UTC()
+				counter, ok := s.repo.(interface {
+					CountDailyWithdrawalsByTenant(context.Context, string, time.Time) (int, error)
+				})
+				if !ok {
+					return nil, errors.New("daily withdrawal limit counter is unavailable")
+				}
+				count, err := counter.CountDailyWithdrawalsByTenant(ctx, tenantID, now)
+				if err != nil {
+					return nil, fmt.Errorf("check daily withdrawal limit: %w", err)
+				}
+				if count >= dailyLimit {
+					return nil, domain.ErrDailyWithdrawalLimitReached
+				}
+			}
+		}
+	}
+
 	// The user states the fiat amount they want to receive; the rail tells us
 	// how much USDC that costs.
 	quote, err := s.rail.GetQuote(ctx, QuoteRequest{
@@ -204,7 +260,35 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, signature s
 	if err != nil {
 		return fmt.Errorf("handle webhook: %w", err)
 	}
+	return s.processEvent(ctx, evt)
+}
 
+// HandleWebhookWithHeaders is the HTTP-handler-facing entry point. It passes
+// the full header map to the rail so each provider can read its own signature
+// header(s) without the service layer knowing their names.
+//
+// Errors are wrapped with the appropriate sentinel (ErrWebhookSignatureInvalid,
+// ErrWebhookPayloadInvalid, ErrWebhookEventUnknown) when the failure is
+// permanent so the HTTP handler can distinguish 4xx from 5xx responses.
+func (s *service) HandleWebhookWithHeaders(ctx context.Context, payload []byte, headers http.Header) error {
+	evt, err := s.rail.HandleWebhookWithHeaders(ctx, payload, headers)
+	if err != nil {
+		// Wrap provider-level validation errors so the HTTP handler can map
+		// them to 4xx without inspecting the error string.
+		if errors.Is(err, ErrWebhookSignatureInvalid) ||
+			errors.Is(err, ErrWebhookPayloadInvalid) ||
+			errors.Is(err, ErrWebhookEventUnknown) {
+			return err
+		}
+		return fmt.Errorf("handle webhook: %w", err)
+	}
+
+	return s.processEvent(ctx, evt)
+}
+
+// processEvent applies the business logic for a fully-verified RailEvent.
+// It is shared by both HandleWebhook (legacy) and HandleWebhookWithHeaders.
+func (s *service) processEvent(ctx context.Context, evt *RailEvent) error {
 	if evt.Type == EventDepositConfirmed || evt.Type == EventDepositFailed {
 		deposit, err := s.repo.GetDepositByReference(ctx, evt.ProviderRef)
 		if err != nil {
@@ -241,8 +325,7 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, signature s
 		// Atomically claim the deposit BEFORE moving any funds. This is
 		// what makes a concurrent or duplicate webhook delivery for the
 		// same event safe: only the caller that wins this pending ->
-		// processing transition proceeds to credit the wallet, so the
-		// same deposit can never be credited twice.
+		// processing transition proceeds to credit the wallet.
 		if err := s.repo.ClaimDepositForProcessing(ctx, deposit.ID); err != nil {
 			return nil // lost the race, or already handled — idempotent no-op
 		}

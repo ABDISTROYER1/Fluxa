@@ -60,7 +60,7 @@ func (r *alertRepository) Get(ctx context.Context, id, tenantID string) (*domain
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, domain.ErrNotFound
+		return nil, domain.ErrWalletNotFound
 	}
 	return alert, err
 }

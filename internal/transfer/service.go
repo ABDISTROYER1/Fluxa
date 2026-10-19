@@ -13,6 +13,7 @@ import (
 	"github.com/fluxa/fluxa/internal/tenant"
 	walletpkg "github.com/fluxa/fluxa/internal/wallet"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"github.com/shopspring/decimal"
 )
 
@@ -34,6 +35,11 @@ type Screener interface {
 // allowlist retain their current transfer behaviour.
 type BeneficiaryChecker interface {
 	Check(ctx context.Context, account string) (configured, active bool, err error)
+}
+
+type ApprovalGate interface {
+	Plan(context.Context, string, string, decimal.Decimal) (*domain.TransferApprovalPolicy, error)
+	CreateRequest(context.Context, *domain.Transaction, string, *domain.TransferApprovalPolicy) error
 }
 
 type AuditEntry struct {
@@ -76,15 +82,25 @@ type Service interface {
 	// using InitiateTransfer directly.
 	InitiateTransferIdempotent(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, idempotencyKey string) (*domain.Transaction, error)
 	InitiateBatchTransfer(ctx context.Context, fromID, toID, asset string, amount decimal.Decimal, batchID, reference string) (*domain.Transaction, error)
-	InitiateTransferExt(ctx context.Context, params TransferParams) (*domain.Transaction, error)
 	GetTransaction(ctx context.Context, id string) (*domain.Transaction, error)
 	ListTransactions(ctx context.Context, walletID string, limit, offset int) ([]*domain.Transaction, error)
-	ListTransactionsFiltered(ctx context.Context, filter domain.TransactionFilter) ([]*domain.Transaction, error)
-	WithStellarClient(stellarClient stellar.Client) Service
 	// WithScreener enables compliance screening. It is optional so the
 	// worker's screener-less wiring still compiles; when unset, transfers
 	// are not screened.
-	WithScreener(screener Screener) Service
+}
+
+func ConfigureStellarClient(svc Service, client stellar.Client) Service {
+	if configurable, ok := svc.(interface{ WithStellarClient(stellar.Client) Service }); ok {
+		return configurable.WithStellarClient(client)
+	}
+	return svc
+}
+
+func ConfigureScreener(svc Service, screener Screener) Service {
+	if configurable, ok := svc.(interface{ WithScreener(Screener) Service }); ok {
+		return configurable.WithScreener(screener)
+	}
+	return svc
 }
 
 // Queue is the subset of the asynq-backed queue client the transfer service
@@ -105,6 +121,7 @@ type service struct {
 	screener       Screener
 	audit          AuditLogger
 	beneficiaries  BeneficiaryChecker
+	approvals      ApprovalGate
 }
 
 func NewService(repo Repository, walletRepo walletpkg.Repository, feeSvc fees.Service, q Queue, tenantRepo ...TenantGetter) Service {
@@ -152,6 +169,18 @@ func ConfigureBeneficiaryChecker(svc Service, checker BeneficiaryChecker) Servic
 		return configurable.WithBeneficiaryChecker(checker)
 	}
 	return svc
+}
+
+func ConfigureApprovalGate(svc Service, gate ApprovalGate) Service {
+	if configurable, ok := svc.(interface{ WithApprovalGate(ApprovalGate) Service }); ok {
+		return configurable.WithApprovalGate(gate)
+	}
+	return svc
+}
+
+func (s *service) WithApprovalGate(gate ApprovalGate) Service {
+	s.approvals = gate
+	return s
 }
 
 func (s *service) WithBeneficiaryChecker(checker BeneficiaryChecker) Service {
@@ -235,10 +264,12 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 	tenantID := tenant.IDFromContext(ctx)
 	mode := tenant.ModeOrDefault(ctx, domain.ModeLive)
 	var monthlyLimit int
+	var dailyLimit int
 	if tenantID != "" && s.tenantRepo != nil {
 		t, err := s.tenantRepo.GetByID(ctx, tenantID)
 		if err == nil && t != nil {
 			monthlyLimit = t.GetTransferLimit()
+			dailyLimit = t.GetDailyTransferLimit()
 		}
 	}
 
@@ -249,6 +280,17 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 	dstWallet, err := s.walletRepo.GetByID(ctx, toID)
 	if err != nil {
 		return nil, fmt.Errorf("destination wallet: %w", err)
+	}
+	// Fail before persisting/enqueuing a transfer when Horizon can confirm that
+	// the recipient account does not exist. A transient Horizon failure is
+	// returned as an error rather than being mistaken for an invalid account.
+	if client := s.client(ctx); client != nil {
+		if _, err := stellar.LoadAccountWithContext(ctx, client, dstWallet.PublicKey); err != nil {
+			if stellar.IsNotFound(err) {
+				return nil, domain.ErrBeneficiaryAccountNotFound
+			}
+			return nil, fmt.Errorf("validate destination Stellar account: %w", err)
+		}
 	}
 	if tenantID != "" && s.beneficiaries != nil {
 		configured, active, checkErr := s.beneficiaries.Check(ctx, dstWallet.PublicKey)
@@ -335,13 +377,31 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 		CreatedAt:         time.Now().UTC(),
 		IdempotencyKey:    idempotencyKey,
 	}
+	var approvalPolicy *domain.TransferApprovalPolicy
+	if status == domain.StatusPending && s.approvals != nil && tenantID != "" {
+		approvalPolicy, err = s.approvals.Plan(ctx, tenantID, asset, amount)
+		if err != nil {
+			return nil, fmt.Errorf("check transfer approval policy: %w", err)
+		}
+		if approvalPolicy != nil {
+			tx.Status = domain.StatusApprovalPending
+		}
+	}
 	if recordID := idempotency.RecordIDFromContext(ctx); recordID != "" && idempotencyKey != "" {
 		tx.IdempotencyRecordID = &recordID
 	}
 
 	var createErr error
-	if monthlyLimit > 0 {
-		now := time.Now().UTC()
+	now := time.Now().UTC()
+	if dailyLimit > 0 {
+		dailyRepo, ok := s.repo.(interface {
+			CreateWithDailyLimit(context.Context, *domain.Transaction, string, time.Time, int) error
+		})
+		if !ok {
+			return nil, errors.New("daily transfer limit enforcement is unavailable")
+		}
+		createErr = dailyRepo.CreateWithDailyLimit(ctx, tx, tenantID, now, dailyLimit)
+	} else if monthlyLimit > 0 {
 		createErr = s.repo.CreateWithMonthlyLimit(ctx, tx, tenantID, now.Year(), now.Month(), monthlyLimit)
 	} else {
 		createErr = s.repo.Create(ctx, tx)
@@ -363,6 +423,13 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 	} else if kID := tenant.APIKeyIDFromContext(ctx); kID != "" {
 		actor = kID
 	}
+	if approvalPolicy != nil {
+		creatorID := tenant.UserIDFromContext(ctx)
+		if err := s.approvals.CreateRequest(ctx, tx, creatorID, approvalPolicy); err != nil {
+			_ = s.repo.UpdateStatus(ctx, tx.ID, domain.StatusFailed, "")
+			return nil, fmt.Errorf("create transfer approval request: %w", err)
+		}
+	}
 	s.recordAudit(ctx, actor, "transfer.created", tx.ID)
 
 	if tx.Status == domain.StatusComplianceHold {
@@ -371,10 +438,14 @@ func (s *service) initiate(ctx context.Context, params TransferParams) (*domain.
 		}
 		return tx, nil
 	}
+	if tx.Status == domain.StatusApprovalPending {
+		return tx, nil
+	}
 
 	if s.queue != nil {
 		if err := s.queue.EnqueueTransfer(ctx, tx.ID); err != nil {
-			_ = err
+			zerolog.Ctx(ctx).Error().Err(err).Str("transaction_id", tx.ID).Msg("transfer: failed to enqueue settlement job")
+			return nil, fmt.Errorf("enqueue settlement: %w", err)
 		}
 	}
 
@@ -476,7 +547,8 @@ func (s *service) CancelTransfer(ctx context.Context, id, actor, idempotencyKey 
 }
 
 func (s *service) dispatchCancelWebhook(ctx context.Context, id, actor string) error {
-	return s.recordAudit(ctx, actor, "transfer.cancel", id)
+	s.recordAudit(ctx, actor, "transfer.cancel", id)
+	return nil
 }
 
 func (s *service) ListTransactions(ctx context.Context, walletID string, limit, offset int) ([]*domain.Transaction, error) {

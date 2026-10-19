@@ -183,7 +183,6 @@ func TestEveryTaskPayloadCarriesTraceContext(t *testing.T) {
 		idValue string
 	}{
 		{"transfer:process", ProcessTransferPayload{TransactionID: "tx-1", Trace: injected}, "transaction_id", "tx-1"},
-		{"transfer:confirm", ConfirmTxPayload{TransactionID: "tx-1", TxHash: "hash", Trace: injected}, "tx_hash", "hash"},
 		{"indexer:sync", SyncLedgerPayload{WalletID: "w-1", Cursor: "c", Trace: injected}, "wallet_id", "w-1"},
 		{"webhook:deliver", WebhookDeliverPayload{DeliveryID: "d-1", Trace: injected}, "delivery_id", "d-1"},
 		{"webhook:tenant-deliver", WebhookDeliverPayload{DeliveryID: "d-1", TenantID: "t-1", Config: true, Trace: injected}, "tenant_id", "t-1"},

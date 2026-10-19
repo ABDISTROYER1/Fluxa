@@ -1,7 +1,9 @@
 package transfer
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -123,7 +125,14 @@ func (h *Handler) initiateTransfer(w http.ResponseWriter, r *http.Request) {
 		idempotencyKey = r.Header.Get("Idempotency-Key")
 	}
 
-	tx, err := h.svc.InitiateTransferExt(r.Context(), TransferParams{
+	extended, ok := h.svc.(interface {
+		InitiateTransferExt(context.Context, TransferParams) (*domain.Transaction, error)
+	})
+	if !ok {
+		api.InternalError(w, errors.New("extended transfers are unavailable"))
+		return
+	}
+	tx, err := extended.InitiateTransferExt(r.Context(), TransferParams{
 		FromID:            req.FromWalletID,
 		ToID:              req.ToWalletID,
 		Asset:             req.Asset,
@@ -155,7 +164,14 @@ func (h *Handler) cancelTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := h.svc.CancelTransfer(r.Context(), id, actor, idempotencyKey)
+	canceller, ok := h.svc.(interface {
+		CancelTransfer(context.Context, string, string, string) (*domain.Transaction, error)
+	})
+	if !ok {
+		api.InternalError(w, errors.New("transfer cancellation is unavailable"))
+		return
+	}
+	tx, err := canceller.CancelTransfer(r.Context(), id, actor, idempotencyKey)
 	if err != nil {
 		api.HandleDomainError(w, err)
 		return
@@ -199,7 +215,14 @@ func (h *Handler) listFiltered(w http.ResponseWriter, r *http.Request) {
 		Offset:            offset,
 	}
 
-	txs, err := h.svc.ListTransactionsFiltered(r.Context(), filter)
+	filterable, ok := h.svc.(interface {
+		ListTransactionsFiltered(context.Context, domain.TransactionFilter) ([]*domain.Transaction, error)
+	})
+	if !ok {
+		api.InternalError(w, errors.New("filtered transaction listing is unavailable"))
+		return
+	}
+	txs, err := filterable.ListTransactionsFiltered(r.Context(), filter)
 	if err != nil {
 		api.HandleDomainError(w, err)
 		return

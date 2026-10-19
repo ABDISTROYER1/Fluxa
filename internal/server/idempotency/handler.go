@@ -82,7 +82,12 @@ func (h *Handler) Inspect(w http.ResponseWriter, r *http.Request) {
 	orgID := tenant.IDFromContext(r.Context())
 	mode := tenant.ModeOrDefault(r.Context(), domain.ModeLive)
 
-	result, err := h.repo.Lookup(r.Context(), orgID, mode, key)
+	lookupRepo, ok := h.repo.(LookupRepository)
+	if !ok {
+		api.InternalError(w, fmt.Errorf("idempotency repository does not support inspection"))
+		return
+	}
+	result, err := lookupRepo.Lookup(r.Context(), orgID, mode, key)
 	if err != nil {
 		api.InternalError(w, err)
 		return

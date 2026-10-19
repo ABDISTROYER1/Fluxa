@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"github.com/fluxa/fluxa/internal/tenant"
+	"github.com/fluxa/fluxa/internal/requestctx"
 )
 
 // ActorFromContext returns the authenticated user ID that performed the
@@ -11,5 +11,5 @@ import (
 // endpoints include it in audit logs so an out-of-band action can be traced
 // back to a person.
 func ActorFromContext(ctx context.Context) string {
-	return tenant.UserIDFromContext(ctx)
+	return requestctx.UserID(ctx)
 }

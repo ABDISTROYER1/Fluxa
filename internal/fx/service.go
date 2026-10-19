@@ -76,9 +76,9 @@ local data = redis.call('GET', KEYS[1])
 if not data then return redis.error_reply('QUOTE_EXPIRED') end
 if ARGV[2] ~= '1' then return redis.error_reply('QUOTE_OWNERSHIP_MISMATCH') end
 local q = cjson.decode(data)
-if q.org_id ~= ARGV[1] then return redis.error_reply('QUOTE_OWNERSHIP_MISMATCH') end
-if q.used then return redis.error_reply('QUOTE_ALREADY_USED') end
-q.used = true
+if q.OrgID ~= ARGV[1] then return redis.error_reply('QUOTE_OWNERSHIP_MISMATCH') end
+if q.Used then return redis.error_reply('QUOTE_ALREADY_USED') end
+q.Used = true
 redis.call('SET', KEYS[1], cjson.encode(q), 'KEEPTTL')
 return data
 `)

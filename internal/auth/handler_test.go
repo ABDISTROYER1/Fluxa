@@ -3,6 +3,7 @@ package auth_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,27 @@ func setupRouter(svc auth.Service) http.Handler {
 	return r
 }
 
+func assertAPIError(t *testing.T, rec *httptest.ResponseRecorder, status int) {
+	t.Helper()
+	var payload struct {
+		Error struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			Status    int    `json:"status"`
+			RequestID string `json:"request_id"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("error response is not JSON: %v", err)
+	}
+	if payload.Error.Code == "" || payload.Error.Message == "" || payload.Error.Status != status {
+		t.Fatalf("unexpected error envelope: %+v", payload.Error)
+	}
+	if payload.Error.RequestID == "" || payload.Error.RequestID != rec.Header().Get("X-Request-ID") {
+		t.Fatalf("request ID mismatch: body=%q header=%q", payload.Error.RequestID, rec.Header().Get("X-Request-ID"))
+	}
+}
+
 func TestHandler_InternalErrorsNeverLeaked(t *testing.T) {
 	t.Run("Login internal database error does not leak to client", func(t *testing.T) {
 		svc := &mockAuthService{
@@ -66,9 +88,7 @@ func TestHandler_InternalErrorsNeverLeaked(t *testing.T) {
 			t.Fatalf("internal error text was leaked in response body: %q", body)
 		}
 
-		if strings.TrimSpace(body) != "internal server error" {
-			t.Fatalf("expected 'internal server error', got: %q", body)
-		}
+		assertAPIError(t, rec, http.StatusInternalServerError)
 	})
 
 	t.Run("Register internal database error does not leak to client", func(t *testing.T) {
@@ -93,9 +113,22 @@ func TestHandler_InternalErrorsNeverLeaked(t *testing.T) {
 			t.Fatalf("internal error text was leaked in response body: %q", body)
 		}
 
-		if strings.TrimSpace(body) != "internal server error" {
-			t.Fatalf("expected 'internal server error', got: %q", body)
+		assertAPIError(t, rec, http.StatusInternalServerError)
+	})
+
+	t.Run("Refresh internal error does not leak to client", func(t *testing.T) {
+		svc := &mockAuthService{refreshErr: errors.New("refresh provider secret leaked")}
+		req := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBufferString(`{"refresh_token":"token"}`))
+		rec := httptest.NewRecorder()
+		setupRouter(svc).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected status 500, got %d", rec.Code)
 		}
+		if strings.Contains(rec.Body.String(), "refresh provider secret leaked") {
+			t.Fatalf("internal error text was leaked: %q", rec.Body.String())
+		}
+		assertAPIError(t, rec, http.StatusInternalServerError)
 	})
 }
 
@@ -115,6 +148,7 @@ func TestHandler_ExpectedStatusCodes(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected status 401, got %d", rec.Code)
 		}
+		assertAPIError(t, rec, http.StatusUnauthorized)
 	})
 
 	t.Run("Register user already exists returns 409", func(t *testing.T) {
@@ -132,6 +166,7 @@ func TestHandler_ExpectedStatusCodes(t *testing.T) {
 		if rec.Code != http.StatusConflict {
 			t.Fatalf("expected status 409, got %d", rec.Code)
 		}
+		assertAPIError(t, rec, http.StatusConflict)
 	})
 
 	t.Run("Register password too short returns 400", func(t *testing.T) {
@@ -149,6 +184,7 @@ func TestHandler_ExpectedStatusCodes(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d", rec.Code)
 		}
+		assertAPIError(t, rec, http.StatusBadRequest)
 	})
 
 	t.Run("Register password too long returns 400", func(t *testing.T) {
@@ -166,5 +202,6 @@ func TestHandler_ExpectedStatusCodes(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d", rec.Code)
 		}
+		assertAPIError(t, rec, http.StatusBadRequest)
 	})
 }

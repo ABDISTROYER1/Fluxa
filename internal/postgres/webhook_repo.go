@@ -297,12 +297,12 @@ func (r *WebhookRepository) ListDeadLetters(ctx context.Context, tenantID *strin
 func (r *WebhookRepository) GetConfig(ctx context.Context, tenantID string) (*domain.TenantWebhookConfig, error) {
 	config := &domain.TenantWebhookConfig{}
 	err := r.db.QueryRow(ctx,
-		`SELECT tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at
+		`SELECT tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at, COALESCE(signing_key_id::text, '')
 		 FROM tenant_webhook_configs WHERE tenant_id = $1`,
 		tenantID,
 	).Scan(
 		&config.TenantID, &config.Enabled, &config.URL, &config.Secret, &config.SigningAlgorithm, &config.Events,
-		&config.Paused, &config.ResumeAt, &config.LastDeliveredAt, &config.CreatedAt, &config.UpdatedAt,
+		&config.Paused, &config.ResumeAt, &config.LastDeliveredAt, &config.CreatedAt, &config.UpdatedAt, &config.SigningKeyID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -316,8 +316,8 @@ func (r *WebhookRepository) GetConfig(ctx context.Context, tenantID string) (*do
 func (r *WebhookRepository) UpsertConfig(ctx context.Context, config *domain.TenantWebhookConfig) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO tenant_webhook_configs
-		 (tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		 (tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at, signing_key_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, '')::uuid)
 		 ON CONFLICT (tenant_id) DO UPDATE SET
 		 enabled = EXCLUDED.enabled,
 		 url = EXCLUDED.url,
@@ -327,9 +327,10 @@ func (r *WebhookRepository) UpsertConfig(ctx context.Context, config *domain.Ten
 		 paused = EXCLUDED.paused,
 		 resume_at = EXCLUDED.resume_at,
 		 last_delivered_at = EXCLUDED.last_delivered_at,
+		 signing_key_id = EXCLUDED.signing_key_id,
 		 updated_at = EXCLUDED.updated_at`,
 		config.TenantID, config.Enabled, config.URL, config.Secret, config.SigningAlgorithm, config.Events,
-		config.Paused, config.ResumeAt, config.LastDeliveredAt, config.CreatedAt, config.UpdatedAt,
+		config.Paused, config.ResumeAt, config.LastDeliveredAt, config.CreatedAt, config.UpdatedAt, config.SigningKeyID,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert tenant webhook config: %w", err)
@@ -339,7 +340,7 @@ func (r *WebhookRepository) UpsertConfig(ctx context.Context, config *domain.Ten
 
 func (r *WebhookRepository) ListEnabledConfigs(ctx context.Context) ([]*domain.TenantWebhookConfig, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at
+		`SELECT tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at, COALESCE(signing_key_id::text, '')
 		 FROM tenant_webhook_configs WHERE enabled = TRUE ORDER BY created_at`,
 	)
 	if err != nil {
@@ -352,7 +353,7 @@ func (r *WebhookRepository) ListEnabledConfigs(ctx context.Context) ([]*domain.T
 		config := &domain.TenantWebhookConfig{}
 		if err := rows.Scan(
 			&config.TenantID, &config.Enabled, &config.URL, &config.Secret, &config.SigningAlgorithm, &config.Events,
-			&config.Paused, &config.ResumeAt, &config.LastDeliveredAt, &config.CreatedAt, &config.UpdatedAt,
+			&config.Paused, &config.ResumeAt, &config.LastDeliveredAt, &config.CreatedAt, &config.UpdatedAt, &config.SigningKeyID,
 		); err != nil {
 			return nil, err
 		}
@@ -361,13 +362,218 @@ func (r *WebhookRepository) ListEnabledConfigs(ctx context.Context) ([]*domain.T
 	return configs, rows.Err()
 }
 
+func (r *WebhookRepository) ListConfigs(ctx context.Context) ([]*domain.TenantWebhookConfig, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tenant webhook secret migration scan: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx,
+		`SELECT tenant_id, enabled, url, secret, signing_algorithm, events, paused, resume_at, last_delivered_at, created_at, updated_at, COALESCE(signing_key_id::text, '')
+		 FROM tenant_webhook_configs ORDER BY tenant_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list tenant webhook configs for secret migration: %w", err)
+	}
+	configs := make([]*domain.TenantWebhookConfig, 0)
+	for rows.Next() {
+		config := &domain.TenantWebhookConfig{}
+		if err := rows.Scan(
+			&config.TenantID, &config.Enabled, &config.URL, &config.Secret, &config.SigningAlgorithm, &config.Events,
+			&config.Paused, &config.ResumeAt, &config.LastDeliveredAt, &config.CreatedAt, &config.UpdatedAt, &config.SigningKeyID,
+		); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		configs = append(configs, config)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tenant webhook secret migration scan: %w", err)
+	}
+	return configs, nil
+}
+
+func (r *WebhookRepository) ListSigningSecrets(ctx context.Context, tenantID string) ([]*domain.WebhookSigningSecret, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin webhook signing secret inspection: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx,
+		`UPDATE tenant_webhook_signing_secrets SET status = 'retired'
+		 WHERE tenant_id = $1 AND status = 'overlapping' AND retired_at <= NOW()`, tenantID); err != nil {
+		return nil, fmt.Errorf("expire webhook signing secrets: %w", err)
+	}
+	rows, err := tx.Query(ctx,
+		`SELECT key_id, created_at, activated_at, retired_at, status
+		 FROM tenant_webhook_signing_secrets WHERE tenant_id = $1 ORDER BY created_at DESC`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list webhook signing secrets: %w", err)
+	}
+	defer rows.Close()
+	secrets := make([]*domain.WebhookSigningSecret, 0)
+	for rows.Next() {
+		secret := &domain.WebhookSigningSecret{}
+		if err := rows.Scan(&secret.KeyID, &secret.CreatedAt, &secret.ActivatedAt, &secret.RetiredAt, &secret.Status); err != nil {
+			return nil, err
+		}
+		secrets = append(secrets, secret)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit webhook signing secret inspection: %w", err)
+	}
+	return secrets, nil
+}
+
+func (r *WebhookRepository) ImportLegacySigningSecret(ctx context.Context, tenantID, keyID, encryptedSecret string, now time.Time) (*domain.WebhookSigningSecret, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var lockedTenantID, activeKeyID string
+	var storedSecret string
+	if err := tx.QueryRow(ctx,
+		`SELECT tenant_id::text, COALESCE(signing_key_id::text, ''), secret
+		 FROM tenant_webhook_configs WHERE tenant_id = $1 FOR UPDATE`, tenantID).
+		Scan(&lockedTenantID, &activeKeyID, &storedSecret); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrWebhookConfigNotFound
+		}
+		return nil, fmt.Errorf("lock legacy webhook signing config: %w", err)
+	}
+	if activeKeyID != "" {
+		metadata := &domain.WebhookSigningSecret{}
+		if err := tx.QueryRow(ctx,
+			`SELECT key_id, created_at, activated_at, retired_at, status
+			 FROM tenant_webhook_signing_secrets WHERE key_id = $1`, activeKeyID).
+			Scan(&metadata.KeyID, &metadata.CreatedAt, &metadata.ActivatedAt, &metadata.RetiredAt, &metadata.Status); err != nil {
+			return nil, fmt.Errorf("read active webhook signing version: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit existing webhook signing version: %w", err)
+		}
+		return metadata, nil
+	}
+	if storedSecret == "" {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit empty webhook signing config: %w", err)
+		}
+		return nil, nil
+	}
+	metadata := &domain.WebhookSigningSecret{KeyID: keyID, CreatedAt: now, ActivatedAt: now, Status: "active"}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO tenant_webhook_signing_secrets (key_id, tenant_id, encrypted_secret, created_at, activated_at, status)
+		 VALUES ($1, $2, $3, $4, $4, 'active')`, keyID, tenantID, encryptedSecret, now); err != nil {
+		return nil, fmt.Errorf("import legacy webhook signing secret: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE tenant_webhook_configs SET secret = $1, signing_key_id = $2, updated_at = $3 WHERE tenant_id = $4`,
+		encryptedSecret, keyID, now, tenantID); err != nil {
+		return nil, fmt.Errorf("activate imported webhook signing secret: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE tenant_webhook_deliveries SET signing_key_id = $1
+		 WHERE tenant_id = $2 AND signing_key_id IS NULL`, keyID, tenantID); err != nil {
+		return nil, fmt.Errorf("pin legacy webhook deliveries: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit legacy webhook signing secret: %w", err)
+	}
+	return metadata, nil
+}
+
+func (r *WebhookRepository) RotateSigningSecret(ctx context.Context, tenantID, keyID, encryptedSecret, legacyKeyID, legacyEncryptedSecret string, overlap time.Duration, now time.Time) (*domain.WebhookSigningSecret, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO tenant_webhook_configs (tenant_id, secret, signing_algorithm)
+		 VALUES ($1, '', 'hmac-sha256') ON CONFLICT (tenant_id) DO NOTHING`, tenantID); err != nil {
+		return nil, fmt.Errorf("initialize webhook signing config: %w", err)
+	}
+	var lockedTenantID, activeKeyID string
+	if err := tx.QueryRow(ctx,
+		`SELECT tenant_id::text, COALESCE(signing_key_id::text, '') FROM tenant_webhook_configs WHERE tenant_id = $1 FOR UPDATE`, tenantID).Scan(&lockedTenantID, &activeKeyID); err != nil {
+		return nil, fmt.Errorf("lock webhook signing config: %w", err)
+	}
+	if overlap > 0 {
+		if _, err := tx.Exec(ctx,
+			`UPDATE tenant_webhook_signing_secrets SET status = 'overlapping', retired_at = $2
+			 WHERE tenant_id = $1 AND status = 'active'`, tenantID, now.Add(overlap)); err != nil {
+			return nil, err
+		}
+	} else if _, err := tx.Exec(ctx,
+		`UPDATE tenant_webhook_signing_secrets SET status = 'retired', retired_at = $2
+		 WHERE tenant_id = $1 AND status IN ('active', 'overlapping')`, tenantID, now); err != nil {
+		return nil, err
+	}
+	if activeKeyID == "" && legacyKeyID != "" && legacyEncryptedSecret != "" {
+		legacyStatus := "retired"
+		legacyRetiredAt := now
+		if overlap > 0 {
+			legacyStatus = "overlapping"
+			legacyRetiredAt = now.Add(overlap)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO tenant_webhook_signing_secrets (key_id, tenant_id, encrypted_secret, created_at, activated_at, retired_at, status)
+			 VALUES ($1, $2, $3, $4, $4, $5, $6)`,
+			legacyKeyID, tenantID, legacyEncryptedSecret, now, legacyRetiredAt, legacyStatus); err != nil {
+			return nil, fmt.Errorf("preserve legacy webhook signing secret: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE tenant_webhook_deliveries SET signing_key_id = $1
+			 WHERE tenant_id = $2 AND signing_key_id IS NULL`, legacyKeyID, tenantID); err != nil {
+			return nil, fmt.Errorf("pin pending legacy webhook deliveries: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO tenant_webhook_signing_secrets (key_id, tenant_id, encrypted_secret, created_at, activated_at, status)
+		 VALUES ($1, $2, $3, $4, $4, 'active')`, keyID, tenantID, encryptedSecret, now); err != nil {
+		return nil, fmt.Errorf("insert webhook signing secret: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE tenant_webhook_configs SET secret = $1, signing_key_id = $2, updated_at = $3 WHERE tenant_id = $4`,
+		encryptedSecret, keyID, now, tenantID); err != nil {
+		return nil, fmt.Errorf("activate webhook signing secret: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit webhook signing secret rotation: %w", err)
+	}
+	return &domain.WebhookSigningSecret{KeyID: keyID, CreatedAt: now, ActivatedAt: now, Status: "active"}, nil
+}
+
+func (r *WebhookRepository) GetSigningSecret(ctx context.Context, tenantID, keyID string) (string, error) {
+	var encrypted string
+	err := r.db.QueryRow(ctx,
+		`SELECT encrypted_secret FROM tenant_webhook_signing_secrets WHERE tenant_id = $1 AND key_id = $2`,
+		tenantID, keyID).Scan(&encrypted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", domain.ErrWebhookConfigNotFound
+		}
+		return "", fmt.Errorf("get webhook signing secret: %w", err)
+	}
+	return encrypted, nil
+}
+
 func (r *WebhookRepository) CreateConfigDelivery(ctx context.Context, delivery *domain.TenantWebhookDelivery) error {
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO tenant_webhook_deliveries
-		 (id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		 (id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at, signing_key_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, '')::uuid)`,
 		delivery.ID, delivery.TenantID, string(delivery.EventType), delivery.Payload, string(delivery.Status),
-		delivery.ResponseCode, delivery.AttemptCount, delivery.LastAttempt, delivery.CreatedAt, delivery.UpdatedAt,
+		delivery.ResponseCode, delivery.AttemptCount, delivery.LastAttempt, delivery.CreatedAt, delivery.UpdatedAt, delivery.SigningKeyID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert tenant webhook delivery: %w", err)
@@ -393,12 +599,12 @@ func (r *WebhookRepository) GetConfigDelivery(ctx context.Context, id, tenantID 
 	delivery := &domain.TenantWebhookDelivery{}
 	var eventType, status string
 	err := r.db.QueryRow(ctx,
-		`SELECT id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at
+		`SELECT id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at, COALESCE(signing_key_id::text, '')
 		 FROM tenant_webhook_deliveries WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
 	).Scan(
 		&delivery.ID, &delivery.TenantID, &eventType, &delivery.Payload, &status, &delivery.ResponseCode,
-		&delivery.AttemptCount, &delivery.LastAttempt, &delivery.CreatedAt, &delivery.UpdatedAt,
+		&delivery.AttemptCount, &delivery.LastAttempt, &delivery.CreatedAt, &delivery.UpdatedAt, &delivery.SigningKeyID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -413,7 +619,7 @@ func (r *WebhookRepository) GetConfigDelivery(ctx context.Context, id, tenantID 
 
 func (r *WebhookRepository) ListConfigDeliveries(ctx context.Context, tenantID string, limit, offset int) ([]*domain.TenantWebhookDelivery, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at
+		`SELECT id, tenant_id, event_type, payload, status, response_code, attempt_count, last_attempt, created_at, updated_at, COALESCE(signing_key_id::text, '')
 		 FROM tenant_webhook_deliveries WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
 		tenantID, limit, offset,
 	)
@@ -428,7 +634,7 @@ func (r *WebhookRepository) ListConfigDeliveries(ctx context.Context, tenantID s
 		var eventType, status string
 		if err := rows.Scan(
 			&delivery.ID, &delivery.TenantID, &eventType, &delivery.Payload, &status, &delivery.ResponseCode,
-			&delivery.AttemptCount, &delivery.LastAttempt, &delivery.CreatedAt, &delivery.UpdatedAt,
+			&delivery.AttemptCount, &delivery.LastAttempt, &delivery.CreatedAt, &delivery.UpdatedAt, &delivery.SigningKeyID,
 		); err != nil {
 			return nil, err
 		}

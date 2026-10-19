@@ -672,15 +672,40 @@ func (r *TransactionRepo) UpdateReconciledAt(ctx context.Context, id string) err
 
 // WriteAuditLog inserts a row into the ledger_audit_log table.
 func (r *TransactionRepo) WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error {
-	_, err := r.db.Exec(ctx,
-		`INSERT INTO ledger_audit_log (id, tx_id, stellar_hash, checked_at, horizon_status, amount_verified, asset_verified, fee_verified, outcome, details)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		entry.ID, entry.TxID, entry.StellarHash, entry.CheckedAt,
-		entry.HorizonStatus, entry.AmountVerified, entry.AssetVerified, entry.FeeVerified,
-		entry.Outcome, entry.Details,
-	)
+	err := RunInTx(ctx, r.db, func(txCtx context.Context) error {
+		db := TxFromContext(txCtx, r.db)
+		_, err := db.Exec(txCtx,
+			`INSERT INTO ledger_audit_log (id, tx_id, stellar_hash, checked_at, horizon_status, amount_verified, asset_verified, fee_verified, outcome, details)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			entry.ID, entry.TxID, entry.StellarHash, entry.CheckedAt,
+			entry.HorizonStatus, entry.AmountVerified, entry.AssetVerified, entry.FeeVerified,
+			entry.Outcome, entry.Details,
+		)
+		if err != nil {
+			return fmt.Errorf("write audit log: %w", err)
+		}
+		if entry.Outcome == domain.AuditOK {
+			return nil
+		}
+		category := domain.ReconciliationDiscrepancyCategory(entry)
+		_, err = db.Exec(txCtx,
+			`INSERT INTO reconciliation_discrepancies
+			 (tenant_id, transaction_id, category, last_audit_log_id)
+			 SELECT tenant_id, id, $2, $3 FROM transactions WHERE id = $1 AND tenant_id IS NOT NULL
+			 ON CONFLICT (transaction_id, category) DO UPDATE
+			 SET last_audit_log_id = EXCLUDED.last_audit_log_id,
+			     status = CASE WHEN reconciliation_discrepancies.status = 'resolved' THEN 'open' ELSE reconciliation_discrepancies.status END,
+			     resolved_at = CASE WHEN reconciliation_discrepancies.status = 'resolved' THEN NULL ELSE reconciliation_discrepancies.resolved_at END,
+			     updated_at = NOW()`,
+			entry.TxID, category, entry.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("upsert reconciliation discrepancy: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("write audit log: %w", err)
+		return fmt.Errorf("write reconciliation audit result: %w", err)
 	}
 	return nil
 }
@@ -872,6 +897,21 @@ func (r *TransactionRepo) CountMonthlyTransfersByTenant(ctx context.Context, ten
 	return count, nil
 }
 
+func (r *TransactionRepo) CountDailyTransfersByTenant(ctx context.Context, tenantID string, date time.Time) (int, error) {
+	startDate := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	endDate := startDate.AddDate(0, 0, 1)
+
+	var count int
+	err := r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM transactions WHERE tenant_id = $1 AND mode = $2 AND created_at >= $3 AND created_at < $4`,
+		tenantID, transactionMode(ctx), startDate, endDate,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count daily transfers: %w", err)
+	}
+	return count, nil
+}
+
 // CreateWithMonthlyLimit atomically checks the tenant's monthly transfer count
 // and inserts the transaction in a single database transaction.
 func (r *TransactionRepo) CreateWithMonthlyLimit(ctx context.Context, tx *domain.Transaction, tenantID string, year int, month time.Month, limit int) error {
@@ -924,6 +964,62 @@ func (r *TransactionRepo) CreateWithMonthlyLimit(ctx context.Context, tx *domain
 
 	if err := dbTx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit limit-check tx: %w", err)
+	}
+	return nil
+}
+
+// CreateWithDailyLimit atomically checks the tenant's daily transfer count
+// and inserts the transaction in a single database transaction.
+func (r *TransactionRepo) CreateWithDailyLimit(ctx context.Context, tx *domain.Transaction, tenantID string, date time.Time, limit int) error {
+	dbTx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin daily limit-check tx: %w", err)
+	}
+	defer dbTx.Rollback(ctx)
+
+	startDate := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	endDate := startDate.AddDate(0, 0, 1)
+
+	var locked int
+	err = dbTx.QueryRow(ctx, `SELECT 1 FROM tenants WHERE id = $1 FOR UPDATE`, tenantID).Scan(&locked)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("lock tenant for daily limit check: %w", err)
+	}
+
+	var count int
+	err = dbTx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM transactions WHERE tenant_id = $1 AND mode = $2 AND created_at >= $3 AND created_at < $4`,
+		tenantID, transactionMode(ctx), startDate, endDate,
+	).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("count daily transfers: %w", err)
+	}
+
+	if count >= limit {
+		return domain.ErrDailyTransferLimitReached
+	}
+
+	if tx.Tags == nil {
+		tx.Tags = []string{}
+	}
+	_, err = dbTx.Exec(ctx,
+		`INSERT INTO transactions (id, tx_hash, type, status, from_wallet, to_wallet, asset, amount, fee, fee_bps, tenant_id, mode, created_at, requeue_count, reconciled_at, batch_id, reference, external_reference, tags, idempotency_key, idempotency_record_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+		tx.ID, nullableString(tx.TxHash), tx.Type, tx.Status,
+		nullableString(tx.FromWallet), nullableString(tx.ToWallet),
+		tx.Asset, tx.Amount.String(), tx.Fee.String(), nullableFeeBps(tx.FeeBps),
+		nullableUUID(tx.TenantID), transactionMode(ctx), tx.CreatedAt,
+		tx.RequeueCount, nullableTime(tx.ReconciledAt),
+		nullableUUID(tx.BatchID), nullableString(tx.Reference),
+		nullableStringPtr(tx.ExternalReference), tx.Tags,
+		nullableString(tx.IdempotencyKey), nullableUUID(tx.IdempotencyRecordID),
+	)
+	if err != nil {
+		return fmt.Errorf("insert transaction: %w", mapTransactionInsertError(err))
+	}
+
+	if err := dbTx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit daily limit-check tx: %w", err)
 	}
 	return nil
 }

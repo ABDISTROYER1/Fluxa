@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/fluxa/fluxa/internal/domain"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -14,8 +16,10 @@ type errorResponse struct {
 }
 
 type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Status    int    `json:"status"`
+	RequestID string `json:"request_id"`
 }
 
 // ValidationErrorDetail describes a single invalid field in a request.
@@ -43,15 +47,29 @@ func WriteJSON(w http.ResponseWriter, status int, v interface{}) {
 	JSON(w, status, v)
 }
 
+func effectiveRequestID(w http.ResponseWriter) string {
+	requestID := strings.TrimSpace(w.Header().Get("X-Request-ID"))
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+	w.Header().Set("X-Request-ID", requestID)
+	return requestID
+}
+
 func Error(w http.ResponseWriter, status int, code, message string) {
 	JSON(w, status, errorResponse{
-		Error: errorDetail{Code: code, Message: message},
+		Error: errorDetail{Code: code, Message: message, Status: status, RequestID: effectiveRequestID(w)},
 	})
 }
 
 // WriteError writes an error response using HandleDomainError for domain errors
 // or InternalError for unexpected errors.
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	if strings.TrimSpace(w.Header().Get("X-Request-ID")) == "" && r != nil {
+		if requestID := strings.TrimSpace(r.Header.Get("X-Request-ID")); requestID != "" {
+			w.Header().Set("X-Request-ID", requestID)
+		}
+	}
 	HandleDomainError(w, err)
 }
 
@@ -61,10 +79,8 @@ func BadRequest(w http.ResponseWriter, message string) {
 
 // BadRequestWithValidationErrors returns a 400 with per-row error details.
 func BadRequestWithValidationErrors(w http.ResponseWriter, message string, errs []ValidationErrorDetail) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
-	_ = json.NewEncoder(w).Encode(validationErrorResponse{
-		Error:            errorDetail{Code: "BAD_REQUEST", Message: message},
+	JSON(w, http.StatusBadRequest, validationErrorResponse{
+		Error:            errorDetail{Code: "BAD_REQUEST", Message: message, Status: http.StatusBadRequest, RequestID: effectiveRequestID(w)},
 		ValidationErrors: errs,
 	})
 }
@@ -96,9 +112,10 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 
 		errors.Is(err, domain.ErrWebhookNotFound), errors.Is(err, domain.ErrWebhookDeliveryNotFound),
 		errors.Is(err, domain.ErrWebhookConfigNotFound),
+		errors.Is(err, domain.ErrTransferApprovalNotFound),
 		errors.Is(err, domain.ErrIncidentNotFound),
 		errors.Is(err, domain.ErrBatchNotFound), errors.Is(err, domain.ErrScheduleNotFound),
-		errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrOrgMemberNotFound),
+		errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrOrgNotFound), errors.Is(err, domain.ErrOrgMemberNotFound),
 		errors.Is(err, domain.ErrInviteNotFound), errors.Is(err, domain.ErrClaimableBalanceNotFound):
 		NotFound(w, err.Error())
 	case errors.Is(err, domain.ErrSelfTransfer), errors.Is(err, domain.ErrInvalidAsset),
@@ -129,6 +146,8 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusConflict, "CLAIMABLE_BALANCE_NOT_PENDING", err.Error())
 	case errors.Is(err, domain.ErrUserAlreadyExists):
 		Error(w, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, domain.ErrLastOrgOwner):
+		Error(w, http.StatusConflict, "LAST_ORG_OWNER", err.Error())
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		Error(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
 	case errors.Is(err, domain.ErrForbidden), errors.Is(err, domain.ErrQuoteOwnershipMismatch):
@@ -151,8 +170,12 @@ func HandleDomainError(w http.ResponseWriter, err error) {
 	// retrying with the same destination will always fail.
 	case errors.Is(err, domain.ErrTransferBlockedSanctions):
 		Error(w, http.StatusForbidden, "TRANSFER_BLOCKED_SANCTIONS", err.Error())
-	case errors.As(err, new(domain.ErrTransferNotCancellable)):
-		e := err.(*domain.ErrTransferNotCancellable)
+	case func() bool {
+		var target *domain.ErrTransferNotCancellable
+		return errors.As(err, &target)
+	}():
+		var e *domain.ErrTransferNotCancellable
+		_ = errors.As(err, &e)
 		msg := "transfer cannot be cancelled: status " + e.Status
 		if e.TxHash != "" {
 			msg += ", tx_hash " + e.TxHash

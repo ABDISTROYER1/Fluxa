@@ -73,14 +73,20 @@ type service struct {
 	fxSvc          FXRateGetter
 	usdcIssuer     string
 	eurcIssuer     string
+	stellarNetwork string
 }
 
 func NewService(repo Repository, stellarClient stellar.Client, masterKey []byte, tenantRepo ...TenantGetter) Service {
+	return NewServiceWithNetwork(repo, stellarClient, masterKey, "testnet", tenantRepo...)
+}
+
+func NewServiceWithNetwork(repo Repository, stellarClient stellar.Client, masterKey []byte, stellarNetwork string, tenantRepo ...TenantGetter) Service {
 	s := &service{
-		repo:          repo,
-		stellar:       stellarClient,
-		masterKey:     masterKey,
-		assetRegistry: assets.NewRegistry("", ""),
+		repo:           repo,
+		stellar:        stellarClient,
+		masterKey:      masterKey,
+		assetRegistry:  assets.NewRegistry("", ""),
+		stellarNetwork: stellarNetwork,
 	}
 	if len(tenantRepo) > 0 {
 		s.tenantRepo = tenantRepo[0]
@@ -184,7 +190,7 @@ func (s *service) GetBalances(ctx context.Context, walletID string, includeFX ..
 
 	var balances []Balance
 
-	acct, err := s.client(ctx).LoadAccount(w.PublicKey)
+	acct, err := stellar.LoadAccountWithContext(ctx, s.client(ctx), w.PublicKey)
 	if err != nil {
 		if stellar.IsNotFound(err) {
 			// Account not yet funded on Stellar — return empty balances
@@ -272,7 +278,7 @@ func (s *service) ExecuteTransfer(
 		return "", err
 	}
 
-	acct, err := s.client(ctx).LoadAccount(w.PublicKey)
+	acct, err := stellar.LoadAccountWithContext(ctx, s.client(ctx), w.PublicKey)
 	if err != nil {
 		return "", fmt.Errorf("load account: %w", err)
 	}
@@ -302,7 +308,7 @@ func (s *service) ExecuteTransfer(
 		return "", fmt.Errorf("sign payment transaction: %w", err)
 	}
 
-	resp, err := s.client(ctx).SubmitTransaction(signedTx)
+	resp, err := stellar.SubmitTransactionWithContext(ctx, s.client(ctx), signedTx)
 	if err != nil {
 		return "", fmt.Errorf("submit payment to stellar: %w", err)
 	}
@@ -354,7 +360,7 @@ func (s *service) sign(ctx context.Context, tx *txnbuild.Transaction, encryptedS
 	if signer := s.signerFor(ctx); signer != nil {
 		return signer.Sign(tx, encryptedSecret)
 	}
-	return stellar.NewEnvSigner(s.masterKey, "testnet").Sign(tx, encryptedSecret)
+	return stellar.NewEnvSigner(s.masterKey, s.stellarNetwork).Sign(tx, encryptedSecret)
 }
 
 func (s *service) AddTrustline(ctx context.Context, walletID, assetCode, issuer, limit string) (string, error) {
@@ -381,7 +387,7 @@ func (s *service) AddTrustline(ctx context.Context, walletID, assetCode, issuer,
 		return "", err
 	}
 
-	acct, err := s.client(ctx).LoadAccount(w.PublicKey)
+	acct, err := stellar.LoadAccountWithContext(ctx, s.client(ctx), w.PublicKey)
 	if err != nil {
 		return "", fmt.Errorf("load account: %w", err)
 	}
@@ -417,7 +423,7 @@ func (s *service) AddTrustline(ctx context.Context, walletID, assetCode, issuer,
 		return "", fmt.Errorf("sign trustline transaction: %w", err)
 	}
 
-	resp, err := s.client(ctx).SubmitTransaction(signedTx)
+	resp, err := stellar.SubmitTransactionWithContext(ctx, s.client(ctx), signedTx)
 	if err != nil {
 		return "", fmt.Errorf("submit trustline to stellar: %w", err)
 	}

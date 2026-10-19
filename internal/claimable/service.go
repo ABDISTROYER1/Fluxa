@@ -32,6 +32,8 @@ type WalletResolver interface {
 	GetByPublicKey(ctx context.Context, publicKey string) (*domain.SourceWallet, error)
 }
 
+type SourceWallet = domain.SourceWallet
+
 // WebhookDispatcher is the narrow view of internal/webhook this service needs.
 // Declared here so the claimable package stays independent of the webhook
 // package; webhook.Dispatcher satisfies it.

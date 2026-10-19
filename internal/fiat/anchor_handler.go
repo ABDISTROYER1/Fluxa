@@ -7,6 +7,7 @@ import (
 	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // AnchorHandler exposes the unified, anchor-agnostic fiat endpoints backed
@@ -103,7 +104,8 @@ func (h *AnchorHandler) deposit(w http.ResponseWriter, r *http.Request) {
 		WalletID: req.WalletID, AssetCode: req.AssetCode, Amount: req.Amount, Email: req.Email,
 	})
 	if err != nil {
-		api.Error(w, http.StatusBadGateway, "ANCHOR_DEPOSIT_FAILED", err.Error())
+		log.Error().Err(err).Msg("anchor deposit failed")
+		api.Error(w, http.StatusBadGateway, "ANCHOR_DEPOSIT_FAILED", "anchor deposit failed")
 		return
 	}
 
@@ -132,7 +134,8 @@ func (h *AnchorHandler) withdraw(w http.ResponseWriter, r *http.Request) {
 		WalletID: req.WalletID, AssetCode: req.AssetCode, Amount: req.Amount, Dest: req.Dest,
 	})
 	if err != nil {
-		api.Error(w, http.StatusBadGateway, "ANCHOR_WITHDRAWAL_FAILED", err.Error())
+		log.Error().Err(err).Msg("anchor withdrawal failed")
+		api.Error(w, http.StatusBadGateway, "ANCHOR_WITHDRAWAL_FAILED", "anchor withdrawal failed")
 		return
 	}
 

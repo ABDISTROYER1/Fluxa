@@ -27,6 +27,8 @@ type Tenant struct {
 	AccountType          AccountType `json:"account_type" db:"account_type"`
 	MaxWallets           int         `json:"max_wallets" db:"max_wallets"`
 	MaxTransfersPerMonth *int        `json:"max_transfers_per_month" db:"max_transfers_per_month"`
+	MaxTransfersPerDay   *int        `json:"max_transfers_per_day" db:"max_transfers_per_day"`
+	MaxWithdrawalsPerDay *int        `json:"max_withdrawals_per_day" db:"max_withdrawals_per_day"`
 	MaxWebhooks          int         `json:"max_webhooks" db:"max_webhooks"`
 	CreatedAt            time.Time   `json:"created_at" db:"created_at"`
 	UpdatedAt            time.Time   `json:"updated_at" db:"updated_at"`
@@ -40,6 +42,26 @@ func (t *Tenant) GetTransferLimit() int {
 		return 0
 	}
 	return *t.MaxTransfersPerMonth
+}
+
+// GetDailyTransferLimit returns the tenant's daily transfer cap. A nil value
+// means the tenant has no configured cap; 0 from this method disables the
+// limit check at the call site.
+func (t *Tenant) GetDailyTransferLimit() int {
+	if t.MaxTransfersPerDay == nil {
+		return 0
+	}
+	return *t.MaxTransfersPerDay
+}
+
+// GetDailyWithdrawalLimit returns the tenant's daily withdrawal cap. A nil value
+// means the tenant has no configured cap; 0 from this method disables the
+// limit check at the call site.
+func (t *Tenant) GetDailyWithdrawalLimit() int {
+	if t.MaxWithdrawalsPerDay == nil {
+		return 0
+	}
+	return *t.MaxWithdrawalsPerDay
 }
 
 // GetWalletLimit returns the tenant's wallet cap, falling back to the

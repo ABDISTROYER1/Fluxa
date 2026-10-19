@@ -31,7 +31,11 @@ func (h *Handler) WithIdempotency(mw func(http.Handler) http.Handler) *Handler {
 
 func (h *Handler) DepositRoutes() func(r chi.Router) {
 	return func(r chi.Router) {
-		r.Post("/fiat", h.handleDeposit)
+		post := r.Post
+		if h.idem != nil {
+			post = r.With(h.idem).Post
+		}
+		post("/fiat", h.handleDeposit)
 	}
 }
 
@@ -43,16 +47,6 @@ func (h *Handler) WithdrawRoutes() func(r chi.Router) {
 		}
 		post("/", h.handleWithdrawal)
 		post("/fiat", h.handleWithdrawal)
-	}
-}
-
-func (h *Handler) WithdrawalRoutes() func(r chi.Router) {
-	return func(r chi.Router) {
-		post := r.Post
-		if h.idem != nil {
-			post = r.With(h.idem).Post
-		}
-		post("/", h.handleWithdrawal)
 	}
 }
 
@@ -142,7 +136,7 @@ func (h *Handler) handleDeposit(w http.ResponseWriter, r *http.Request) {
 
 	dr := DepositRequest{
 		WalletID:      walletID,
-		Reference:     "DEP-" + uuid.New().String()[:8],
+		Reference:     "DEP-" + uuid.New().String(), // full UUID — 122 bits of entropy
 		FiatAmount:    amount,
 		FiatCurrency:  req.Currency,
 		CustomerEmail: req.Email,
@@ -200,7 +194,7 @@ func (h *Handler) handleWithdrawal(w http.ResponseWriter, r *http.Request) {
 
 	wr := WithdrawRequest{
 		WalletID:      walletID,
-		Reference:     "WIT-" + uuid.New().String()[:8],
+		Reference:     "WIT-" + uuid.New().String(), // full UUID — 122 bits of entropy
 		FiatAmount:    amount,
 		FiatCurrency:  req.Currency,
 		AccountBank:   req.AccountBank,
@@ -221,6 +215,23 @@ func (h *Handler) handleWithdrawal(w http.ResponseWriter, r *http.Request) {
 	api.JSON(w, http.StatusOK, resp)
 }
 
+// webhookCallbackDTO is the minimal shape every provider callback must satisfy.
+// Individual providers do their own full decode after the handler validates this.
+type webhookCallbackDTO struct {
+	Event string `json:"event" validate:"required"`
+}
+
+// handleWebhook handles inbound provider callbacks.
+//
+// Error classification (important for provider retry behaviour):
+//   - 4xx: the payload is permanently invalid (bad signature, unknown event
+//     type, missing required fields). Providers should NOT retry these.
+//   - 5xx: a transient infrastructure failure occurred (DB down, transfer
+//     service unavailable). Providers SHOULD retry after a delay.
+//
+// Access control is HMAC signature verification performed by the provider
+// implementation, not by API-key authentication. The route is therefore
+// mounted in the public (unauthenticated) sub-router in server.go.
 func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	provider := chi.URLParam(r, "provider")
 	if provider == "" {
@@ -230,17 +241,41 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
-		api.BadRequest(w, "read payload error")
+		// Body read failure is transient — return 5xx so the provider retries.
+		log.Error().Err(err).Str("provider", provider).Msg("failed to read webhook body")
+		api.InternalError(w, err)
 		return
 	}
 
-	// Flutterwave sends signature in "verif-hash" header
-	signature := r.Header.Get("verif-hash")
+	// Validate the outer structure so a completely malformed body is rejected
+	// immediately with 4xx before the provider layer even inspects it.
+	var dto webhookCallbackDTO
+	if err := json.Unmarshal(payload, &dto); err != nil {
+		api.BadRequest(w, "webhook payload must be valid JSON with an 'event' field")
+		return
+	}
+	if err := api.Validate(dto); err != nil {
+		api.BadRequest(w, err.Error())
+		return
+	}
 
-	if err := h.svc.HandleWebhook(r.Context(), payload, signature); err != nil {
+	// Pass the raw headers to the service so provider-specific signature
+	// headers (e.g. "verif-hash" for Flutterwave, "x-yellowcard-signature"
+	// for Yellow Card) are forwarded without loss.
+	if err := h.svc.HandleWebhookWithHeaders(r.Context(), payload, r.Header); err != nil {
 		log.Error().Err(err).Str("provider", provider).Msg("webhook handling failed")
-		// Do not return 500 so provider won't keep retrying if it's a fatal validation error
-		api.BadRequest(w, "webhook validation failed")
+		if errors.Is(err, ErrWebhookSignatureInvalid) ||
+			errors.Is(err, ErrWebhookPayloadInvalid) ||
+			errors.Is(err, ErrWebhookEventUnknown) {
+			// Permanent rejection: bad signature, unrecognisable payload, or
+			// an event type this provider does not support. Providers must not
+			// retry these — the same payload will fail again.
+			api.BadRequest(w, err.Error())
+			return
+		}
+		// Transient failure (DB unavailable, transfer service down, etc.).
+		// Return 5xx so the provider retries after its back-off delay.
+		api.InternalError(w, err)
 		return
 	}
 

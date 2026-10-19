@@ -14,14 +14,6 @@ type CatalogPair struct {
 	Provider string `json:"provider"`
 }
 
-func parsePair(p string) (string, string, string) {
-	parts := strings.SplitN(p, "-", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1], ""
-	}
-	return p, "", "unknown"
-}
-
 type Catalog struct {
 	Assets []assets.Asset `json:"assets"`
 	Pairs  []CatalogPair  `json:"supported_pairs"`

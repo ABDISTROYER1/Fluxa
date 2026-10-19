@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/fluxa/fluxa/internal/anchor"
+	"github.com/fluxa/fluxa/internal/api"
 	"github.com/fluxa/fluxa/internal/apikey"
 	"github.com/fluxa/fluxa/internal/audit"
 	"github.com/fluxa/fluxa/internal/auth"
@@ -27,9 +29,12 @@ import (
 	"github.com/fluxa/fluxa/internal/schedule"
 	"github.com/fluxa/fluxa/internal/server/idempotency"
 	"github.com/fluxa/fluxa/internal/status"
+	"github.com/fluxa/fluxa/internal/tenantdata"
 	"github.com/fluxa/fluxa/internal/transfer"
+	"github.com/fluxa/fluxa/internal/transferapproval"
 	"github.com/fluxa/fluxa/internal/treasury"
 	"github.com/fluxa/fluxa/internal/wallet"
+	"github.com/fluxa/fluxa/internal/wallet_balance_alert"
 	"github.com/fluxa/fluxa/internal/webhook"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -62,7 +67,6 @@ func New(
 	complianceHandler *compliance.Handler,
 	auditHandler *audit.Handler,
 	usageHandler *UsageHandler,
-	idempotencyHandler *idempotency.Handler,
 	jwtSecret []byte,
 	port string,
 	healthChecks map[string]DependencyCheck,
@@ -74,21 +78,39 @@ func New(
 
 	rateCfg := DefaultAuthRateLimitConfig()
 	var beneficiaryHandler *beneficiary.Handler
+	var walletBalanceAlertHandler *wallet_balance_alert.Handler
 	var paymentLinkHandler *paymentlink.Handler
 	var refundHandler *refund.Handler
+	var transferApprovalHandler *transferapproval.Handler
+	var tenantDataHandler *tenantdata.Handler
+	var idempotencyHandler *idempotency.Handler
+	var scopeDenialRecorder ScopeDenialRecorder
 	for _, option := range options {
 		switch value := option.(type) {
 		case AuthRateLimitConfig:
 			rateCfg = value
 		case *beneficiary.Handler:
 			beneficiaryHandler = value
+		case *wallet_balance_alert.Handler:
+			walletBalanceAlertHandler = value
 		case *paymentlink.Handler:
 			paymentLinkHandler = value
 		case *refund.Handler:
 			refundHandler = value
+		case *transferapproval.Handler:
+			transferApprovalHandler = value
+		case *tenantdata.Handler:
+			tenantDataHandler = value
+		case *idempotency.Handler:
+			idempotencyHandler = value
+		case ScopeDenialRecorder:
+			scopeDenialRecorder = value
 		}
 	}
 	authLimiter := NewAuthRateLimiter(rateCfg)
+	if scopeDenialRecorder != nil {
+		r.Use(WithScopeDenialRecorder(scopeDenialRecorder))
+	}
 
 	r.Use(middleware.RealIP)
 	r.Use(requestID)
@@ -97,6 +119,20 @@ func New(
 	r.Use(CORS(corsOrigins))
 	r.Use(MaxBodySize(1 << 20))
 	r.Use(MetricsMiddleware)
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") {
+			api.Error(w, http.StatusNotFound, "NOT_FOUND", "route not found")
+			return
+		}
+		http.NotFound(w, r)
+	})
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") {
+			api.Error(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
 
 	componentProbes := make(map[string]fluxahealth.Probe, len(healthChecks))
 	for name, check := range healthChecks {
@@ -129,10 +165,22 @@ func New(
 		// Registered as a direct path because the authenticated group mounts /webhooks
 		r.With(webhook.VerifyRateLimit()).Post("/webhooks/verify", webhookHandler.VerifySignature)
 
+		// Fiat provider callbacks are intentionally public: a real payment
+		// provider (Flutterwave, Yellow Card) cannot present a Fluxa API key.
+		// Access control is HMAC signature verification inside the handler.
+		r.Route("/webhooks/fiat", fiatHandler.WebhookRoutes())
+
 		// Authenticated endpoints
 		r.Group(func(r chi.Router) {
 			r.Use(AuthMiddleware(apiKeyRepo, jwtSecret, membershipValidator))
 			r.Use(RateLimit(100, 200))
+			if transferApprovalHandler != nil {
+				r.With(RequireScope(domain.ScopeTransfersRead)).Get("/transfer-approvals", transferApprovalHandler.List)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersWrite)).Post("/transfer-approvals/{id}/approve", transferApprovalHandler.Approve)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersWrite)).Post("/transfer-approvals/{id}/reject", transferApprovalHandler.Reject)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersRead)).Get("/approval-policies", transferApprovalHandler.GetPolicy)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeTransfersWrite)).Put("/approval-policies", transferApprovalHandler.PutPolicy)
+			}
 
 			// API Keys (Owner & Admin only for creation, expiry update, rotation & revocation)
 			r.Route("/keys", func(r chi.Router) {
@@ -152,9 +200,9 @@ func New(
 				})
 			}
 
-			// Usage Introspection
+			// Usage Introspection (a tenant usage report)
 			if usageHandler != nil {
-				r.Get("/usage", usageHandler.GetUsage)
+				r.With(RequireScope(domain.ScopeReportsRead)).Get("/usage", usageHandler.GetUsage)
 			}
 
 			// Idempotency Key Inspection
@@ -163,6 +211,9 @@ func New(
 			}
 
 			// Org Member Management (Owner & Admin for invite, role update, remove)
+			if tenantDataHandler != nil {
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Get("/data-export", tenantDataHandler.Export)
+			}
 			r.Route("/org", func(r chi.Router) {
 				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin)).Post("/members/invite", orgHandler.InviteMember)
 				r.Get("/members", orgHandler.ListMembers)
@@ -177,6 +228,8 @@ func New(
 				r.With(RequireScope(domain.ScopeWebhooksRead)).Get("/", webhookHandler.ListEndpoints)
 				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeWebhooksWrite)).Delete("/{id}", webhookHandler.DeleteEndpoint)
 				r.With(RequireScope(domain.ScopeWebhooksRead)).Get("/{id}/deliveries", webhookHandler.ListDeliveries)
+				r.With(RequireScope(domain.ScopeWebhooksRead)).Get("/secret", webhookHandler.GetSigningSecret)
+				r.With(RequireRole(domain.RoleOwner, domain.RoleAdmin), RequireScope(domain.ScopeWebhooksWrite), webhookHandler.IdempotencyMiddleware()).Post("/secret/rotate", webhookHandler.RotateSigningSecret)
 			})
 
 			// Sandbox-only escape hatch: lets a developer drive a webhook event
@@ -186,13 +239,19 @@ func New(
 			// Operational routes (Require not viewer for mutating calls)
 			r.Group(func(r chi.Router) {
 				r.Use(RequireNotViewer)
-				r.With(RequireScope(domain.ScopeWalletsRead)).Route("/wallets", walletHandler.Routes())
+				// Resource groups use RequireResourceScope so that every
+				// mutating method needs the :write scope, not just :read.
+				fiatScope := RequireResourceScope(domain.ScopeFiatRead, domain.ScopeFiatWrite)
+				_ = fiatScope
+				r.With(RequireResourceScope(domain.ScopeWalletsRead, domain.ScopeWalletsWrite)).Route("/wallets", walletHandler.Routes())
 				if beneficiaryHandler != nil {
-					r.With(RequireScope(domain.ScopeBeneficiariesRead)).Route("/beneficiaries", beneficiaryHandler.Routes())
+					r.With(RequireResourceScope(domain.ScopeBeneficiariesRead, domain.ScopeBeneficiariesWrite)).Route("/beneficiaries", beneficiaryHandler.Routes())
+				}
+				if walletBalanceAlertHandler != nil {
+					r.With(RequireScope(domain.ScopeWalletBalanceAlertsRead)).Route("/wallet-balance-alerts", walletBalanceAlertHandler.Routes())
 				}
 				r.Route("/wallets/{id}/deposit", fiatHandler.DepositRoutes())
 				r.Route("/wallets/{id}/withdraw", fiatHandler.WithdrawRoutes())
-				r.Route("/webhooks/fiat", fiatHandler.WebhookRoutes())
 				r.With(RequireScope(domain.ScopeFiatRead)).Route("/fiat", anchorFiatHandler.Routes())
 				if paymentLinkHandler != nil {
 					r.Route("/payment-links", paymentLinkHandler.Routes(
@@ -206,8 +265,8 @@ func New(
 						RequireScope(domain.ScopeTransfersWrite),
 					))
 				}
-				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transfers", transferHandler.Routes())
-				r.With(RequireScope(domain.ScopeTransfersWrite)).Route("/transfers/batch", batchHandler.Routes())
+				r.With(RequireResourceScope(domain.ScopeTransfersRead, domain.ScopeTransfersWrite)).Route("/transfers", transferHandler.Routes())
+				r.With(RequireResourceScope(domain.ScopeBatchesRead, domain.ScopeBatchesWrite)).Route("/transfers/batch", batchHandler.Routes())
 				r.With(RequireScope(domain.ScopeTransfersRead)).Route("/transactions", transferHandler.TransactionRoutes())
 				r.Route("/schedules", scheduleHandler.Routes(
 					RequireScope(domain.ScopeTransfersRead),

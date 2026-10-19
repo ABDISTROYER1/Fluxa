@@ -9,7 +9,6 @@ import (
 	"github.com/fluxa/fluxa/internal/auth"
 	"github.com/fluxa/fluxa/internal/domain"
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog/log"
 )
 
 type Handler struct {
@@ -42,16 +41,29 @@ func isAcceptInviteValidationError(err error) bool {
 		msg == "invite is invalid, already used, or expired"
 }
 
+func isInviteMemberValidationError(err error) bool {
+	msg := err.Error()
+	return msg == "email is required" || msg == "invalid role; must be owner, admin, developer, or viewer"
+}
+
 func (h *Handler) InviteMember(w http.ResponseWriter, r *http.Request) {
 	var req InviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		api.BadRequest(w, "invalid request body")
 		return
 	}
 
 	inv, err := h.svc.InviteMember(r.Context(), req.Email, req.Role)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if isInviteMemberValidationError(err) {
+			api.BadRequest(w, err.Error())
+			return
+		}
+		if err.Error() == "tenant not found in context" {
+			api.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "tenant not found in context")
+			return
+		}
+		api.InternalError(w, err)
 		return
 	}
 
@@ -63,22 +75,21 @@ func (h *Handler) InviteMember(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 	var req AcceptInviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		api.BadRequest(w, "invalid request body")
 		return
 	}
 
 	resp, err := h.svc.AcceptInvite(r.Context(), req)
 	if err != nil {
 		if errors.Is(err, domain.ErrInviteNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			api.HandleDomainError(w, err)
 			return
 		}
 		if isAcceptInviteValidationError(err) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			api.BadRequest(w, err.Error())
 			return
 		}
-		log.Error().Err(err).Msg("org: accept invite internal error")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		api.InternalError(w, err)
 		return
 	}
 
@@ -90,7 +101,7 @@ func (h *Handler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	members, err := h.svc.ListMembers(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		api.InternalError(w, err)
 		return
 	}
 
@@ -104,22 +115,20 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		Role string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		api.BadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.svc.UpdateRole(r.Context(), targetUserID, req.Role); err != nil {
-		if errors.Is(err, domain.ErrOrgMemberNotFound) || errors.Is(err, domain.ErrOrgNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
+		if errors.Is(err, domain.ErrOrgMemberNotFound) || errors.Is(err, domain.ErrOrgNotFound) || errors.Is(err, domain.ErrLastOrgOwner) {
+			api.HandleDomainError(w, err)
 			return
 		}
-		if errors.Is(err, domain.ErrLastOrgOwner) {
-			// The request is well-formed but conflicts with the tenant's current
-			// state: it would leave the organization without an owner.
-			http.Error(w, err.Error(), http.StatusConflict)
+		if err.Error() == "invalid role" {
+			api.BadRequest(w, err.Error())
 			return
 		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		api.InternalError(w, err)
 		return
 	}
 
@@ -131,15 +140,11 @@ func (h *Handler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	targetUserID := chi.URLParam(r, "userId")
 
 	if err := h.svc.RemoveMember(r.Context(), targetUserID); err != nil {
-		if errors.Is(err, domain.ErrOrgMemberNotFound) || errors.Is(err, domain.ErrOrgNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
+		if errors.Is(err, domain.ErrOrgMemberNotFound) || errors.Is(err, domain.ErrOrgNotFound) || errors.Is(err, domain.ErrLastOrgOwner) {
+			api.HandleDomainError(w, err)
 			return
 		}
-		if errors.Is(err, domain.ErrLastOrgOwner) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		api.InternalError(w, err)
 		return
 	}
 

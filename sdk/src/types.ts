@@ -65,10 +65,16 @@ export interface ListTransactionsQuery {
   wallet_id: string;
   limit?: number;
   offset?: number;
+  cursor?: string;
+  external_reference?: string;
+  tag?: string;
+  [key: string]: unknown;
 }
 
 export interface ListTransactionsResponse {
   transactions: TransferResponse[];
+  next_cursor?: string | null;
+  cursor?: string | null;
 }
 
 // ── Batch ───────────────────────────────────────────────────────────────────
@@ -312,6 +318,29 @@ export interface ListDeliveriesResponse {
   deliveries: WebhookDeliveryResponse[];
 }
 
+export type WebhookSigningSecretStatus = 'active' | 'overlapping' | 'retired';
+
+export interface WebhookSigningSecretMetadata {
+  key_id: string;
+  created_at: string;
+  activated_at: string;
+  retired_at?: string | null;
+  status: WebhookSigningSecretStatus;
+}
+
+export interface ListWebhookSigningSecretsResponse {
+  secrets: WebhookSigningSecretMetadata[];
+}
+
+export interface RotateWebhookSigningSecretRequest {
+  overlap_window_seconds?: number;
+}
+
+export interface RotateWebhookSigningSecretResponse extends WebhookSigningSecretMetadata {
+  secret: string;
+  overlap_window_seconds: number;
+}
+
 // ── Schedule ────────────────────────────────────────────────────────────────
 
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
@@ -380,15 +409,49 @@ export interface ListSchedulesResponse {
 
 // ── API Key ─────────────────────────────────────────────────────────────────
 
+/** A resource an API key scope can cover. */
+export type APIKeyScopeResource =
+  | 'wallets'
+  | 'transfers'
+  | 'batches'
+  | 'webhooks'
+  | 'reports'
+  | 'keys'
+  | 'audit'
+  | 'fiat'
+  | 'fx'
+  | 'fees'
+  | 'beneficiaries'
+  | 'compliance';
+
+/**
+ * A permission an API key can hold: `<resource>:read`, `<resource>:write`,
+ * `<resource>:*`, or `*` for everything. Reads (GET) need `read`; anything
+ * that changes state needs `write`. A key with no scopes has full access.
+ */
+export type APIKeyScope = `${APIKeyScopeResource}:${'read' | 'write' | '*'}` | '*' | 'admin';
+
 export interface CreateKeyRequest {
   label?: string;
+  /**
+   * Scopes to grant. Omit (or pass `[]`) for a full-access key. A scoped key
+   * can only create keys with scopes it holds itself.
+   */
+  scopes?: APIKeyScope[];
+  role?: 'owner' | 'admin' | 'developer' | 'viewer';
+  mode?: 'live' | 'test';
+  expires_at?: string;
+  rotation_reminder_days?: number;
 }
 
 export interface CreateKeyResponse {
   id: string;
+  /** The raw key. Returned only once, in this response. */
   key: string;
   prefix: string;
   label?: string;
+  /** Granted scopes; an empty list means full access. */
+  scopes: APIKeyScope[];
   created_at: string;
 }
 
@@ -396,6 +459,8 @@ export interface APIKeyResponse {
   id: string;
   prefix: string;
   label?: string;
+  /** Granted scopes; an empty list means full access. The secret is never listed. */
+  scopes: APIKeyScope[];
   last_used_at?: string;
   revoked_at?: string;
   created_at: string;

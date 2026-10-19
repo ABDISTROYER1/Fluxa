@@ -1,9 +1,17 @@
 # Webhook signature verification
 
-Every Fluxa webhook delivery includes two headers:
+Endpoint-scoped deliveries include two headers:
 
 - `X-Fluxa-Signature` — `sha256=<hex HMAC-SHA256>`
 - `X-Fluxa-Timestamp` — Unix seconds at delivery time
+
+Tenant-config deliveries use an HMAC of the raw body (without a timestamp
+prefix) and include `X-Fluxa-Key-ID`, which identifies the secret version used
+to sign that delivery. Keep each rotated secret available while its metadata
+status is `overlapping`; the inspection endpoint returns version metadata only,
+while `POST /v1/webhooks/secret/rotate` discloses the new plaintext once.
+Rotation accepts an overlap window from 0 to 86,400 seconds (300 seconds by
+default) and requires an `Idempotency-Key` header.
 
 ## Verification algorithm
 

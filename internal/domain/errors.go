@@ -37,6 +37,8 @@ var (
 	ErrForbidden                    = errors.New("insufficient permissions")
 	ErrWalletLimitReached           = errors.New("wallet creation limit reached for account type")
 	ErrTransferLimitReached         = errors.New("monthly transfer limit reached for account type")
+	ErrDailyTransferLimitReached    = errors.New("daily transfer limit reached for account type")
+	ErrDailyWithdrawalLimitReached  = errors.New("daily withdrawal limit reached for account type")
 	ErrWebhookLimitReached          = errors.New("webhook registration limit reached for account type")
 	ErrInsufficientSweepableBalance = errors.New("sweep amount exceeds sweepable balance")
 	ErrTreasuryConfigNotFound       = errors.New("treasury config not found for asset")
@@ -49,9 +51,13 @@ var (
 	ErrContractWasmNotConfigured = errors.New("contract wallet wasm hash is not configured")
 	ErrTrustlineNotApplicable    = errors.New("contract wallets do not use trustlines")
 
-	ErrTransferBlockedSanctions = errors.New("transfer blocked: destination matches a sanctions list entry")
-	ErrComplianceReviewNotFound = errors.New("compliance review not found")
-	ErrReviewNotPending         = errors.New("compliance review has already been decided")
+	ErrTransferBlockedSanctions     = errors.New("transfer blocked: destination matches a sanctions list entry")
+	ErrComplianceReviewNotFound     = errors.New("compliance review not found")
+	ErrReviewNotPending             = errors.New("compliance review has already been decided")
+	ErrTransferApprovalNotFound     = errors.New("transfer approval request not found")
+	ErrApprovalAlreadyDecided       = errors.New("transfer approval request has already been decided")
+	ErrApprovalExpired              = errors.New("transfer approval request has expired")
+	ErrApprovalCreatorCannotApprove = errors.New("transfer creator cannot approve a second-person policy")
 
 	// Claimable balance errors. The claim path distinguishes "you cannot claim
 	// this yet" (predicate not satisfiable) from "this is no longer claimable"
@@ -68,6 +74,9 @@ var (
 	ErrSponsorNotCustodied        = errors.New("sponsor account is not a wallet custodied by Fluxa")
 	ErrInvalidAmount              = errors.New("amount must be a positive number")
 	ErrBeneficiaryNotAllowed      = errors.New("destination is not an active beneficiary")
+	ErrBeneficiaryAccountNotFound = errors.New("destination Stellar account does not exist")
+	ErrWalletBalanceAlertNotFound = errors.New("wallet balance alert not found")
+	ErrDuplicateAlert             = errors.New("wallet balance alert already exists for this wallet and asset")
 )
 
 // Organization membership. Kept in its own block: appending to the var block
